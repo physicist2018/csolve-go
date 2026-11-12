@@ -41,9 +41,11 @@ func nLrows(nu int) int {
 	return 0
 }
 
-// buildAug — расширенная система [W A; gamma L] c = [W g1n; 0].
-func buildAug(A []float64, nch, nu int, gamma float64, weights, g1n []float64,
-	aug, rhs []float64) {
+// buildAugRows — расширенная система [W A; gamma L; D] c = [W g1n; 0; 0],
+// где D — nExtra дополнительных строк ограничений (например, по δ_l),
+// записанных подряд в extra (nExtra × nu).
+func buildAugRows(A []float64, nch, nu int, gamma float64, weights, g1n []float64,
+	extra []float64, nExtra int, aug, rhs []float64) {
 	nL := nLrows(nu)
 	for j := 0; j < nch; j++ {
 		for i := 0; i < nu; i++ {
@@ -61,19 +63,35 @@ func buildAug(A []float64, nch, nu int, gamma float64, weights, g1n []float64,
 		row[k+2] = gamma
 		rhs[nch+k] = 0
 	}
+	for k := 0; k < nExtra; k++ {
+		copy(aug[(nch+nL+k)*nu:(nch+nL+k+1)*nu], extra[k*nu:(k+1)*nu])
+		rhs[nch+nL+k] = 0
+	}
 }
 
-func solveGamma(A []float64, nch, nu int, gamma float64, weights, g1n []float64,
-	nonneg bool) []float64 {
+func buildAug(A []float64, nch, nu int, gamma float64, weights, g1n []float64,
+	aug, rhs []float64) {
+	buildAugRows(A, nch, nu, gamma, weights, g1n, nil, 0, aug, rhs)
+}
+
+// solveGammaRows — то же, что solveGamma, но с nExtra дополнительными
+// строками ограничений extra (nExtra × nu, правая часть — нули).
+func solveGammaRows(A []float64, nch, nu int, gamma float64, weights, g1n []float64,
+	nonneg bool, extra []float64, nExtra int) []float64 {
 	nL := nLrows(nu)
-	rows := nch + nL
+	rows := nch + nL + nExtra
 	aug := make([]float64, rows*nu)
 	rhs := make([]float64, rows)
-	buildAug(A, nch, nu, gamma, weights, g1n, aug, rhs)
+	buildAugRows(A, nch, nu, gamma, weights, g1n, extra, nExtra, aug, rhs)
 	if nonneg {
 		return nnls(aug, rows, nu, rhs)
 	}
 	return lstsq(aug, rows, nu, rhs)
+}
+
+func solveGamma(A []float64, nch, nu int, gamma float64, weights, g1n []float64,
+	nonneg bool) []float64 {
+	return solveGammaRows(A, nch, nu, gamma, weights, g1n, nonneg, nil, 0)
 }
 
 func residualErr(A []float64, nch, nu int, c, g1n []float64) float64 {
@@ -211,10 +229,11 @@ func sortSolutions(sol []solution) {
 	sort.SliceStable(sol, func(i, j int) bool { return sol[i].err < sol[j].err })
 }
 
-// scanVariants — перебор (m, окно) с регуляризацией по кривизне.
+// scanVariants — перебор (m, окно) с регуляризацией по кривизне. Если dc
+// задано, в систему добавляется строка ограничения по измеренному δ_l.
 func scanVariants(d *design, g1 []float64, nch, gammaSelect int,
 	gammaRelFixed, gammaExpMin, gammaExpMax float64, nGamma int,
-	nonneg, relative bool) *solutions {
+	nonneg, relative bool, dc *depolCons) *solutions {
 	out := &solutions{}
 	if d.nW == 0 || d.nM == 0 {
 		out.scale = 1.0
@@ -313,6 +332,14 @@ func scanVariants(d *design, g1 []float64, nch, gammaSelect int,
 			cAbs := make([]float64, nu)
 			for i := 0; i < nu; i++ {
 				cAbs[i] = cNorm[i] * scale
+			}
+			// второй проход: то же γ, но с строкой ограничения δ_l
+			if extra, nExtra := dc.rows(im, iw, cAbs); nExtra > 0 {
+				c2 := solveGammaRows(A, nch, nu, gamma, weights, g1n,
+					nonneg, extra, nExtra)
+				for i := 0; i < nu; i++ {
+					cAbs[i] = c2[i] * scale
+				}
 			}
 			gfit := make([]float64, nch)
 			for j := 0; j < nch; j++ {

@@ -166,11 +166,12 @@ func run(a *Args) {
 	// ---- каналы и измерения ----
 	var baseCh []channel
 	var g1 []float64
+	var depWl, depVal []float64
 	demo := a.Data == ""
 	trueRe, trueIm := 1.45, -0.005
 
 	if !demo {
-		baseCh, g1 = loadJSONInput(a.Data, &trueRe, &trueIm)
+		baseCh, g1, depWl, depVal = loadJSONInput(a.Data, &trueRe, &trueIm)
 		fmt.Printf("data: %s; channels: %d\n", a.Data, len(baseCh))
 	} else {
 		if a.HasMReal {
@@ -192,6 +193,17 @@ func run(a *Args) {
 		fmt.Printf("demo on synthetic data\n")
 	}
 	nch := len(baseCh)
+
+	if a.DepolRatioCons && len(depVal) == 0 {
+		if demo {
+			fatal("option --depol-ratio-cons requires measured " +
+				"depolarization, but demo data has none — provide --data JSON " +
+				"with a \"depolarization\" group")
+		}
+		fatal("option --depol-ratio-cons requires measured depolarization: " +
+			"add a \"depolarization\" group with wavelengths_nm/coefficients " +
+			"to the input JSON")
+	}
 
 	for j := range baseCh {
 		fmt.Printf("  channel: %s\n", baseCh[j].name())
@@ -298,6 +310,37 @@ func run(a *Args) {
 	depolSetReport(ds, src, nm)
 	phase("depolarization", tPhase)
 
+	// измеренное δ_l для ограничения --depol-ratio-cons
+	var depIw, depCol []int
+	if a.DepolRatioCons {
+		if !depolSetAvailable(ds) {
+			fmt.Fprintf(os.Stderr, "[warning] --depol-ratio-cons: tables have no "+
+				"valid S11/S22 columns; constraint is not applied\n")
+		} else {
+			depIw, depCol = depolColumnMatch(ds, depWl, "input data")
+			if len(depIw) == 0 {
+				fmt.Fprintf(os.Stderr, "[warning] --depol-ratio-cons: no measured "+
+					"depolarization matching S11/S22 wavelengths; constraint is "+
+					"not applied\n")
+			} else if !(a.DepolRatioW > 0) {
+				fmt.Printf("depolarization ratio constraint δ_l: disabled " +
+					"(--depol-ratio-w 0)\n")
+			} else {
+				var sb strings.Builder
+				for k, c := range depCol {
+					if k > 0 {
+						sb.WriteString(", ")
+					}
+					fmt.Fprintf(&sb, "%.6g nm = %g %%", ds.wl[depIw[k]]*1e3,
+						depVal[c])
+				}
+				fmt.Printf("depolarization ratio constraint δ_l: enabled "+
+					"(weight %g, mode %s; measured %s)\n", a.DepolRatioW,
+					depolModeName(a.DepolRatioMode), sb.String())
+			}
+		}
+	}
+
 	// ---- измерения ----
 	var nTrueFn func(float64) float64
 	if demo {
@@ -349,12 +392,32 @@ func run(a *Args) {
 		a.LogSpan)
 	phase("design", tPhase)
 
+	// ограничение по измеренному δ_l: строка в функционале или ранжирование
+	var depProj *depolProj
+	var depTargets []float64
+	if a.DepolRatioCons && len(depIw) > 0 && a.DepolRatioW > 0 {
+		if proj := depolProjBuild(ds, design, depIw); proj != nil {
+			depProj = proj
+			depTargets = make([]float64, len(depCol))
+			for k, c := range depCol {
+				depTargets[k] = depVal[c]
+			}
+		}
+	}
+	var dc *depolCons
+	if depProj != nil && a.DepolRatioMode == depolModeFunc {
+		dc = &depolCons{proj: depProj, w: a.DepolRatioW, targets: depTargets}
+	}
+
 	tPhase = nowSec()
 	sols := scanVariants(design, g1, nch, a.GammaSelect, a.GammaRel,
-		a.GammaMin, a.GammaMax, a.NGamma, a.Nonneg, !a.Absolute)
+		a.GammaMin, a.GammaMax, a.NGamma, a.Nonneg, !a.Absolute, dc)
 	phase("scan", tPhase)
 	if sols.n == 0 {
 		fatal("no valid window [r0, r1] — check the bounds and min-ratio")
+	}
+	if depProj != nil && a.DepolRatioMode == depolModeRank {
+		rankByDepol(sols, depProj, mre, mim, depTargets, a.DepolRatioW)
 	}
 
 	tPhase = nowSec()

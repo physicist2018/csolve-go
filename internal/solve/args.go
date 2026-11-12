@@ -66,6 +66,10 @@ type Args struct {
 	LidarRatioCons bool
 	LidarRatioW    float64
 	LidarRatioIter int
+
+	DepolRatioCons bool
+	DepolRatioW    float64
+	DepolRatioMode int
 }
 
 var errHelp = errors.New("help requested")
@@ -184,6 +188,13 @@ Options:
   --lidar-ratio-cons             constrain smoothness of S = alpha/beta
   --lidar-ratio-w <X>            weight of S deviation penalty, >= 0 [0.5]
   --lidar-ratio-iter <N>         iterations to refine reference S, >= 1 [3]
+
+  --depol-ratio-cons             add a delta_l residual to the retrieval
+                                 functional or to solution ranking
+  --depol-ratio-w <X>            weight of the delta_l residual, >= 0 [1]
+  --depol-ratio-mode {func|rank}
+                                 how delta_l is applied: functional residual
+                                 or solution ranking [func]
 `)
 }
 
@@ -219,6 +230,8 @@ func ParseArgs(argv []string) (*Args, error) {
 		PlotFontSize:   0.0,
 		LidarRatioW:    0.5,
 		LidarRatioIter: 3,
+		DepolRatioW:    1.0,
+		DepolRatioMode: depolModeFunc,
 	}
 
 	fs := flag.NewFlagSet("csolve", flag.ContinueOnError)
@@ -291,6 +304,10 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.BoolVar(&a.LidarRatioCons, "lidar-ratio-cons", false, "")
 	fs.Float64Var(&a.LidarRatioW, "lidar-ratio-w", a.LidarRatioW, "")
 	fs.IntVar(&a.LidarRatioIter, "lidar-ratio-iter", a.LidarRatioIter, "")
+	fs.BoolVar(&a.DepolRatioCons, "depol-ratio-cons", false, "")
+	fs.Float64Var(&a.DepolRatioW, "depol-ratio-w", a.DepolRatioW, "")
+	depolMode := &enumFlag{allowed: []string{"func", "rank"}, value: "func"}
+	fs.Var(depolMode, "depol-ratio-mode", "")
 
 	if err := fs.Parse(argv); err != nil {
 		return nil, err
@@ -326,6 +343,8 @@ func ParseArgs(argv []string) (*Args, error) {
 	a.GammaSelect = map[string]int{"fixed": gammaFixed, "cv": gammaCV,
 		"err": gammaErr}[gammaSelect.value]
 	a.Modes = map[string]int{"auto": 0, "fit": 1, "stat": 2}[modesFlag.value]
+	a.DepolRatioMode = map[string]int{"func": depolModeFunc,
+		"rank": depolModeRank}[depolMode.value]
 	a.PlotFormat = map[string]int{"png": plotFmtPng, "pdf": plotFmtPdf,
 		"svg": plotFmtSvg}[plotFormat.value]
 
@@ -364,6 +383,9 @@ func ParseArgs(argv []string) (*Args, error) {
 	}
 	if !(a.LidarRatioW >= 0) {
 		return nil, fmt.Errorf("option --lidar-ratio-w must be >= 0")
+	}
+	if !(a.DepolRatioW >= 0) {
+		return nil, fmt.Errorf("option --depol-ratio-w must be >= 0")
 	}
 	if a.PlotFontSize != 0 && !(a.PlotFontSize >= 4 && a.PlotFontSize <= 72) {
 		return nil, fmt.Errorf("option --plot-font-size must be 0 or between 4 and 72")
