@@ -1,9 +1,12 @@
 package solve
 
 import (
+	"bytes"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -143,17 +146,13 @@ func TestDirname(t *testing.T) {
 }
 
 func TestTableParse(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "table.txt")
 	content := "# Units: x (dimless), C (um^2)\n" +
 		"# x Cback Cext Qext n\n" +
 		"0.1 7.0 1.0 0.5 5\n" +
 		"0.5 8.0 2.0 0.6 5\n" +
 		"1.0 9.0 4.0 0.7 5\n" +
 		"2.0 10.0 16.0 0.8 5\n"
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-	tb := tableLoad(path, false)
+	tb, _ := parseTable([]byte(content), "table.txt", false)
 	if !tb.hasCext || !tb.hasCback {
 		t.Fatalf("both columns must be found")
 	}
@@ -173,11 +172,7 @@ func TestTableParseS11S22(t *testing.T) {
 		"0.5 2.0 0.1 8.0 0.6 0.1 3.8 8.0 2.0 5\n" +
 		"1.0 4.0 0.1 9.0 0.7 0.1 4.0 9.0 1.0 5\n" +
 		"2.0 16.0 0.1 10.0 0.8 0.1 4.2 10.0 0.5 5\n"
-	path := filepath.Join(t.TempDir(), "data.txt")
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatal(err)
-	}
-	tb := tableLoad(path, false)
+	tb, _ := parseTable([]byte(content), "data.txt", false)
 	if !tb.hasS11 || !tb.hasS22 {
 		t.Fatalf("S11/S22 columns must be parsed (new table format)")
 	}
@@ -188,11 +183,7 @@ func TestTableParseS11S22(t *testing.T) {
 
 	// nan в S22 (mkbase пишет nan, если столбца s22 нет) — колонка отбрасывается
 	bad := strings.Replace(content, "7.0 3.5 5", "7.0 nan 5", 1)
-	pathNaN := filepath.Join(t.TempDir(), "data.txt")
-	if err := os.WriteFile(pathNaN, []byte(bad), 0644); err != nil {
-		t.Fatal(err)
-	}
-	tbNaN := tableLoad(pathNaN, false)
+	tbNaN, _ := parseTable([]byte(bad), "data.txt", false)
 	if tbNaN.hasS22 || !tbNaN.hasS11 {
 		t.Errorf("nan in S22 must disable the S22 column only")
 	}
@@ -209,11 +200,7 @@ func TestDepol(t *testing.T) {
 	for _, x := range xs {
 		fmt.Fprintf(&sb, "%.17g %.6g 0 1 0 0 0 %.17g 1\n", x, x, x)
 	}
-	path := filepath.Join(t.TempDir(), "data.txt")
-	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
-		t.Fatal(err)
-	}
-	tb := tableLoad(path, false)
+	tb, _ := parseTable([]byte(sb.String()), "data.txt", false)
 	if !tb.hasS11 || !tb.hasS22 {
 		t.Fatalf("S11/S22 must be available")
 	}
@@ -293,8 +280,41 @@ func TestArgs(t *testing.T) {
 		if len(a.Degrees) != 1 || a.Degrees[0] != 1 {
 			t.Errorf("default degree must be 1, got %v", a.Degrees)
 		}
+		if a.Type != "agglomerate" {
+			t.Errorf("default --type must be agglomerate, got %q", a.Type)
+		}
 		checkClose(t, "plot-dpi default", a.PlotDpi, 150.0, 0)
 		checkClose(t, "plot-font-size default", a.PlotFontSize, 0.0, 0)
+	}
+	{
+		// без --tables таблицы встроенные
+		a, err := ParseArgs(nil)
+		if err != nil {
+			t.Fatalf("builtin tables must not require --tables: %v", err)
+		}
+		if a.Tables != "" || a.Type != "agglomerate" {
+			t.Errorf("builtin defaults: tables=%q type=%q", a.Tables, a.Type)
+		}
+	}
+	{
+		a, err := ParseArgs([]string{"--type", "sphere"})
+		if err != nil {
+			t.Fatalf("--type sphere: %v", err)
+		}
+		if a.Type != "sphere" {
+			t.Errorf("--type sphere not parsed: %q", a.Type)
+		}
+	}
+	{
+		if _, err := ParseArgs([]string{"--type", "bad"}); err == nil {
+			t.Errorf("unknown --type must be rejected")
+		}
+		_, err := ParseArgs([]string{"--type", "sphere", "--tables", "dir"})
+		if err == nil {
+			t.Errorf("--type and --tables must be mutually exclusive")
+		} else if !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Errorf("unexpected error for --type with --tables: %v", err)
+		}
 	}
 	{
 		a, err := ParseArgs([]string{"--tables", "dir", "--degree", "2",
@@ -350,6 +370,83 @@ func TestArgs(t *testing.T) {
 	{
 		if _, err := ParseArgs([]string{"--tables", "dir", "--nr0", "0"}); err == nil {
 			t.Errorf("--nr0 0 must be rejected")
+		}
+	}
+}
+
+func TestBuiltinTables(t *testing.T) {
+	cases := []struct {
+		kind    string
+		dir     string
+		nM      int
+		nPoints int
+		xMinMax [2]float64 // грубые границы: [ниже xMin, выше xMax]
+	}{
+		{"sphere", "base_sph_25/average", 286, 41, [2]float64{0.02, 600.0}},
+		{"spheroid", "base_sphrd_25/average", 286, 41, [2]float64{0.02, 600.0}},
+		{"agglomerate", "large_aggl_100/average", 56, 100, [2]float64{0.05, 80.0}},
+	}
+	for _, c := range cases {
+		src := builtinTableSource(c.kind)
+		if src.origin != c.dir {
+			t.Errorf("%s: origin = %q, want %q", c.kind, src.origin, c.dir)
+		}
+		mre, mim := tableMGrid(src)
+		if len(mre) != c.nM || len(mim) != c.nM {
+			t.Fatalf("%s: %d/%d m values, want %d", c.kind, len(mre),
+				len(mim), c.nM)
+		}
+		tab := tableCacheGet(src, mre[0], mim[0], false)
+		if !tab.hasCext || !tab.hasCback || !tab.hasS11 || !tab.hasS22 {
+			t.Errorf("%s: table %s must have Cext/Cback/S11/S22", c.kind,
+				tab.path)
+		}
+		if tab.n != c.nPoints {
+			t.Errorf("%s: %d x points, want %d", c.kind, tab.n, c.nPoints)
+		}
+		if !(tab.xMin < c.xMinMax[0]) || !(tab.xMax > c.xMinMax[1]) {
+			t.Errorf("%s: x range [%g, %g] outside expected bounds", c.kind,
+				tab.xMin, tab.xMax)
+		}
+		if tab.xMin <= 0 || !isFinite(tab.xMax) {
+			t.Errorf("%s: invalid x range [%g, %g]", c.kind, tab.xMin, tab.xMax)
+		}
+	}
+}
+
+// TestEmbeddedGzipMatchesSource проверяет, что встроенные .gz не устарели
+// относительно текстовых исходников bases/<set>/average/mre_*/data.txt.
+func TestEmbeddedGzipMatchesSource(t *testing.T) {
+	if _, err := os.Stat(filepath.Join("..", "..", "bases")); err != nil {
+		t.Skip("bases/ is not available (run 'go generate ./bases' first)")
+	}
+	for kind, dir := range builtinTableDirs {
+		src := builtinTableSource(kind)
+		err := fs.WalkDir(src.fsys, ".", func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || !strings.HasSuffix(p, ".gz") {
+				return nil
+			}
+			data, _, err := src.readTable(path.Dir(p))
+			if err != nil {
+				return err
+			}
+			disk := filepath.Join("..", "..", "bases", dir,
+				filepath.FromSlash(path.Dir(p)), "data.txt")
+			want, err := os.ReadFile(disk)
+			if err != nil {
+				return err
+			}
+			if !bytes.Equal(data, want) {
+				t.Errorf("%s: embedded %s differs from %s — run 'go generate ./bases'",
+					kind, p, disk)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", kind, err)
 		}
 	}
 }

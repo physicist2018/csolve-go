@@ -7,7 +7,7 @@ BIN := csolve
 endif
 WIN_BIN := csolve.exe
 
-.PHONY: all build build-windows test fmt vet clean
+.PHONY: all build build-windows test fmt vet generate clean
 
 all: build
 
@@ -26,6 +26,11 @@ fmt:
 
 vet:
 	$(GO) vet ./...
+
+# Пересобрать сжатые таблицы для встроенных наборов (bases/*/average).
+# Требуется после изменения bases/*/average/mre_*/data.txt.
+generate:
+	$(GO) generate ./bases
 
 clean:
 	rm -f $(BIN) $(WIN_BIN)

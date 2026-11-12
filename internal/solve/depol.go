@@ -24,7 +24,7 @@ func depolSetAvailable(ds *depolSet) bool { return ds != nil && ds.nOK > 0 }
 
 // depolSetBuild — построение ядер деполяризации по всем m из таблиц. Сетка r
 // совпадает с сеткой основных ядер (dxMax, минимальная длина волны).
-func depolSetBuild(root string, mre, mim []float64, refWl, rMin, rMax,
+func depolSetBuild(src *tableSource, mre, mim []float64, refWl, rMin, rMax,
 	dxMax float64, extrapolate bool) *depolSet {
 	ds := &depolSet{
 		wl: append([]float64(nil), depolWlsUm...),
@@ -41,7 +41,7 @@ func depolSetBuild(root string, mre, mim []float64, refWl, rMin, rMax,
 	}
 	r := rGridFor(rMin, rMax, dxMax, lamMin)
 	for i := range mre {
-		tab := tableCacheGet(root, mre[i], mim[i], extrapolate)
+		tab := tableCacheGet(src, mre[i], mim[i], extrapolate)
 		if !tab.hasS11 || !tab.hasS22 {
 			continue
 		}
@@ -109,14 +109,15 @@ func tableSColumn(t *table, sp *spline, x, wl float64) float64 {
 }
 
 // depolSetReport — диагностика доступности столбцов S11/S22.
-func depolSetReport(ds *depolSet, root string, nm int) {
+func depolSetReport(ds *depolSet, src *tableSource, nm int) {
 	if ds == nil || len(ds.wl) == 0 {
 		return
 	}
+	label := src.label
 	if ds.nOK == 0 {
 		fmt.Fprintf(os.Stderr, "[warning] tables in %s have no valid S11/S22 "+
 			"columns (or they contain nan) — linear depolarization is not "+
-			"computed\n", root)
+			"computed\n", label)
 		return
 	}
 	var sb strings.Builder
@@ -132,7 +133,7 @@ func depolSetReport(ds *depolSet, root string, nm int) {
 	if ds.nOK < nm {
 		fmt.Fprintf(os.Stderr, "[warning] tables in %s: S11/S22 available "+
 			"only for %d of %d m values — δ_l is averaged over the available "+
-			"ones\n", root, ds.nOK, nm)
+			"ones\n", label, ds.nOK, nm)
 	}
 }
 

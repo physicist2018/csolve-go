@@ -15,6 +15,7 @@ import (
 type Args struct {
 	Data             string
 	Tables           string
+	Type             string
 	TableExtrapolate bool
 	TableRefWl       float64
 	TableCback4pi    bool
@@ -126,8 +127,11 @@ Options:
   -h, --help                     show this help and exit
 
   --data <JSON>                  measured coefficients; demo data if omitted
-  --tables <DIR>                 directory with mre_<real>_mim_<imag>/data.txt
-                                 (required)
+  --type {sphere|spheroid|agglomerate}
+                                 built-in cross-section tables [agglomerate]
+  --tables <DIR>                 external tables: directory with
+                                 mre_<real>_mim_<imag>/data.txt (mutually
+                                 exclusive with --type)
   --table-extrapolate            allow cross-section extrapolation in x
   --table-ref-lambda-um <X>      reference wavelength of tables, um [2pi]
   --table-cback {dsigma|4pi}     Cback column convention [dsigma]
@@ -187,6 +191,7 @@ Options:
 func ParseArgs(argv []string) (*Args, error) {
 	a := &Args{
 		TableRefWl:     tableRefWlUm,
+		Type:           defaultTableType,
 		Degrees:        []int{1},
 		R0Min:          0.02,
 		R0Max:          0.5,
@@ -225,6 +230,8 @@ func ParseArgs(argv []string) (*Args, error) {
 
 	fs.StringVar(&a.Data, "data", "", "")
 	fs.StringVar(&a.Tables, "tables", "", "")
+	tableType := &enumFlag{allowed: builtinTypeNames, value: defaultTableType}
+	fs.Var(tableType, "type", "")
 	fs.BoolVar(&a.TableExtrapolate, "table-extrapolate", false, "")
 	fs.Float64Var(&a.TableRefWl, "table-ref-lambda-um", a.TableRefWl, "")
 	tableCback := &enumFlag{allowed: []string{"dsigma", "4pi"}, value: "dsigma"}
@@ -299,8 +306,8 @@ func ParseArgs(argv []string) (*Args, error) {
 	seen := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
 
-	if a.Tables == "" {
-		return nil, fmt.Errorf("missing required option: --tables <DIR>")
+	if seen["tables"] && seen["type"] {
+		return nil, fmt.Errorf("options --tables and --type are mutually exclusive")
 	}
 
 	if degree.set {
@@ -315,6 +322,7 @@ func ParseArgs(argv []string) (*Args, error) {
 		a.MImag = mImag
 	}
 	a.TableCback4pi = tableCback.value == "4pi"
+	a.Type = tableType.value
 	a.GammaSelect = map[string]int{"fixed": gammaFixed, "cv": gammaCV,
 		"err": gammaErr}[gammaSelect.value]
 	a.Modes = map[string]int{"auto": 0, "fit": 1, "stat": 2}[modesFlag.value]

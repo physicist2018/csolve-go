@@ -700,7 +700,8 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 // ---------------- основной сценарий ----------------
 func runBatch(a *Args) {
 	b := parseBatchTxt(a.Batch)
-	mre, mim := tableMGrid(a.Tables)
+	src := a.tableSource()
+	mre, mim := tableMGrid(src)
 	nm := len(mre)
 
 	fmt.Printf("batch processing: %s\n", a.Batch)
@@ -737,7 +738,7 @@ func runBatch(a *Args) {
 	// покрытие таблиц -> r1_max_eff
 	capmin := math.Inf(1)
 	for i := 0; i < nm; i++ {
-		chs := loadTableChannels(a.Tables, mre[i], mim[i], solveCh,
+		chs := loadTableChannels(src, mre[i], mim[i], solveCh,
 			a.TableExtrapolate, a.TableRefWl, cbackScale)
 		if chs.cap < capmin {
 			capmin = chs.cap
@@ -746,12 +747,12 @@ func runBatch(a *Args) {
 	r1MaxEff := math.Min(a.R1Max, capmin)
 	if r1MaxEff < a.R1Min {
 		fatal("table coverage in x limits r1_max = %g µm < "+
-			"r1_min = %g — extend the tables or decrease --r1-min",
-			r1MaxEff, a.R1Min)
+			"r1_min = %g — decrease --r1-min, choose another --type, "+
+			"or extend the tables (%s)", r1MaxEff, a.R1Min, src.describe())
 	}
 
-	fmt.Printf("table-based kernel mode (external cross sections), root: %s\n",
-		a.Tables)
+	fmt.Printf("table-based kernel mode (external cross sections), %s\n",
+		src.describe())
 	fmt.Printf("  table λ_ref = %g µm (cross sections are rescaled as "+
 		"(λ/λ_ref)²)\n", a.TableRefWl)
 	if a.TableCback4pi {
@@ -760,7 +761,7 @@ func runBatch(a *Args) {
 		fmt.Printf("  Cback convention = dsigma\n")
 	}
 	{
-		c0 := loadTableChannels(a.Tables, mre[0], mim[0], solveCh,
+		c0 := loadTableChannels(src, mre[0], mim[0], solveCh,
 			a.TableExtrapolate, a.TableRefWl, cbackScale)
 		for j := 0; j < b.nch; j++ {
 			fmt.Printf("  %-14s x_max = %g, r_max = %.3g µm\n",
@@ -775,16 +776,16 @@ func runBatch(a *Args) {
 	fmt.Printf("building kernel tables (%d m values, once per batch)...\n", nm)
 	kts := make([]*ktable, nm)
 	for i := 0; i < nm; i++ {
-		chs := loadTableChannels(a.Tables, mre[i], mim[i], solveCh,
+		chs := loadTableChannels(src, mre[i], mim[i], solveCh,
 			a.TableExtrapolate, a.TableRefWl, cbackScale)
 		kts[i] = ktableBuild(chs, a.R0Min, r1MaxEff, a.DxMax)
 	}
 	fmt.Printf("  table: %d r points per m\n", kts[0].n)
 
 	// ядра S11/S22 для линейной деполяризации — тоже один раз на пакет
-	ds := depolSetBuild(a.Tables, mre, mim, a.TableRefWl, a.R0Min, r1MaxEff,
+	ds := depolSetBuild(src, mre, mim, a.TableRefWl, a.R0Min, r1MaxEff,
 		a.DxMax, a.TableExtrapolate)
-	depolSetReport(ds, a.Tables, nm)
+	depolSetReport(ds, src, nm)
 
 	// матрицы A — тоже один раз
 	r0Grid := geomspace(a.R0Min, a.R0Max, a.NR0)
