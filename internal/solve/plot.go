@@ -319,6 +319,16 @@ func anyFiniteSeries(vals [][]float64) bool {
 // вроде деполяризации в процентах это нежелательно).
 func plotProfiles(po *plotOpts, outPath, title, xlabel string, nSeries int,
 	alt []float64, vals [][]float64, names []string, logAuto bool) bool {
+	return plotProfilesStyled(po, outPath, title, xlabel, nSeries, alt, vals,
+		names, nil, logAuto)
+}
+
+// plotProfilesStyled — то же, что plotProfiles, но с дополнительными
+// gnuplot-атрибутами по сериям (styles[s] добавляется к описанию линии,
+// например "dt 2"; пустая строка или nil — стиль по умолчанию).
+func plotProfilesStyled(po *plotOpts, outPath, title, xlabel string,
+	nSeries int, alt []float64, vals [][]float64, names []string,
+	styles []string, logAuto bool) bool {
 	n := len(alt)
 	if n <= 0 || nSeries <= 0 {
 		return false
@@ -440,9 +450,12 @@ func plotProfiles(po *plotOpts, outPath, title, xlabel string, nSeries int,
 		if s > 0 {
 			sb.WriteString(", \\\n     ")
 		}
-		fmt.Fprintf(&sb, "%q using %d:1 with linespoints lw 1.8 pt %d "+
-			"ps 1.1 lc rgb %s title '%s'", gpPath(pData), s+2, points[s%6],
-			colors[s%6], names[s])
+		fmt.Fprintf(&sb, "%q using %d:1 with linespoints", gpPath(pData), s+2)
+		if s < len(styles) && styles[s] != "" {
+			sb.WriteString(" " + styles[s])
+		}
+		fmt.Fprintf(&sb, " lw 1.8 pt %d ps 1.1 lc rgb %s title '%s'",
+			points[s%6], colors[s%6], names[s])
 	}
 	sb.WriteByte('\n')
 

@@ -66,6 +66,9 @@ type Args struct {
 	LidarRatioCons bool
 	LidarRatioW    float64
 	LidarRatioIter int
+
+	DepolRatioCons bool
+	DepolRatioW    float64
 }
 
 var errHelp = errors.New("help requested")
@@ -184,6 +187,10 @@ Options:
   --lidar-ratio-cons             constrain smoothness of S = alpha/beta
   --lidar-ratio-w <X>            weight of S deviation penalty, >= 0 [0.5]
   --lidar-ratio-iter <N>         iterations to refine reference S, >= 1 [3]
+
+  --depol-ratio-cons             penalize relative deviation of delta_l
+                                 from the measured dep<nm> values
+  --depol-ratio-w <X>            weight of the delta_l deviation penalty, >= 0 [1]
 `)
 }
 
@@ -219,6 +226,7 @@ func ParseArgs(argv []string) (*Args, error) {
 		PlotFontSize:   0.0,
 		LidarRatioW:    0.5,
 		LidarRatioIter: 3,
+		DepolRatioW:    1.0,
 	}
 
 	fs := flag.NewFlagSet("csolve", flag.ContinueOnError)
@@ -291,6 +299,8 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.BoolVar(&a.LidarRatioCons, "lidar-ratio-cons", false, "")
 	fs.Float64Var(&a.LidarRatioW, "lidar-ratio-w", a.LidarRatioW, "")
 	fs.IntVar(&a.LidarRatioIter, "lidar-ratio-iter", a.LidarRatioIter, "")
+	fs.BoolVar(&a.DepolRatioCons, "depol-ratio-cons", false, "")
+	fs.Float64Var(&a.DepolRatioW, "depol-ratio-w", a.DepolRatioW, "")
 
 	if err := fs.Parse(argv); err != nil {
 		return nil, err
@@ -364,6 +374,9 @@ func ParseArgs(argv []string) (*Args, error) {
 	}
 	if !(a.LidarRatioW >= 0) {
 		return nil, fmt.Errorf("option --lidar-ratio-w must be >= 0")
+	}
+	if !(a.DepolRatioW >= 0) {
+		return nil, fmt.Errorf("option --depol-ratio-w must be >= 0")
 	}
 	if a.PlotFontSize != 0 && !(a.PlotFontSize >= 4 && a.PlotFontSize <= 72) {
 		return nil, fmt.Errorf("option --plot-font-size must be 0 or between 4 and 72")

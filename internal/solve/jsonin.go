@@ -16,13 +16,17 @@ type jsonGroup struct {
 }
 
 type jsonInput struct {
-	M           *jsonMFloat `json:"m"`
-	Backscatter *jsonGroup  `json:"backscatter"`
-	Extinction  *jsonGroup  `json:"extinction"`
+	M              *jsonMFloat `json:"m"`
+	Backscatter    *jsonGroup  `json:"backscatter"`
+	Extinction     *jsonGroup  `json:"extinction"`
+	Depolarization *jsonGroup  `json:"depolarization"`
 }
 
 // loadJSONInput — чтение измерений из JSON (структура как в Python-версии).
-func loadJSONInput(path string, trueRe, trueIm *float64) ([]channel, []float64) {
+// Дополнительно возвращаются измеренные значения δ_l (проценты) и их длины
+// волн (µm) для --depol-ratio-cons.
+func loadJSONInput(path string, trueRe, trueIm *float64) ([]channel, []float64,
+	[]float64, []float64) {
 	text, err := os.ReadFile(path)
 	if err != nil {
 		fatal("failed to open file: %s", path)
@@ -69,5 +73,18 @@ func loadJSONInput(path string, trueRe, trueIm *float64) ([]channel, []float64) 
 	if len(chans) == 0 {
 		fatal("no channels in data")
 	}
-	return chans, g1
+
+	depWl := []float64{}
+	depVal := []float64{}
+	if grp := root.Depolarization; grp != nil {
+		cnt := len(grp.WavelengthsNm)
+		if len(grp.Coefficients) < cnt {
+			cnt = len(grp.Coefficients)
+		}
+		for i := 0; i < cnt; i++ {
+			depWl = append(depWl, grp.WavelengthsNm[i]*1e-3)
+			depVal = append(depVal, grp.Coefficients[i])
+		}
+	}
+	return chans, g1, depWl, depVal
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -243,6 +244,220 @@ func TestDepol(t *testing.T) {
 	}
 }
 
+// TestDepolProjection: проекции S11/S22 на базис дают то же δ_l, что и
+// прямая свёртка с распределением на узлах окна.
+func TestDepolProjection(t *testing.T) {
+	xs := make([]float64, 60)
+	for i := range xs {
+		xs[i] = 0.05 * math.Pow(1200.0, float64(i)/float64(len(xs)-1))
+	}
+	var sb strings.Builder
+	sb.WriteString("# x Cext Cabs Cback Qext Qabs Qback S11 S22\n")
+	for _, x := range xs {
+		fmt.Fprintf(&sb, "%.17g %.6g 0 1 0 0 0 %.17g 1\n", x, x, x)
+	}
+	tb, _ := parseTable([]byte(sb.String()), "data.txt", false)
+
+	g := geomBuild(1.0, 2.0, 1, 4, false, 24, 0.1)
+	d := &design{nM: 1, nW: 1, nu: g.nUnknown, geom: []*geom{g}}
+	r := rGridFor(1.0, 2.0, 0.1, 0.355)
+	ds := &depolSet{wl: append([]float64(nil), depolWlsUm...),
+		kt: make([][2]*ktable, 1)}
+	for iw, wl := range ds.wl {
+		ds.kt[0][iw] = depolKtableBuild(tb, wl, tableRefWlUm, r)
+	}
+	ds.nOK = 1
+
+	p := depolProjBuild(ds, d, []int{1})
+	if p == nil {
+		t.Fatalf("projection must be built")
+	}
+	C := []float64{1.3, 0.4, 0.2, 0.7}
+	nq := make([]float64, g.nNodes)
+	for q := 0; q < g.nNodes; q++ {
+		for i := 0; i < g.nUnknown; i++ {
+			nq[q] += C[i] * g.values[q*g.nUnknown+i]
+		}
+	}
+	_, _, delta := depolFromProfile(ds, []int{0}, g.nodes, g.weights, nq)
+	got := p.depolModel(0, 0, 0, C)
+	checkClose(t, "delta_l from projections vs convolution", got,
+		delta[1], 1e-10)
+}
+
+func TestRankByDepol(t *testing.T) {
+	// a11=[4,1], a22=[1,1]: C=[1,0] ⇒ δ=60 %, C=[0,1] ⇒ δ=0 %.
+	p := &depolProj{wl: []float64{0.532}, iw: []int{1}, nM: 1, nW: 1, nu: 2,
+		a11: [][]float64{{4, 1}}, a22: [][]float64{{1, 1}}}
+	mk := func() *solutions {
+		return &solutions{n: 2, sol: []solution{
+			{mRe: 1.45, mIm: -0.005, geomIndex: 0, err: 0.1, id: 0,
+				C: []float64{0, 1}},
+			{mRe: 1.45, mIm: -0.005, geomIndex: 0, err: 0.1, id: 1,
+				C: []float64{1, 0}},
+		}}
+	}
+	mre := []float64{1.45}
+	mim := []float64{-0.005}
+
+	sols := mk()
+	rankByDepol(sols, p, mre, mim, []float64{50.0}, 1.0)
+	if sols.sol[0].id != 1 {
+		t.Errorf("solution closest to δ=50%% must rank first, got id %d",
+			sols.sol[0].id)
+	}
+
+	// нулевой вес — порядок по err не меняется
+	sols = mk()
+	rankByDepol(sols, p, mre, mim, []float64{50.0}, 0.0)
+	if sols.sol[0].id != 0 || sols.sol[1].id != 1 {
+		t.Errorf("zero weight must keep the order by err")
+	}
+
+	// невалидное измерение — штраф не применяется
+	sols = mk()
+	rankByDepol(sols, p, mre, mim, []float64{math.NaN()}, 1.0)
+	if sols.sol[0].id != 0 {
+		t.Errorf("NaN target must not reorder solutions")
+	}
+}
+
+// TestLidarConstraintWithDepolPenalty: штраф δ_l учитывается в том же
+// функционале, что и ограничение гладкости S (не затирается им).
+func TestLidarConstraintWithDepolPenalty(t *testing.T) {
+	mk := func() *solutions {
+		return &solutions{n: 2, sol: []solution{
+			{err: 0.1, id: 0},
+			{err: 0.2, id: 1},
+		}}
+	}
+	per := []*solutions{mk(), mk()}
+	S := [][]float64{{0.5, 0.5}, {0.5, 0.5}}
+	pen := [][]float64{{1.0, 0.0}, {1.0, 0.0}}
+	applyLidarConstraint(per, 2, []float64{0, 1}, 1, 0, 1, 1, S, pen)
+	for h := range per {
+		if per[h].sol[0].id != 1 {
+			t.Errorf("altitude %d: depol penalty must dominate ranking, "+
+				"got id %d", h, per[h].sol[0].id)
+		}
+	}
+}
+
+// TestWriteProfileDepolColumns: в dist_<H>.txt добавляются колонки
+// depol_calc_532 (всегда) и depol_meas_532 (если есть dep532).
+func TestWriteProfileDepolColumns(t *testing.T) {
+	dir := t.TempDir()
+	b := &batchInput{nch: 2, ndep: 1, nAlt: 1,
+		ch:    []batchChannel{{chBeta, 0.532, "b532"}, {chAlpha, 0.532, "a532"}},
+		depWl: []float64{0.532}, dep: []float64{7.5}}
+	g1 := []float64{1e-4, 3e-4}
+	prof := &profile{nr: 2, rGrid: []float64{0.1, 0.2},
+		nAvg: []float64{1, 2}, gFit: append([]float64(nil), g1...)}
+	writeProfile(dir, 500, b, g1, prof,
+		distDepol{calc: 6.25, meas: 7.5, hasMeas: true})
+
+	data, err := os.ReadFile(filepath.Join(dir, "dist_500.txt"))
+	if err != nil {
+		t.Fatalf("read dist file: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "depol_calc_532") ||
+		!strings.Contains(text, "depol_meas_532") {
+		t.Errorf("dist header must declare depol columns:\n%s", text)
+	}
+	rows := 0
+	for _, ln := range strings.Split(text, "\n") {
+		if ln == "" || strings.HasPrefix(ln, "#") {
+			continue
+		}
+		f := strings.Fields(ln)
+		if len(f) != 4 {
+			t.Fatalf("expected 4 columns, got %d: %q", len(f), ln)
+		}
+		checkClose(t, "dist depol_calc", mustFloat(t, f[2]), 6.25, 1e-12)
+		checkClose(t, "dist depol_meas", mustFloat(t, f[3]), 7.5, 1e-12)
+		rows++
+	}
+	if rows != 2 {
+		t.Errorf("expected 2 data rows, got %d", rows)
+	}
+
+	// без измерения — только колонка расчёта (nan при отсутствии S11/S22)
+	b2 := &batchInput{nch: 2, nAlt: 1,
+		ch: []batchChannel{{chBeta, 0.532, "b532"}, {chAlpha, 0.532, "a532"}}}
+	writeProfile(dir, 700, b2, g1, prof, distDepol{calc: math.NaN()})
+	data, err = os.ReadFile(filepath.Join(dir, "dist_700.txt"))
+	if err != nil {
+		t.Fatalf("read dist file: %v", err)
+	}
+	if strings.Contains(string(data), "depol_meas_532") {
+		t.Errorf("dist must not declare measured depol without dep column")
+	}
+	if !strings.Contains(string(data), "depol_calc_532") {
+		t.Errorf("dist must always declare depol_calc_532")
+	}
+	for _, ln := range strings.Split(string(data), "\n") {
+		if ln == "" || strings.HasPrefix(ln, "#") {
+			continue
+		}
+		f := strings.Fields(ln)
+		if len(f) != 3 || f[2] != "nan" {
+			t.Errorf("expected 3 columns with nan depol, got %q", ln)
+		}
+	}
+}
+
+func mustFloat(t *testing.T, s string) float64 {
+	t.Helper()
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		t.Fatalf("parse float %q: %v", s, err)
+	}
+	return v
+}
+
+func TestBatchParseDepol(t *testing.T) {
+	write := func(t *testing.T, content string) string {
+		t.Helper()
+		p := filepath.Join(t.TempDir(), "batch.txt")
+		if err := os.WriteFile(p, []byte(content), 0644); err != nil {
+			t.Fatalf("write temp batch: %v", err)
+		}
+		return p
+	}
+
+	b := parseBatchTxt(write(t, "Altitude b532 a532 dep532\n"+
+		"500 1e-4 3e-4 12.5\n700 1.1e-4 3.1e-4 nan\n"))
+	if b.nch != 2 || b.ndep != 1 {
+		t.Fatalf("nch/ndep = %d/%d, want 2/1", b.nch, b.ndep)
+	}
+	if b.ch[0].name != "b532" || b.ch[0].kind != chBeta ||
+		b.ch[1].name != "a532" || b.ch[1].kind != chAlpha {
+		t.Errorf("unexpected channels: %+v", b.ch)
+	}
+	checkClose(t, "dep wavelength", b.depWl[0], 0.532, 1e-12)
+	checkClose(t, "dep[0]", b.dep[0], 12.5, 0)
+	if !math.IsNaN(b.dep[1]) {
+		t.Errorf("nan in dep column must be preserved, got %g", b.dep[1])
+	}
+	checkClose(t, "alt[1]", b.alt[1], 700.0, 0)
+	checkClose(t, "data[2]", b.data[2], 1.1e-4, 0)
+
+	// произвольный порядок столбцов
+	b = parseBatchTxt(write(t, "Altitude dep355 a532 b532\n"+
+		"500 8.0 3e-4 1e-4\n"))
+	if b.nch != 2 || b.ndep != 1 {
+		t.Fatalf("nch/ndep = %d/%d, want 2/1", b.nch, b.ndep)
+	}
+	checkClose(t, "dep wavelength (dep355)", b.depWl[0], 0.355, 1e-12)
+	checkClose(t, "dep value", b.dep[0], 8.0, 0)
+	checkClose(t, "a532 value", b.data[0], 3e-4, 0)
+	checkClose(t, "b532 value", b.data[1], 1e-4, 0)
+	if b.ch[0].name != "a532" || b.ch[1].name != "b532" {
+		t.Errorf("channel order must follow the header: %+v", b.ch)
+	}
+}
+
 func TestSmoothing(t *testing.T) {
 	r := []float64{0.05, 0.08469069900482264, 0.14345028995850928,
 		0.24297810658061286, 0.41155971378360795, 0.6971055968511699,
@@ -329,6 +544,24 @@ func TestArgs(t *testing.T) {
 		checkClose(t, "--r1-min=0.5", a.R1Min, 0.5, 0)
 		if !a.Nonneg {
 			t.Errorf("--nonneg not parsed")
+		}
+	}
+	{
+		a, err := ParseArgs([]string{"--tables", "dir", "--depol-ratio-cons"})
+		if err != nil {
+			t.Fatalf("--depol-ratio-cons: %v", err)
+		}
+		if !a.DepolRatioCons {
+			t.Errorf("--depol-ratio-cons not parsed")
+		}
+		checkClose(t, "--depol-ratio-w default", a.DepolRatioW, 1.0, 0)
+		a, err = ParseArgs([]string{"--tables", "dir", "--depol-ratio-w", "2.5"})
+		if err != nil {
+			t.Fatalf("--depol-ratio-w: %v", err)
+		}
+		checkClose(t, "--depol-ratio-w", a.DepolRatioW, 2.5, 0)
+		if _, err := ParseArgs([]string{"--tables", "dir", "--depol-ratio-w=-1"}); err == nil {
+			t.Errorf("negative --depol-ratio-w must be rejected")
 		}
 	}
 	{

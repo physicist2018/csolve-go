@@ -24,6 +24,18 @@ type batchInput struct {
 	alt  []float64
 	data []float64 // nAlt x nch, row-major
 	nAlt int
+
+	depWl []float64 // длины волн измеренных δ_l, µm (столбцы dep<nm>)
+	dep   []float64 // nAlt x ndep, row-major; δ_l в процентах
+	ndep  int
+}
+
+// batchColSpec — описание одного столбца таблицы (кроме высоты).
+type batchColSpec struct {
+	dep  bool
+	kind chKind
+	wlUm float64
+	name string
 }
 
 func parseBatchTxt(path string) *batchInput {
@@ -37,6 +49,7 @@ func parseBatchTxt(path string) *batchInput {
 	scan := bufio.NewScanner(f)
 	scan.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	haveHeader, haveRow := false, false
+	var specs []batchColSpec
 
 	for scan.Scan() {
 		s := strings.TrimSpace(scan.Text())
@@ -52,58 +65,53 @@ func parseBatchTxt(path string) *batchInput {
 			if low != "altitude" && low != "alt" && low != "h" {
 				fatal("first header field must be 'Altitude', got '%s'", toks[0])
 			}
-			b.nch = len(toks) - 1
+			specs = make([]batchColSpec, 0, len(toks)-1)
+			for i := 1; i < len(toks); i++ {
+				spec, ok := parseBatchColumnName(toks[i])
+				if !ok {
+					fatal("unknown column name '%s' (expected b<nm>, a<nm> or dep<nm>)",
+						toks[i])
+				}
+				if spec.dep {
+					for _, prev := range specs {
+						if prev.dep && prev.wlUm == spec.wlUm {
+							fatal("duplicate depolarization column '%s'", toks[i])
+						}
+					}
+					b.depWl = append(b.depWl, spec.wlUm)
+				} else {
+					b.ch = append(b.ch, batchChannel{spec.kind, spec.wlUm, spec.name})
+				}
+				specs = append(specs, spec)
+			}
+			b.nch = len(b.ch)
+			b.ndep = len(b.depWl)
 			if b.nch <= 0 {
 				fatal("no channels in header (expected b/a<nm>)")
-			}
-			b.ch = make([]batchChannel, b.nch)
-			for i := 1; i < len(toks); i++ {
-				nm := toks[i]
-				c0 := nm[0]
-				if c0 >= 'A' && c0 <= 'Z' {
-					c0 = c0 - 'A' + 'a'
-				}
-				digits := len(nm) > 1
-				for k := 1; k < len(nm); k++ {
-					if nm[k] < '0' || nm[k] > '9' {
-						digits = false
-					}
-				}
-				if !digits || (c0 != 'b' && c0 != 'a') {
-					fatal("unknown channel name '%s' (expected b<nm> or a<nm>)", nm)
-				}
-				ch := &b.ch[i-1]
-				if c0 == 'b' {
-					ch.kind = chBeta
-				} else {
-					ch.kind = chAlpha
-				}
-				wl, err := strconv.Atoi(nm[1:])
-				if err != nil {
-					fatal("unknown channel name '%s' (expected b<nm> or a<nm>)", nm)
-				}
-				ch.wlUm = float64(wl) * 1e-3
-				ch.name = nm
 			}
 			haveHeader = true
 			continue
 		}
 
-		if len(toks) != b.nch+1 {
-			fatal("expected %d coefficients per row, got %d: '%s'",
-				b.nch, len(toks)-1, s)
+		if len(toks) != len(specs)+1 {
+			fatal("expected %d values per row, got %d: '%s'",
+				len(specs), len(toks)-1, s)
 		}
 		hv, err := strconv.ParseFloat(toks[0], 64)
 		if err != nil {
 			fatal("failed to parse line '%s'", s)
 		}
 		b.alt = append(b.alt, hv)
-		for i := 0; i < b.nch; i++ {
+		for i, spec := range specs {
 			v, err := strconv.ParseFloat(toks[i+1], 64)
 			if err != nil {
 				fatal("failed to parse line '%s'", s)
 			}
-			b.data = append(b.data, v)
+			if spec.dep {
+				b.dep = append(b.dep, v)
+			} else {
+				b.data = append(b.data, v)
+			}
 		}
 		haveRow = true
 	}
@@ -118,6 +126,40 @@ func parseBatchTxt(path string) *batchInput {
 	}
 	b.nAlt = len(b.alt)
 	return b
+}
+
+// parseBatchColumnName — разбор имени столбца: b<nm> (β), a<nm> (α) или
+// dep<nm> (измеренное δ_l, %).
+func parseBatchColumnName(nm string) (batchColSpec, bool) {
+	low := strings.ToLower(nm)
+	if strings.HasPrefix(low, "dep") {
+		wl, err := strconv.Atoi(nm[3:])
+		if err != nil || wl <= 0 {
+			return batchColSpec{}, false
+		}
+		return batchColSpec{dep: true, wlUm: float64(wl) * 1e-3, name: nm}, true
+	}
+	if len(nm) < 2 {
+		return batchColSpec{}, false
+	}
+	digits := true
+	for k := 1; k < len(nm); k++ {
+		if nm[k] < '0' || nm[k] > '9' {
+			digits = false
+		}
+	}
+	if !digits || (low[0] != 'b' && low[0] != 'a') {
+		return batchColSpec{}, false
+	}
+	wl, err := strconv.Atoi(nm[1:])
+	if err != nil || wl <= 0 {
+		return batchColSpec{}, false
+	}
+	kind := chAlpha
+	if low[0] == 'b' {
+		kind = chBeta
+	}
+	return batchColSpec{kind: kind, wlUm: float64(wl) * 1e-3, name: nm}, true
 }
 
 // ---------------- общие длины волн и лидарное отношение ----------------
@@ -336,7 +378,7 @@ func storeTopIds(sols *solutions, g int, prev []int, off int) {
 }
 
 func applyLidarConstraint(per []*solutions, nAlt int, alt []float64, nl int,
-	w float64, maxIter, best int, S [][]float64) {
+	w float64, maxIter, best int, S [][]float64, pen [][]float64) {
 	dbg := os.Getenv("CSOLVE_LIDAR_DEBUG") != ""
 	gEff := make([]int, nAlt)
 	kEff := make([]int, nAlt)
@@ -453,6 +495,11 @@ func applyLidarConstraint(per []*solutions, nAlt int, alt []float64, nl int,
 					dev = 0
 				}
 				score[t] = per[h].sol[t].err + w*dev
+				if pen != nil && h < len(pen) && pen[h] != nil {
+					if id := per[h].sol[t].id; id >= 0 && id < len(pen[h]) {
+						score[t] += pen[h][id]
+					}
+				}
 			}
 			reorderByScore(per[h], score)
 			if dbg {
@@ -529,8 +576,15 @@ func openAppend(path string) *os.File {
 	return f
 }
 
+// distDepol — скалярные δ_l на 532 нм для файла dist_<H>.txt.
+type distDepol struct {
+	calc    float64
+	meas    float64
+	hasMeas bool
+}
+
 func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
-	p *profile) float64 {
+	p *profile, dd distDepol) float64 {
 	path := filepath.Join(outDir, fmt.Sprintf("dist_%s.txt", cG(h)))
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# altitude H = %g m\n", h)
@@ -541,11 +595,20 @@ func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
 		}
 		fmt.Fprintf(&sb, "%s=%s", b.ch[j].name, cG(g1[j]))
 	}
-	sb.WriteString("\n# r, µm  dV/dln r, µm³/cm³\n")
+	sb.WriteString("\n# r, µm  dV/dln r, µm³/cm³  depol_calc_532")
+	if dd.hasMeas {
+		sb.WriteString("  depol_meas_532")
+	}
+	sb.WriteString("\n# depol — линейная деполяризация на 532 нм, % (nan если нет " +
+		"S11/S22 или измерения)\n")
 	for i := 0; i < p.nr; i++ {
 		nv := p.nAvg[i] / cm3PerM3
 		if isFinite(nv) {
-			fmt.Fprintf(&sb, "%s  %s\n", cG(p.rGrid[i]), cG(nv))
+			fmt.Fprintf(&sb, "%s  %s  %s", cG(p.rGrid[i]), cG(nv), cG(dd.calc))
+			if dd.hasMeas {
+				fmt.Fprintf(&sb, "  %s", cG(dd.meas))
+			}
+			sb.WriteString("\n")
 		}
 	}
 	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
@@ -590,6 +653,8 @@ type metrics struct {
 	S              []float64   // nl x nAlt
 	dpol           [][]float64 // ndepol x nAlt, δ_l, %
 	dpolWl         []float64   // длины волн δ_l, µm
+	dpolMeas       [][]float64 // ndep x nAlt, измеренная δ_l, %
+	dpolMeasWl     []float64   // длины волн измеренной δ_l, µm
 	nAlt, nl       int
 }
 
@@ -599,7 +664,15 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 	nl int, writeLidar bool, met *metrics, hi int, ds *depolSet) {
 	prof := profileFinalize(a, solveCh, kts, mre, mim, sols, geom, a.R0Min,
 		r1Max, ds)
-	err := writeProfile(outDir, h, b, g1, prof)
+	dd := distDepol{calc: math.NaN(), meas: math.NaN()}
+	if i := depolWlIndex(prof.deltaLwl, 0.532); i >= 0 && i < len(prof.deltaL) {
+		dd.calc = prof.deltaL[i]
+	}
+	if k := depolWlIndex(b.depWl, 0.532); k >= 0 {
+		dd.meas = b.dep[hi*b.ndep+k]
+		dd.hasMeas = true
+	}
+	err := writeProfile(outDir, h, b, g1, prof, dd)
 
 	dStr := ""
 	if ds != nil && len(ds.wl) > 0 {
@@ -611,6 +684,9 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 				v = prof.deltaL[i]
 			}
 			fmt.Fprintf(fd, "  %s", cG(v))
+		}
+		for k := 0; k < b.ndep; k++ {
+			fmt.Fprintf(fd, "  %s", cG(b.dep[hi*b.ndep+k]))
 		}
 		fd.WriteString("\n")
 		fd.Close()
@@ -700,6 +776,10 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 // ---------------- основной сценарий ----------------
 func runBatch(a *Args) {
 	b := parseBatchTxt(a.Batch)
+	if a.DepolRatioCons && b.ndep == 0 {
+		fatal("option --depol-ratio-cons requires a dep<nm> column in the " +
+			"batch file (e.g. dep532), got none")
+	}
 	src := a.tableSource()
 	mre, mim := tableMGrid(src)
 	nm := len(mre)
@@ -715,6 +795,9 @@ func runBatch(a *Args) {
 			b.ch[j].wlUm*1e3)
 	}
 	fmt.Printf("  units: β [1/(m·sr)], α [1/m]\n")
+	for k, wl := range b.depWl {
+		fmt.Printf("  measured δ_l column %d: %.6g nm, %%\n", k+1, wl*1e3)
+	}
 	if a.LidarRatioCons {
 		fmt.Printf("lidar ratio S=α/β smoothness constraint along altitude: "+
 			"enabled (weight %g, iterations <= %d)\n", a.LidarRatioW,
@@ -795,6 +878,50 @@ func runBatch(a *Args) {
 		a.LogSpan)
 	fmt.Printf("  matrices A precomputed: %d windows × %d m\n", design.nW, nm)
 
+	// ограничение по измеренному δ_l для ранжирования решений
+	var depIw, depCol []int
+	if a.DepolRatioCons {
+		if !depolSetAvailable(ds) {
+			fmt.Fprintf(os.Stderr, "[warning] --depol-ratio-cons: tables have no "+
+				"valid S11/S22 columns; constraint is not applied\n")
+		} else {
+			depIw, depCol = depolColumnMatch(ds, b.depWl, a.Batch)
+			if len(depIw) == 0 {
+				fmt.Fprintf(os.Stderr, "[warning] --depol-ratio-cons: no measured "+
+					"depolarization matching S11/S22 wavelengths; constraint is "+
+					"not applied\n")
+			} else if !(a.DepolRatioW > 0) {
+				fmt.Printf("depolarization ratio constraint δ_l: disabled " +
+					"(--depol-ratio-w 0)\n")
+			}
+		}
+	}
+	var depProj *depolProj
+	if len(depIw) > 0 && a.DepolRatioW > 0 {
+		depProj = depolProjBuild(ds, design, depIw)
+		if depProj != nil {
+			var sb strings.Builder
+			for k := range depIw {
+				if k > 0 {
+					sb.WriteString(", ")
+				}
+				fmt.Fprintf(&sb, "%.6g nm", ds.wl[depIw[k]]*1e3)
+			}
+			fmt.Printf("depolarization ratio constraint δ_l: enabled "+
+				"(weight %g; measured at %s)\n", a.DepolRatioW, sb.String())
+		}
+	}
+	rankDepolAt := func(sols *solutions, h int) []float64 {
+		if depProj == nil {
+			return nil
+		}
+		targets := make([]float64, len(depCol))
+		for k, c := range depCol {
+			targets[k] = b.dep[h*b.ndep+c]
+		}
+		return rankByDepol(sols, depProj, mre, mim, targets, a.DepolRatioW)
+	}
+
 	outDir := a.BatchOutDir
 	if outDir == "" {
 		outDir = defaultOutDir(a.Batch)
@@ -838,10 +965,17 @@ func runBatch(a *Args) {
 		for _, wl := range ds.wl {
 			fmt.Fprintf(&sb, "  delta_l_%g", wl*1e3)
 		}
+		for _, wl := range b.depWl {
+			fmt.Fprintf(&sb, "  delta_l_meas_%g", wl*1e3)
+		}
 		sb.WriteString("\n# linear depolarization at 180 deg, % " +
 			"(delta_l = (S11-S22)/(S11+S22)*100)\n")
 		if !depolSetAvailable(ds) {
 			sb.WriteString("# nan: tables have no valid S11/S22 columns\n")
+		}
+		if b.ndep > 0 {
+			sb.WriteString("# delta_l_meas_* — measured depolarization from " +
+				"the dep<nm> columns\n")
 		}
 		writeHeader("delpol.txt", sb.String())
 	}
@@ -868,6 +1002,16 @@ func runBatch(a *Args) {
 			met.dpol[i] = make([]float64, b.nAlt)
 		}
 	}
+	if b.ndep > 0 {
+		met.dpolMeasWl = append([]float64(nil), b.depWl...)
+		met.dpolMeas = make([][]float64, b.ndep)
+		for k := range met.dpolMeas {
+			met.dpolMeas[k] = make([]float64, b.nAlt)
+			for h := 0; h < b.nAlt; h++ {
+				met.dpolMeas[k][h] = b.dep[h*b.ndep+k]
+			}
+		}
+	}
 
 	if writeLidar {
 		var sb strings.Builder
@@ -884,6 +1028,7 @@ func runBatch(a *Args) {
 
 	if retain {
 		per := make([]*solutions, b.nAlt)
+		depPen := make([][]float64, b.nAlt)
 		for h := 0; h < b.nAlt; h++ {
 			g1 := b.data[h*b.nch:]
 			fmt.Printf("scan over (m, r0, r1, degree)...\n")
@@ -893,6 +1038,7 @@ func runBatch(a *Args) {
 			if per[h].n == 0 {
 				fatal("no valid [r0, r1] window")
 			}
+			depPen[h] = rankDepolAt(per[h], h)
 			fmt.Printf("  altitude %g m: %d variants\n", b.alt[h], per[h].n)
 		}
 
@@ -918,7 +1064,7 @@ func runBatch(a *Args) {
 			}
 		}
 		applyLidarConstraint(per, b.nAlt, b.alt, nl, a.LidarRatioW,
-			a.LidarRatioIter, a.Best, S)
+			a.LidarRatioIter, a.Best, S, depPen)
 
 		for h := 0; h < b.nAlt; h++ {
 			g1 := b.data[h*b.nch:]
@@ -946,6 +1092,7 @@ func runBatch(a *Args) {
 			if sols.n == 0 {
 				fatal("no valid [r0, r1] window")
 			}
+			rankDepolAt(sols, h)
 			fmt.Printf("  altitude %g m: %d variants\n", b.alt[h], sols.n)
 			emitProfile(a, outDir, b.alt[h], b, solveCh, g1, sols, kts,
 				mre, mim, design.geom, r1MaxEff, common, nl, writeLidar,
@@ -1006,14 +1153,27 @@ func runBatch(a *Args) {
 				b.alt, svals, snames, true)
 		}
 
-		if len(met.dpol) > 0 && anyFiniteSeries(met.dpol) {
-			pp = filepath.Join(outDir, "delpol."+ext)
-			dnames := make([]string, len(met.dpol))
-			for k := range met.dpol {
-				dnames[k] = fmt.Sprintf("δ_l(%g nm)", met.dpolWl[k]*1e3)
+		if len(met.dpol) > 0 || len(met.dpolMeas) > 0 {
+			series := make([][]float64, 0, len(met.dpol)+len(met.dpolMeas))
+			series = append(series, met.dpol...)
+			series = append(series, met.dpolMeas...)
+			if anyFiniteSeries(series) {
+				pp = filepath.Join(outDir, "delpol."+ext)
+				dnames := make([]string, 0, len(series))
+				dstyles := make([]string, 0, len(series))
+				for k := range met.dpol {
+					dnames = append(dnames, fmt.Sprintf("δ_l(%g nm)",
+						met.dpolWl[k]*1e3))
+					dstyles = append(dstyles, "")
+				}
+				for k := range met.dpolMeas {
+					dnames = append(dnames, fmt.Sprintf("δ_l^{meas}(%g nm)",
+						met.dpolMeasWl[k]*1e3))
+					dstyles = append(dstyles, "dt 2")
+				}
+				plotProfilesStyled(&po, pp, "Linear depolarization ratio",
+					"δ_l, %", len(series), b.alt, series, dnames, dstyles, false)
 			}
-			plotProfiles(&po, pp, "Linear depolarization ratio",
-				"δ_l, %", len(met.dpol), b.alt, met.dpol, dnames, false)
 		}
 	}
 
