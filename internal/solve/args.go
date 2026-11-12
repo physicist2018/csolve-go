@@ -188,9 +188,9 @@ Options:
   --lidar-ratio-w <X>            weight of S deviation penalty, >= 0 [0.5]
   --lidar-ratio-iter <N>         iterations to refine reference S, >= 1 [3]
 
-  --depol-ratio-cons             penalize relative deviation of delta_l
-                                 from the measured dep<nm> values
-  --depol-ratio-w <X>            weight of the delta_l deviation penalty, >= 0 [1]
+  --depol-ratio-cons             add a delta_l residual to the retrieval
+                                 functional (measured dep<nm> / JSON)
+  --depol-ratio-w <X>            weight of the delta_l residual, >= 0 [1]
 `)
 }
 

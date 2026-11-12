@@ -285,61 +285,60 @@ func TestDepolProjection(t *testing.T) {
 		delta[1], 1e-10)
 }
 
-func TestRankByDepol(t *testing.T) {
-	// a11=[4,1], a22=[1,1]: C=[1,0] ⇒ δ=60 %, C=[0,1] ⇒ δ=0 %.
+// TestDepolFunctional: строка ограничения δ_l в функционале приближает
+// модельное δ_l к измеренному; w=0 — ограничение не добавляется.
+func TestDepolFunctional(t *testing.T) {
 	p := &depolProj{wl: []float64{0.532}, iw: []int{1}, nM: 1, nW: 1, nu: 2,
 		a11: [][]float64{{4, 1}}, a22: [][]float64{{1, 1}}}
-	mk := func() *solutions {
-		return &solutions{n: 2, sol: []solution{
-			{mRe: 1.45, mIm: -0.005, geomIndex: 0, err: 0.1, id: 0,
-				C: []float64{0, 1}},
-			{mRe: 1.45, mIm: -0.005, geomIndex: 0, err: 0.1, id: 1,
-				C: []float64{1, 0}},
-		}}
-	}
-	mre := []float64{1.45}
-	mim := []float64{-0.005}
+	A := []float64{1, 0, 0, 1}
+	weights := []float64{1, 1}
+	g1n := []float64{1, 0.5}
+	const nch = 2
 
-	sols := mk()
-	rankByDepol(sols, p, mre, mim, []float64{50.0}, 1.0)
-	if sols.sol[0].id != 1 {
-		t.Errorf("solution closest to δ=50%% must rank first, got id %d",
-			sols.sol[0].id)
+	c0 := solveGamma(A, nch, p.nu, 0, weights, g1n, false)
+	d0 := p.depolModel(0, 0, 0, c0)
+	checkClose(t, "channel-only delta_l", d0, 50.0, 1e-9)
+
+	// без дополнительных строк результат тот же
+	cEq := solveGammaRows(A, nch, p.nu, 0, weights, g1n, false, nil, 0)
+	for i := range cEq {
+		checkClose(t, "solveGammaRows without extra rows", cEq[i], c0[i], 1e-12)
 	}
 
-	// нулевой вес — порядок по err не меняется
-	sols = mk()
-	rankByDepol(sols, p, mre, mim, []float64{50.0}, 0.0)
-	if sols.sol[0].id != 0 || sols.sol[1].id != 1 {
-		t.Errorf("zero weight must keep the order by err")
+	dc := &depolCons{proj: p, w: 1, targets: []float64{60}}
+	extra, nExtra := dc.rows(0, 0, c0)
+	if nExtra != 1 || len(extra) != p.nu {
+		t.Fatalf("expected 1 row of length %d, got %d rows / %d values",
+			p.nu, nExtra, len(extra))
+	}
+	c1 := solveGammaRows(A, nch, p.nu, 0, weights, g1n, false, extra, nExtra)
+	d1 := p.depolModel(0, 0, 0, c1)
+	if !(d1 > d0 && d1 < 60) {
+		t.Errorf("delta_l must move towards the measurement: %g -> %g", d0, d1)
 	}
 
-	// невалидное измерение — штраф не применяется
-	sols = mk()
-	rankByDepol(sols, p, mre, mim, []float64{math.NaN()}, 1.0)
-	if sols.sol[0].id != 0 {
-		t.Errorf("NaN target must not reorder solutions")
-	}
-}
+	// большой вес — ограничение выполняется почти точно
+	dc.w = 1e4
+	extra, nExtra = dc.rows(0, 0, c0)
+	c2 := solveGammaRows(A, nch, p.nu, 0, weights, g1n, false, extra, nExtra)
+	checkClose(t, "large weight delta_l", p.depolModel(0, 0, 0, c2), 60.0, 1e-3)
 
-// TestLidarConstraintWithDepolPenalty: штраф δ_l учитывается в том же
-// функционале, что и ограничение гладкости S (не затирается им).
-func TestLidarConstraintWithDepolPenalty(t *testing.T) {
-	mk := func() *solutions {
-		return &solutions{n: 2, sol: []solution{
-			{err: 0.1, id: 0},
-			{err: 0.2, id: 1},
-		}}
+	// w = 0 — строки нет
+	zero := &depolCons{proj: p, w: 0, targets: []float64{60}}
+	if _, n := zero.rows(0, 0, c0); n != 0 {
+		t.Errorf("zero weight must add no rows, got %d", n)
 	}
-	per := []*solutions{mk(), mk()}
-	S := [][]float64{{0.5, 0.5}, {0.5, 0.5}}
-	pen := [][]float64{{1.0, 0.0}, {1.0, 0.0}}
-	applyLidarConstraint(per, 2, []float64{0, 1}, 1, 0, 1, 1, S, pen)
-	for h := range per {
-		if per[h].sol[0].id != 1 {
-			t.Errorf("altitude %d: depol penalty must dominate ranking, "+
-				"got id %d", h, per[h].sol[0].id)
+	// невалидные цели — строк нет
+	for _, target := range []float64{math.NaN(), 100.0, -100.0} {
+		bad := &depolCons{proj: p, w: 1, targets: []float64{target}}
+		if _, n := bad.rows(0, 0, c0); n != 0 {
+			t.Errorf("target %g must be skipped, got %d rows", target, n)
 		}
+	}
+	// nil-получатель безопасен (ограничение выключено)
+	var nilDC *depolCons
+	if _, n := nilDC.rows(0, 0, c0); n != 0 {
+		t.Errorf("nil constraint must add no rows")
 	}
 }
 

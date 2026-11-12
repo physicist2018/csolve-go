@@ -391,22 +391,24 @@ func run(a *Args) {
 		a.LogSpan)
 	phase("design", tPhase)
 
+	// ограничение по измеренному δ_l добавляется в функционал
+	var dc *depolCons
+	if a.DepolRatioCons && len(depIw) > 0 && a.DepolRatioW > 0 {
+		if proj := depolProjBuild(ds, design, depIw); proj != nil {
+			targets := make([]float64, len(depCol))
+			for k, c := range depCol {
+				targets[k] = depVal[c]
+			}
+			dc = &depolCons{proj: proj, w: a.DepolRatioW, targets: targets}
+		}
+	}
+
 	tPhase = nowSec()
 	sols := scanVariants(design, g1, nch, a.GammaSelect, a.GammaRel,
-		a.GammaMin, a.GammaMax, a.NGamma, a.Nonneg, !a.Absolute)
+		a.GammaMin, a.GammaMax, a.NGamma, a.Nonneg, !a.Absolute, dc)
 	phase("scan", tPhase)
 	if sols.n == 0 {
 		fatal("no valid window [r0, r1] — check the bounds and min-ratio")
-	}
-
-	if a.DepolRatioCons && len(depIw) > 0 {
-		targets := make([]float64, len(depCol))
-		for k, c := range depCol {
-			targets[k] = depVal[c]
-		}
-		if proj := depolProjBuild(ds, design, depIw); proj != nil && a.DepolRatioW > 0 {
-			rankByDepol(sols, proj, mre, mim, targets, a.DepolRatioW)
-		}
 	}
 
 	tPhase = nowSec()
