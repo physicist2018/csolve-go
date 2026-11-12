@@ -2,7 +2,9 @@ package solve
 
 import (
 	"bytes"
+	"compress/zlib"
 	"fmt"
+	"io"
 	"io/fs"
 	"math"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf16"
 )
 
 func checkClose(t *testing.T, what string, got, want, tol float64) {
@@ -536,6 +539,12 @@ func TestArgs(t *testing.T) {
 		}
 		checkClose(t, "plot-dpi default", a.PlotDpi, 150.0, 0)
 		checkClose(t, "plot-font-size default", a.PlotFontSize, 0.0, 0)
+		if a.Plotting != plottingInternal {
+			t.Errorf("default --plotting must be internal, got %d", a.Plotting)
+		}
+		if a.PlotFormat != plotFmtPdf {
+			t.Errorf("internal backend must force pdf, got %d", a.PlotFormat)
+		}
 	}
 	{
 		// без --tables таблицы встроенные
@@ -730,5 +739,214 @@ func TestEmbeddedGzipMatchesSource(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", kind, err)
 		}
+	}
+}
+
+func TestArgsPlotting(t *testing.T) {
+	{
+		a, err := ParseArgs([]string{"--tables", "dir", "--plotting", "gnuplot"})
+		if err != nil {
+			t.Fatalf("--plotting gnuplot: %v", err)
+		}
+		if a.Plotting != plottingGnuplot {
+			t.Errorf("--plotting gnuplot not parsed")
+		}
+		if a.PlotFormat != plotFmtPng {
+			t.Errorf("gnuplot backend must keep png default, got %d",
+				a.PlotFormat)
+		}
+	}
+	{
+		if _, err := ParseArgs([]string{"--tables", "dir",
+			"--plot-format", "png"}); err == nil {
+			t.Errorf("--plot-format png with internal backend must fail")
+		}
+		if _, err := ParseArgs([]string{"--tables", "dir",
+			"--plot-format", "svg"}); err == nil {
+			t.Errorf("--plot-format svg with internal backend must fail")
+		}
+	}
+	{
+		a, err := ParseArgs([]string{"--tables", "dir",
+			"--plot-format", "pdf", "--plotting", "internal"})
+		if err != nil {
+			t.Fatalf("--plot-format pdf: %v", err)
+		}
+		if a.PlotFormat != plotFmtPdf {
+			t.Errorf("--plot-format pdf not parsed with internal backend")
+		}
+	}
+	{
+		if _, err := ParseArgs([]string{"--tables", "dir",
+			"--out", "result.png"}); err == nil {
+			t.Errorf("--out with a non-pdf extension must fail")
+		}
+		if _, err := ParseArgs([]string{"--tables", "dir",
+			"--out", "result.pdf"}); err != nil {
+			t.Errorf("--out result.pdf: %v", err)
+		}
+	}
+	{
+		// с --no-plot опции графиков не проверяются
+		if _, err := ParseArgs([]string{"--tables", "dir", "--no-plot",
+			"--plot-format", "png", "--out", "result.png"}); err != nil {
+			t.Errorf("--no-plot must ignore plot options: %v", err)
+		}
+	}
+	{
+		if _, err := ParseArgs([]string{"--tables", "dir",
+			"--plotting", "cairo"}); err == nil {
+			t.Errorf("unknown --plotting value must fail")
+		}
+	}
+}
+
+func TestInternalLabel(t *testing.T) {
+	cases := map[string]string{
+		"r, µm":               "r, µm",
+		"dV/dln r, µm³/cm³":   "dV/dln r, µm³/cm³",
+		"N, cm⁻³":             "N, cm⁻³",
+		"⟨m⟩ = 1.450-0.005j":  "⟨m⟩ = 1.450-0.005j",
+		"S_{355}":             "S_355",
+		"δ_l^{meas}(532 nm)":  "δ_l^meas(532 nm)",
+		"Concentration, см⁻³": "Concentration, см⁻³",
+	}
+	for in, want := range cases {
+		if got := internalLabel(in); got != want {
+			t.Errorf("internalLabel(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func checkPDF(t *testing.T, p string) {
+	t.Helper()
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("read %s: %v", p, err)
+	}
+	if !bytes.HasPrefix(data, []byte("%PDF")) {
+		t.Fatalf("%s is not a PDF", p)
+	}
+	if len(data) < 1024 {
+		t.Fatalf("%s is too small (%d bytes)", p, len(data))
+	}
+}
+
+func TestInternalPlotSmoke(t *testing.T) {
+	dir := t.TempDir()
+	po := &plotOpts{fmt: plotFmtPdf, dpi: 150, backend: plottingInternal}
+	alt := []float64{0, 500, 1000}
+	vals := [][]float64{{1, 2, 3}, {3, math.NaN(), 1}}
+	p := filepath.Join(dir, "profiles.pdf")
+	if !plotProfilesStyled(po, p, "Профиль", "N, cm⁻³", 2, alt, vals,
+		[]string{"calc", "meas"}, []bool{false, true}, true) {
+		t.Fatalf("internal profiles plot failed")
+	}
+	checkPDF(t, p)
+
+	rGrid := []float64{0.05, 0.1, 0.2, 0.4, 0.8}
+	nTrue := []float64{0, 1, 2, 1, 0}
+	nAvg := []float64{0, 1.1, 2.1, 0.9, 0.1}
+	nRaw := []float64{0, 1.2, 2.0, 1.0, 0.2}
+	nBest := [][]float64{nAvg, nAvg}
+	ch := []channel{{kind: chBeta, wlUm: 0.355}, {kind: chBeta, wlUm: 0.532},
+		{kind: chAlpha, wlUm: 0.532}}
+	p = filepath.Join(dir, "results.pdf")
+	if !plotResults(po, p, rGrid, nTrue, nAvg, nRaw, nBest, len(nBest), ch,
+		[]float64{0.9, 0.8, 0.7}, []float64{0.85, 0.82, 0.72}, 1.45, -0.005) {
+		t.Fatalf("internal results plot failed")
+	}
+	checkPDF(t, p)
+
+	p = filepath.Join(dir, "refractive.pdf")
+	if !plotRefractiveProfile(po, p, []float64{0, 1000, 2000},
+		[]float64{1.45, 1.5, 1.42}, []float64{-0.005, 0, -0.01}) {
+		t.Fatalf("internal refractive plot failed")
+	}
+	checkPDF(t, p)
+
+	p = filepath.Join(dir, "profile.pdf")
+	if !plotProfile(po, p, rGrid, []float64{1, 2, 3, 2, 1}, ch,
+		[]float64{0.9, 0.8, 0.7}, []float64{0.85, 0.82, 0.72}, 500) {
+		t.Fatalf("internal single profile plot failed")
+	}
+	checkPDF(t, p)
+}
+
+func TestInternalPlotEmpty(t *testing.T) {
+	dir := t.TempDir()
+	po := &plotOpts{fmt: plotFmtPdf, backend: plottingInternal}
+	if plotProfilesStyled(po, filepath.Join(dir, "a.pdf"), "t", "x", 0,
+		nil, nil, nil, nil, true) {
+		t.Errorf("empty series must not produce a plot")
+	}
+	if plotRefractiveProfile(po, filepath.Join(dir, "b.pdf"), nil, nil, nil) {
+		t.Errorf("empty refractive profile must not produce a plot")
+	}
+}
+
+// utf16be кодирует строку так, как её пишет fpdf для UTF-8 шрифтов.
+func utf16be(s string) []byte {
+	u := utf16.Encode([]rune(s))
+	b := make([]byte, 0, len(u)*2)
+	for _, r := range u {
+		b = append(b, byte(r>>8), byte(r))
+	}
+	return b
+}
+
+// pdfPayloads возвращает распакованные потоки PDF (содержимое сжато zlib).
+func pdfPayloads(data []byte) [][]byte {
+	var out [][]byte
+	for {
+		i := bytes.Index(data, []byte("stream"))
+		if i < 0 {
+			return out
+		}
+		data = data[i+len("stream"):]
+		data = bytes.TrimPrefix(data, []byte("\r"))
+		data = bytes.TrimPrefix(data, []byte("\n"))
+		j := bytes.Index(data, []byte("endstream"))
+		if j < 0 {
+			return out
+		}
+		raw := data[:j]
+		data = data[j+len("endstream"):]
+		if zr, err := zlib.NewReader(bytes.NewReader(raw)); err == nil {
+			if buf, err := io.ReadAll(zr); err == nil {
+				out = append(out, buf)
+				zr.Close()
+				continue
+			}
+			zr.Close()
+		}
+		out = append(out, raw)
+	}
+}
+
+func TestInternalPDFUnicodeText(t *testing.T) {
+	dir := t.TempDir()
+	po := &plotOpts{fmt: plotFmtPdf, backend: plottingInternal}
+	p := filepath.Join(dir, "unicode.pdf")
+	alt := []float64{0, 500}
+	vals := [][]float64{{1, 2}}
+	if !plotProfilesStyled(po, p, "Профиль концентрации",
+		"r, µm; N, cm⁻³", 1, alt, vals, []string{"⟨m⟩, δ_l"}, nil, true) {
+		t.Fatalf("internal plot failed")
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("read pdf: %v", err)
+	}
+	// Шрифт подключается как UTF-8 (Identity-H), текст пишется в UTF-16BE.
+	// Раньше vgpdf с cp1252 давал мойзинг вида "Âµ" и "Ð...".
+	all := bytes.Join(pdfPayloads(data), []byte("\n"))
+	for _, s := range []string{"Профиль", "µm", "⟨m⟩", "cm⁻³"} {
+		if !bytes.Contains(all, utf16be(s)) {
+			t.Errorf("PDF does not contain %q as UTF-16BE text", s)
+		}
+	}
+	if bytes.Contains(all, []byte("µm")) {
+		t.Errorf("PDF contains raw UTF-8 bytes instead of UTF-16BE text")
 	}
 }

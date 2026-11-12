@@ -453,7 +453,8 @@ func run(a *Args) {
 				nTrueVals[i] = nTrueFn(prof.rGrid[i])
 			}
 		}
-		po := plotOpts{a.PlotFormat, a.PlotDpi, a.PlotFontSize}
+		po := plotOpts{fmt: a.PlotFormat, dpi: a.PlotDpi,
+			fontSize: a.PlotFontSize, backend: a.Plotting}
 		outPath := a.Out
 		if outPath == "" {
 			outPath = "result." + plotFormatExt(a.PlotFormat)

@@ -17,10 +17,17 @@ const (
 	plotFmtSvg = 2
 )
 
+// Способы отрисовки: внешний gnuplot или встроенный рендерер (PDF, чистый Go).
+const (
+	plottingGnuplot  = 0
+	plottingInternal = 1
+)
+
 type plotOpts struct {
 	fmt      int
 	dpi      float64
 	fontSize float64
+	backend  int
 }
 
 func plotFormatExt(f int) string {
@@ -32,6 +39,25 @@ func plotFormatExt(f int) string {
 	default:
 		return "png"
 	}
+}
+
+// ---------------- диспетчеры способа отрисовки ----------------
+
+// plotProfile — компактный график одной высоты пакетного режима (2 панели).
+func plotProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
+	ch []channel, g1, gFit []float64, h float64) bool {
+	if po != nil && po.backend == plottingInternal {
+		return internalProfile(po, outPath, rGrid, nAvg, ch, g1, gFit, h)
+	}
+	return gnuplotProfile(po, outPath, rGrid, nAvg, ch, g1, gFit, h)
+}
+
+// plotRefractiveProfile — сводный вертикальный профиль m по высотам.
+func plotRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []float64) bool {
+	if po != nil && po.backend == plottingInternal {
+		return internalRefractiveProfile(po, outPath, alt, mRe, mIm)
+	}
+	return gnuplotRefractiveProfile(po, outPath, alt, mRe, mIm)
 }
 
 // fmtG повторяет C-формат "%.17g".
@@ -128,8 +154,8 @@ func gnuplotOK(outPath, script string) bool {
 	return statErr == nil
 }
 
-// plotProfile — компактный график одной высоты пакетного режима (2 панели).
-func plotProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
+// gnuplotProfile — компактный график одной высоты пакетного режима (2 панели).
+func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
 	ch []channel, g1, gFit []float64, h float64) bool {
 	dir, ok := plotTempDir()
 	if !ok {
@@ -193,8 +219,8 @@ func plotProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
 	return true
 }
 
-// plotRefractiveProfile — сводный вертикальный профиль m по высотам.
-func plotRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []float64) bool {
+// gnuplotRefractiveProfile — сводный вертикальный профиль m по высотам.
+func gnuplotRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []float64) bool {
 	n := len(alt)
 	if n <= 0 {
 		return false
@@ -206,60 +232,8 @@ func plotRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []float64
 	pData := filepath.Join(dir, "refr.dat")
 	pScript := filepath.Join(dir, "plot.gp")
 
-	idx := make([]int, n)
-	for i := range idx {
-		idx[i] = i
-	}
-	sort.SliceStable(idx, func(a, b int) bool { return alt[idx[a]] < alt[idx[b]] })
-
-	reLo, reHi := mRe[idx[0]], mRe[idx[0]]
-	imLo, imHi := mIm[idx[0]], mIm[idx[0]]
-	hLo, hHi := alt[idx[0]], alt[idx[0]]
-	for k := 1; k < n; k++ {
-		i := idx[k]
-		if mRe[i] < reLo {
-			reLo = mRe[i]
-		}
-		if mRe[i] > reHi {
-			reHi = mRe[i]
-		}
-		if mIm[i] < imLo {
-			imLo = mIm[i]
-		}
-		if mIm[i] > imHi {
-			imHi = mIm[i]
-		}
-		if alt[i] < hLo {
-			hLo = alt[i]
-		}
-		if alt[i] > hHi {
-			hHi = alt[i]
-		}
-	}
-	reMag := math.Max(math.Abs(reLo), math.Abs(reHi))
-	imMag := math.Max(math.Abs(imLo), math.Abs(imHi))
-	rePad := 0.06 * (reHi - reLo)
-	if 0.02*reMag > rePad {
-		rePad = 0.02 * reMag
-	}
-	if rePad <= 0 {
-		rePad = 0.01
-	}
-	imPad := 0.06 * (imHi - imLo)
-	if 0.02*imMag > imPad {
-		imPad = 0.02 * imMag
-	}
-	if imPad <= 0 {
-		imPad = 0.001
-	}
-	hMag := math.Max(math.Abs(hLo), math.Abs(hHi))
-	hPad := 0.04 * (hHi - hLo)
-	if 0.02*hMag > hPad {
-		hPad = 0.02 * hMag
-	}
-	if hPad <= 0 {
-		hPad = 10.0
-	}
+	idx := altitudeOrder(alt)
+	reLo, reHi, imLo, imHi, hLo, hHi := refractiveAxes(alt, mRe, mIm)
 
 	var data strings.Builder
 	for k := 0; k < n; k++ {
@@ -282,9 +256,9 @@ func plotRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []float64
 	sb.WriteString("set x2tics\n")
 	sb.WriteString("set ytics nomirror\n")
 	fmt.Fprintf(&sb, "set key top right%s\n", fa)
-	fmt.Fprintf(&sb, "set xrange [%.10g:%.10g]\n", reLo-rePad, reHi+rePad)
-	fmt.Fprintf(&sb, "set x2range [%.10g:%.10g]\n", imLo-imPad, imHi+imPad)
-	fmt.Fprintf(&sb, "set yrange [%.10g:%.10g]\n", hLo-hPad, hHi+hPad)
+	fmt.Fprintf(&sb, "set xrange [%.10g:%.10g]\n", reLo, reHi)
+	fmt.Fprintf(&sb, "set x2range [%.10g:%.10g]\n", imLo, imHi)
+	fmt.Fprintf(&sb, "set yrange [%.10g:%.10g]\n", hLo, hHi)
 	sb.WriteString("set title 'Refractive index vs altitude'\n")
 	fmt.Fprintf(&sb, "plot %q using 2:1 with linespoints axes x1y1 "+
 		"lw 1.8 pt 7 ps 1.1 lc rgb '#1f77b4' title 'Re(m)', \\\n"+
@@ -323,41 +297,26 @@ func plotProfiles(po *plotOpts, outPath, title, xlabel string, nSeries int,
 		names, nil, logAuto)
 }
 
-// plotProfilesStyled — то же, что plotProfiles, но с дополнительными
-// gnuplot-атрибутами по сериям (styles[s] добавляется к описанию линии,
-// например "dt 2"; пустая строка или nil — стиль по умолчанию).
+// plotProfilesStyled — то же, что plotProfiles, но с пометкой штриховых
+// серий: dashed[s] рисует серию штриховой линией (измеренные величины).
 func plotProfilesStyled(po *plotOpts, outPath, title, xlabel string,
 	nSeries int, alt []float64, vals [][]float64, names []string,
-	styles []string, logAuto bool) bool {
+	dashed []bool, logAuto bool) bool {
+	if po != nil && po.backend == plottingInternal {
+		return internalProfiles(po, outPath, title, xlabel, nSeries, alt, vals,
+			names, dashed, logAuto)
+	}
+	return gnuplotProfilesStyled(po, outPath, title, xlabel, nSeries, alt, vals,
+		names, dashed, logAuto)
+}
+
+// profileAxes вычисляет дополненные отступом диапазоны по значениям (x) и по
+// высоте (y) и автоматическое решение о логарифмической шкале x.
+func profileAxes(alt []float64, vals [][]float64, nSeries int,
+	logAuto bool) (lo, hi, hLo, hHi float64, useLog bool) {
 	n := len(alt)
-	if n <= 0 || nSeries <= 0 {
-		return false
-	}
-	dir, ok := plotTempDir()
-	if !ok {
-		return false
-	}
-	pData := filepath.Join(dir, "prof.dat")
-	pScript := filepath.Join(dir, "plot.gp")
-
-	var data strings.Builder
-	for i := 0; i < n; i++ {
-		data.WriteString(fmtG(alt[i]))
-		for s := 0; s < nSeries; s++ {
-			v := vals[s][i]
-			data.WriteByte(' ')
-			if isFinite(v) {
-				data.WriteString(fmtG(v))
-			} else {
-				data.WriteString("NaN")
-			}
-		}
-		data.WriteByte('\n')
-	}
-	writeDataFile(pData, data.String())
-
-	lo, hi := math.Inf(1), math.Inf(-1)
-	hLo, hHi := math.Inf(1), math.Inf(-1)
+	lo, hi = math.Inf(1), math.Inf(-1)
+	hLo, hHi = math.Inf(1), math.Inf(-1)
 	any := false
 	for s := 0; s < nSeries; s++ {
 		for i := 0; i < n; i++ {
@@ -388,7 +347,7 @@ func plotProfilesStyled(po *plotOpts, outPath, title, xlabel string,
 	if !any {
 		lo, hi = 0, 1
 	}
-	useLog := logAuto && lo > 0 && hi > 0 && hi/lo > 30.0
+	useLog = logAuto && lo > 0 && hi > 0 && hi/lo > 30.0
 	mag := math.Max(math.Abs(lo), math.Abs(hi))
 	if useLog {
 		lo /= 1.3
@@ -422,6 +381,95 @@ func plotProfilesStyled(po *plotOpts, outPath, title, xlabel string,
 	}
 	hLo -= hPad
 	hHi += hPad
+	return lo, hi, hLo, hHi, useLog
+}
+
+// altitudeOrder возвращает индексы точек в порядке возрастания высоты.
+func altitudeOrder(alt []float64) []int {
+	idx := make([]int, len(alt))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.SliceStable(idx, func(a, b int) bool { return alt[idx[a]] < alt[idx[b]] })
+	return idx
+}
+
+// refractiveAxes вычисляет дополненные отступом диапазоны Re(m), Im(m) и
+// высоты для сводного профиля.
+func refractiveAxes(alt, mRe, mIm []float64) (reLo, reHi, imLo, imHi, hLo, hHi float64) {
+	n := len(alt)
+	reLo, reHi = mRe[0], mRe[0]
+	imLo, imHi = mIm[0], mIm[0]
+	hLo, hHi = alt[0], alt[0]
+	for i := 1; i < n; i++ {
+		reLo = math.Min(reLo, mRe[i])
+		reHi = math.Max(reHi, mRe[i])
+		imLo = math.Min(imLo, mIm[i])
+		imHi = math.Max(imHi, mIm[i])
+		hLo = math.Min(hLo, alt[i])
+		hHi = math.Max(hHi, alt[i])
+	}
+	reMag := math.Max(math.Abs(reLo), math.Abs(reHi))
+	imMag := math.Max(math.Abs(imLo), math.Abs(imHi))
+	rePad := 0.06 * (reHi - reLo)
+	if 0.02*reMag > rePad {
+		rePad = 0.02 * reMag
+	}
+	if rePad <= 0 {
+		rePad = 0.01
+	}
+	imPad := 0.06 * (imHi - imLo)
+	if 0.02*imMag > imPad {
+		imPad = 0.02 * imMag
+	}
+	if imPad <= 0 {
+		imPad = 0.001
+	}
+	hMag := math.Max(math.Abs(hLo), math.Abs(hHi))
+	hPad := 0.04 * (hHi - hLo)
+	if 0.02*hMag > hPad {
+		hPad = 0.02 * hMag
+	}
+	if hPad <= 0 {
+		hPad = 10.0
+	}
+	return reLo - rePad, reHi + rePad, imLo - imPad, imHi + imPad,
+		hLo - hPad, hHi + hPad
+}
+
+// gnuplotProfilesStyled — реализация plotProfilesStyled через gnuplot;
+// dashed[s] добавляет к описанию линии атрибут "dt 2".
+func gnuplotProfilesStyled(po *plotOpts, outPath, title, xlabel string,
+	nSeries int, alt []float64, vals [][]float64, names []string,
+	dashed []bool, logAuto bool) bool {
+	n := len(alt)
+	if n <= 0 || nSeries <= 0 {
+		return false
+	}
+	dir, ok := plotTempDir()
+	if !ok {
+		return false
+	}
+	pData := filepath.Join(dir, "prof.dat")
+	pScript := filepath.Join(dir, "plot.gp")
+
+	var data strings.Builder
+	for i := 0; i < n; i++ {
+		data.WriteString(fmtG(alt[i]))
+		for s := 0; s < nSeries; s++ {
+			v := vals[s][i]
+			data.WriteByte(' ')
+			if isFinite(v) {
+				data.WriteString(fmtG(v))
+			} else {
+				data.WriteString("NaN")
+			}
+		}
+		data.WriteByte('\n')
+	}
+	writeDataFile(pData, data.String())
+
+	lo, hi, hLo, hHi, useLog := profileAxes(alt, vals, nSeries, logAuto)
 
 	colors := [6]string{"'#1f77b4'", "'#d62728'", "'#2ca02c'",
 		"'#9467bd'", "'#ff7f0e'", "'#8c564b'"}
@@ -451,8 +499,8 @@ func plotProfilesStyled(po *plotOpts, outPath, title, xlabel string,
 			sb.WriteString(", \\\n     ")
 		}
 		fmt.Fprintf(&sb, "%q using %d:1 with linespoints", gpPath(pData), s+2)
-		if s < len(styles) && styles[s] != "" {
-			sb.WriteString(" " + styles[s])
+		if s < len(dashed) && dashed[s] {
+			sb.WriteString(" dt 2")
 		}
 		fmt.Fprintf(&sb, " lw 1.8 pt %d ps 1.1 lc rgb %s title '%s'",
 			points[s%6], colors[s%6], names[s])
@@ -471,6 +519,22 @@ func plotProfilesStyled(po *plotOpts, outPath, title, xlabel string,
 
 // plotResults — основной график одиночного режима (2 панели).
 func plotResults(po *plotOpts, outPath string, rGrid []float64,
+	nTrue, nAvg, nAvgRaw []float64, nBest [][]float64, nBestCount int,
+	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64) bool {
+	if po != nil && po.backend == plottingInternal {
+		ok := internalResults(po, outPath, rGrid, nTrue, nAvg, nAvgRaw, nBest,
+			nBestCount, ch, g1, gFit, mAvgRe, mAvgIm)
+		if ok {
+			fmt.Printf("plot saved: %s\n", outPath)
+		}
+		return ok
+	}
+	return gnuplotResults(po, outPath, rGrid, nTrue, nAvg, nAvgRaw, nBest,
+		nBestCount, ch, g1, gFit, mAvgRe, mAvgIm)
+}
+
+// gnuplotResults — основной график одиночного режима (2 панели), gnuplot.
+func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 	nTrue, nAvg, nAvgRaw []float64, nBest [][]float64, nBestCount int,
 	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64) bool {
 	dir, ok := plotTempDir()

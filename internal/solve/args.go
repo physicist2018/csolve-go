@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -57,6 +58,7 @@ type Args struct {
 	Out          string
 	JSON         string
 	NoPlot       bool
+	Plotting     int
 	PlotFormat   int
 	PlotDpi      float64
 	PlotFontSize float64
@@ -177,7 +179,11 @@ Options:
 
   --out <FILE>                   plot output file [result.<fmt>]
   --json <JSON>                  save results to JSON
-  --plot-format {png|pdf|svg}    plot format [png]
+  --plotting {internal|gnuplot}
+                                 plotting backend [internal]; internal
+                                 renders PDF only, without gnuplot
+  --plot-format {png|pdf|svg}    plot format (gnuplot backend) [png];
+                                 internal backend requires pdf
   --plot-dpi <N>                 resolution for png/svg, dpi, > 0 [150]
   --plot-font-size <pt>          axis/series label size, pt (0 or 4..72) [0]
   --no-plot                      do not build plots
@@ -225,6 +231,7 @@ func ParseArgs(argv []string) (*Args, error) {
 		QuadOrder:      24,
 		LogSpan:        0.1,
 		Seed:           1,
+		Plotting:       plottingInternal,
 		PlotFormat:     plotFmtPng,
 		PlotDpi:        150.0,
 		PlotFontSize:   0.0,
@@ -295,6 +302,9 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.StringVar(&a.JSON, "json", "", "")
 	plotFormat := &enumFlag{allowed: []string{"png", "pdf", "svg"}, value: "png"}
 	fs.Var(plotFormat, "plot-format", "")
+	plotting := &enumFlag{allowed: []string{"internal", "gnuplot"},
+		value: "internal"}
+	fs.Var(plotting, "plotting", "")
 	fs.Float64Var(&a.PlotDpi, "plot-dpi", a.PlotDpi, "")
 	fs.Float64Var(&a.PlotFontSize, "plot-font-size", a.PlotFontSize, "")
 	fs.BoolVar(&a.NoPlot, "no-plot", false, "")
@@ -347,6 +357,26 @@ func ParseArgs(argv []string) (*Args, error) {
 		"rank": depolModeRank}[depolMode.value]
 	a.PlotFormat = map[string]int{"png": plotFmtPng, "pdf": plotFmtPdf,
 		"svg": plotFmtSvg}[plotFormat.value]
+	a.Plotting = map[string]int{"gnuplot": plottingGnuplot,
+		"internal": plottingInternal}[plotting.value]
+	if a.Plotting == plottingInternal {
+		if seen["plot-format"] && a.PlotFormat != plotFmtPdf && !a.NoPlot {
+			return nil, fmt.Errorf("option --plot-format=%s is not "+
+				"supported with --plotting=internal (only pdf)", plotFormat.value)
+		}
+		a.PlotFormat = plotFmtPdf
+		if seen["plot-dpi"] && !a.NoPlot {
+			fmt.Fprintf(os.Stderr, "[warning] --plot-dpi has no effect with "+
+				"--plotting=internal (vector PDF)\n")
+		}
+		if seen["out"] && !a.NoPlot {
+			if ext := strings.ToLower(filepath.Ext(a.Out)); ext != "" &&
+				ext != ".pdf" {
+				return nil, fmt.Errorf("option --out must have a .pdf "+
+					"extension with --plotting=internal, got %q", a.Out)
+			}
+		}
+	}
 
 	if a.NR0 < 1 {
 		return nil, fmt.Errorf("option --nr0 must be >= 1")

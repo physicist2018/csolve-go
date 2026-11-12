@@ -736,7 +736,8 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 	}
 
 	if !a.NoPlot {
-		po := plotOpts{a.PlotFormat, a.PlotDpi, a.PlotFontSize}
+		po := plotOpts{fmt: a.PlotFormat, dpi: a.PlotDpi,
+			fontSize: a.PlotFontSize, backend: a.Plotting}
 		pp := filepath.Join(outDir,
 			fmt.Sprintf("plot_%s.%s", cG(h), plotFormatExt(a.PlotFormat)))
 		plotProfile(&po, pp, prof.rGrid, prof.nAvg, solveCh, g1, prof.gFit, h)
@@ -1115,7 +1116,8 @@ func runBatch(a *Args) {
 	}
 
 	if !a.NoPlot {
-		po := plotOpts{a.PlotFormat, a.PlotDpi, a.PlotFontSize}
+		po := plotOpts{fmt: a.PlotFormat, dpi: a.PlotDpi,
+			fontSize: a.PlotFontSize, backend: a.Plotting}
 		ext := plotFormatExt(a.PlotFormat)
 
 		pp := filepath.Join(outDir, "refractive."+ext)
@@ -1174,19 +1176,19 @@ func runBatch(a *Args) {
 			if anyFiniteSeries(series) {
 				pp = filepath.Join(outDir, "delpol."+ext)
 				dnames := make([]string, 0, len(series))
-				dstyles := make([]string, 0, len(series))
+				dashed := make([]bool, 0, len(series))
 				for k := range met.dpol {
 					dnames = append(dnames, fmt.Sprintf("δ_l(%g nm)",
 						met.dpolWl[k]*1e3))
-					dstyles = append(dstyles, "")
+					dashed = append(dashed, false)
 				}
 				for k := range met.dpolMeas {
 					dnames = append(dnames, fmt.Sprintf("δ_l^{meas}(%g nm)",
 						met.dpolMeasWl[k]*1e3))
-					dstyles = append(dstyles, "dt 2")
+					dashed = append(dashed, true)
 				}
 				plotProfilesStyled(&po, pp, "Linear depolarization ratio",
-					"δ_l, %", len(series), b.alt, series, dnames, dstyles, false)
+					"δ_l, %", len(series), b.alt, series, dnames, dashed, false)
 			}
 		}
 	}
