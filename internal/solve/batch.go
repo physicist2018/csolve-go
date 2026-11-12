@@ -378,7 +378,7 @@ func storeTopIds(sols *solutions, g int, prev []int, off int) {
 }
 
 func applyLidarConstraint(per []*solutions, nAlt int, alt []float64, nl int,
-	w float64, maxIter, best int, S [][]float64) {
+	w float64, maxIter, best int, S [][]float64, pen [][]float64) {
 	dbg := os.Getenv("CSOLVE_LIDAR_DEBUG") != ""
 	gEff := make([]int, nAlt)
 	kEff := make([]int, nAlt)
@@ -495,6 +495,11 @@ func applyLidarConstraint(per []*solutions, nAlt int, alt []float64, nl int,
 					dev = 0
 				}
 				score[t] = per[h].sol[t].err + w*dev
+				if pen != nil && h < len(pen) && pen[h] != nil {
+					if id := per[h].sol[t].id; id >= 0 && id < len(pen[h]) {
+						score[t] += pen[h][id]
+					}
+				}
 			}
 			reorderByScore(per[h], score)
 			if dbg {
@@ -903,19 +908,32 @@ func runBatch(a *Args) {
 				fmt.Fprintf(&sb, "%.6g nm", ds.wl[depIw[k]]*1e3)
 			}
 			fmt.Printf("depolarization ratio constraint δ_l: enabled "+
-				"(weight %g; measured at %s)\n", a.DepolRatioW, sb.String())
+				"(weight %g, mode %s; measured at %s)\n", a.DepolRatioW,
+				depolModeName(a.DepolRatioMode), sb.String())
 		}
 	}
-	// depolAt — ограничение δ_l для высоты h (nil — не применяется)
-	depolAt := func(h int) *depolCons {
-		if depProj == nil {
-			return nil
-		}
+	depTargets := func(h int) []float64 {
 		targets := make([]float64, len(depCol))
 		for k, c := range depCol {
 			targets[k] = b.dep[h*b.ndep+c]
 		}
-		return &depolCons{proj: depProj, w: a.DepolRatioW, targets: targets}
+		return targets
+	}
+	// depolAt — ограничение δ_l для функционала (nil — не применяется)
+	depolAt := func(h int) *depolCons {
+		if depProj == nil || a.DepolRatioMode != depolModeFunc {
+			return nil
+		}
+		return &depolCons{proj: depProj, w: a.DepolRatioW,
+			targets: depTargets(h)}
+	}
+	// rankDepolAt — штраф δ_l для ранжирования (nil — не применяется)
+	rankDepolAt := func(sols *solutions, h int) []float64 {
+		if depProj == nil || a.DepolRatioMode != depolModeRank {
+			return nil
+		}
+		return rankByDepol(sols, depProj, mre, mim, depTargets(h),
+			a.DepolRatioW)
 	}
 
 	outDir := a.BatchOutDir
@@ -1024,6 +1042,7 @@ func runBatch(a *Args) {
 
 	if retain {
 		per := make([]*solutions, b.nAlt)
+		depPen := make([][]float64, b.nAlt)
 		for h := 0; h < b.nAlt; h++ {
 			g1 := b.data[h*b.nch:]
 			fmt.Printf("scan over (m, r0, r1, degree)...\n")
@@ -1033,6 +1052,7 @@ func runBatch(a *Args) {
 			if per[h].n == 0 {
 				fatal("no valid [r0, r1] window")
 			}
+			depPen[h] = rankDepolAt(per[h], h)
 			fmt.Printf("  altitude %g m: %d variants\n", b.alt[h], per[h].n)
 		}
 
@@ -1058,7 +1078,7 @@ func runBatch(a *Args) {
 			}
 		}
 		applyLidarConstraint(per, b.nAlt, b.alt, nl, a.LidarRatioW,
-			a.LidarRatioIter, a.Best, S)
+			a.LidarRatioIter, a.Best, S, depPen)
 
 		for h := 0; h < b.nAlt; h++ {
 			g1 := b.data[h*b.nch:]
@@ -1086,6 +1106,7 @@ func runBatch(a *Args) {
 			if sols.n == 0 {
 				fatal("no valid [r0, r1] window")
 			}
+			rankDepolAt(sols, h)
 			fmt.Printf("  altitude %g m: %d variants\n", b.alt[h], sols.n)
 			emitProfile(a, outDir, b.alt[h], b, solveCh, g1, sols, kts,
 				mre, mim, design.geom, r1MaxEff, common, nl, writeLidar,

@@ -69,6 +69,7 @@ type Args struct {
 
 	DepolRatioCons bool
 	DepolRatioW    float64
+	DepolRatioMode int
 }
 
 var errHelp = errors.New("help requested")
@@ -189,8 +190,11 @@ Options:
   --lidar-ratio-iter <N>         iterations to refine reference S, >= 1 [3]
 
   --depol-ratio-cons             add a delta_l residual to the retrieval
-                                 functional (measured dep<nm> / JSON)
+                                 functional or to solution ranking
   --depol-ratio-w <X>            weight of the delta_l residual, >= 0 [1]
+  --depol-ratio-mode {func|rank}
+                                 how delta_l is applied: functional residual
+                                 or solution ranking [func]
 `)
 }
 
@@ -227,6 +231,7 @@ func ParseArgs(argv []string) (*Args, error) {
 		LidarRatioW:    0.5,
 		LidarRatioIter: 3,
 		DepolRatioW:    1.0,
+		DepolRatioMode: depolModeFunc,
 	}
 
 	fs := flag.NewFlagSet("csolve", flag.ContinueOnError)
@@ -301,6 +306,8 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.IntVar(&a.LidarRatioIter, "lidar-ratio-iter", a.LidarRatioIter, "")
 	fs.BoolVar(&a.DepolRatioCons, "depol-ratio-cons", false, "")
 	fs.Float64Var(&a.DepolRatioW, "depol-ratio-w", a.DepolRatioW, "")
+	depolMode := &enumFlag{allowed: []string{"func", "rank"}, value: "func"}
+	fs.Var(depolMode, "depol-ratio-mode", "")
 
 	if err := fs.Parse(argv); err != nil {
 		return nil, err
@@ -336,6 +343,8 @@ func ParseArgs(argv []string) (*Args, error) {
 	a.GammaSelect = map[string]int{"fixed": gammaFixed, "cv": gammaCV,
 		"err": gammaErr}[gammaSelect.value]
 	a.Modes = map[string]int{"auto": 0, "fit": 1, "stat": 2}[modesFlag.value]
+	a.DepolRatioMode = map[string]int{"func": depolModeFunc,
+		"rank": depolModeRank}[depolMode.value]
 	a.PlotFormat = map[string]int{"png": plotFmtPng, "pdf": plotFmtPdf,
 		"svg": plotFmtSvg}[plotFormat.value]
 

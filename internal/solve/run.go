@@ -335,7 +335,8 @@ func run(a *Args) {
 						depVal[c])
 				}
 				fmt.Printf("depolarization ratio constraint δ_l: enabled "+
-					"(weight %g; measured %s)\n", a.DepolRatioW, sb.String())
+					"(weight %g, mode %s; measured %s)\n", a.DepolRatioW,
+					depolModeName(a.DepolRatioMode), sb.String())
 			}
 		}
 	}
@@ -391,16 +392,21 @@ func run(a *Args) {
 		a.LogSpan)
 	phase("design", tPhase)
 
-	// ограничение по измеренному δ_l добавляется в функционал
-	var dc *depolCons
+	// ограничение по измеренному δ_l: строка в функционале или ранжирование
+	var depProj *depolProj
+	var depTargets []float64
 	if a.DepolRatioCons && len(depIw) > 0 && a.DepolRatioW > 0 {
 		if proj := depolProjBuild(ds, design, depIw); proj != nil {
-			targets := make([]float64, len(depCol))
+			depProj = proj
+			depTargets = make([]float64, len(depCol))
 			for k, c := range depCol {
-				targets[k] = depVal[c]
+				depTargets[k] = depVal[c]
 			}
-			dc = &depolCons{proj: proj, w: a.DepolRatioW, targets: targets}
 		}
+	}
+	var dc *depolCons
+	if depProj != nil && a.DepolRatioMode == depolModeFunc {
+		dc = &depolCons{proj: depProj, w: a.DepolRatioW, targets: depTargets}
 	}
 
 	tPhase = nowSec()
@@ -409,6 +415,9 @@ func run(a *Args) {
 	phase("scan", tPhase)
 	if sols.n == 0 {
 		fatal("no valid window [r0, r1] — check the bounds and min-ratio")
+	}
+	if depProj != nil && a.DepolRatioMode == depolModeRank {
+		rankByDepol(sols, depProj, mre, mim, depTargets, a.DepolRatioW)
 	}
 
 	tPhase = nowSec()

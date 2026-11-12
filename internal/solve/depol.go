@@ -11,6 +11,21 @@ import (
 // расчёте линейной деполяризации обратного рассеяния.
 var depolWlsUm = []float64{0.355, 0.532}
 
+// способы учёта измеренного δ_l: в функционале (строка системы) или при
+// ранжировании решений.
+const (
+	depolModeFunc = 0
+	depolModeRank = 1
+)
+
+// depolModeName — имя режима учёта δ_l для отчёта.
+func depolModeName(mode int) string {
+	if mode == depolModeRank {
+		return "rank"
+	}
+	return "func"
+}
+
 // depolSet — таблицы ядер S11(r), S22(r) для всех m сетки и обеих длин волн.
 // kt[m][iw] == nil означает, что у таблицы для этого m нет валидных столбцов
 // S11/S22 (например, старые базы `base/average` или `miedir`).
@@ -313,6 +328,75 @@ func (dc *depolCons) rows(im, iwGeom int, C []float64) ([]float64, int) {
 		cnt++
 	}
 	return out, cnt
+}
+
+// depolDeviation — среднее относительное отклонение модельного δ_l от
+// измеренных значений (targets выровнен с p.wl). Пары с нефинитными или
+// неположительными измерениями пропускаются; при отсутствии пар — NaN.
+func depolDeviation(p *depolProj, im, iwGeom int, C, targets []float64) float64 {
+	if p == nil {
+		return math.NaN()
+	}
+	sum, cnt := 0.0, 0
+	n := len(targets)
+	if n > len(p.wl) {
+		n = len(p.wl)
+	}
+	for k := 0; k < n; k++ {
+		t := targets[k]
+		if !isFinite(t) || !(t > 0) {
+			continue
+		}
+		v := p.depolModel(im, iwGeom, k, C)
+		if !isFinite(v) {
+			continue
+		}
+		sum += math.Abs(v-t) / t
+		cnt++
+	}
+	if cnt == 0 {
+		return math.NaN()
+	}
+	return sum / float64(cnt)
+}
+
+// depolPenaltyVector — штраф w·|δ_l − δ_l^meas| / δ_l^meas для каждого
+// решения, индексированный по sol.id (nil, если штраф не нужен).
+func depolPenaltyVector(sols *solutions, p *depolProj, mre, mim,
+	targets []float64, w float64) []float64 {
+	if sols == nil || sols.n == 0 || p == nil || !(w > 0) {
+		return nil
+	}
+	pen := make([]float64, sols.n)
+	for t := 0; t < sols.n; t++ {
+		s := &sols.sol[t]
+		if s.id < 0 || s.id >= len(pen) {
+			continue
+		}
+		im := mIndex(mre, mim, s.mRe, s.mIm)
+		dev := depolDeviation(p, im, s.geomIndex, s.C, targets)
+		if isFinite(dev) {
+			pen[s.id] = w * dev
+		}
+	}
+	return pen
+}
+
+// rankByDepol — ранжирование решений с штрафом за относительное отклонение
+// δ_l от измеренных значений: score = err + w * dev. Возвращает вектор
+// штрафов (по sol.id), чтобы его можно было сложить с другими штрафами.
+func rankByDepol(sols *solutions, p *depolProj, mre, mim, targets []float64,
+	w float64) []float64 {
+	pen := depolPenaltyVector(sols, p, mre, mim, targets, w)
+	if pen == nil {
+		return nil
+	}
+	score := make([]float64, sols.n)
+	for t := 0; t < sols.n; t++ {
+		score[t] = sols.sol[t].err + pen[sols.sol[t].id]
+	}
+	reorderByScore(sols, score)
+	return pen
 }
 
 // depolSetReport — диагностика доступности столбцов S11/S22.

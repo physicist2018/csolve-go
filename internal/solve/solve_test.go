@@ -285,6 +285,43 @@ func TestDepolProjection(t *testing.T) {
 		delta[1], 1e-10)
 }
 
+func TestRankByDepol(t *testing.T) {
+	// a11=[4,1], a22=[1,1]: C=[1,0] ⇒ δ=60 %, C=[0,1] ⇒ δ=0 %.
+	p := &depolProj{wl: []float64{0.532}, iw: []int{1}, nM: 1, nW: 1, nu: 2,
+		a11: [][]float64{{4, 1}}, a22: [][]float64{{1, 1}}}
+	mk := func() *solutions {
+		return &solutions{n: 2, sol: []solution{
+			{mRe: 1.45, mIm: -0.005, geomIndex: 0, err: 0.1, id: 0,
+				C: []float64{0, 1}},
+			{mRe: 1.45, mIm: -0.005, geomIndex: 0, err: 0.1, id: 1,
+				C: []float64{1, 0}},
+		}}
+	}
+	mre := []float64{1.45}
+	mim := []float64{-0.005}
+
+	sols := mk()
+	rankByDepol(sols, p, mre, mim, []float64{50.0}, 1.0)
+	if sols.sol[0].id != 1 {
+		t.Errorf("solution closest to δ=50%% must rank first, got id %d",
+			sols.sol[0].id)
+	}
+
+	// нулевой вес — порядок по err не меняется
+	sols = mk()
+	rankByDepol(sols, p, mre, mim, []float64{50.0}, 0.0)
+	if sols.sol[0].id != 0 || sols.sol[1].id != 1 {
+		t.Errorf("zero weight must keep the order by err")
+	}
+
+	// невалидное измерение — штраф не применяется
+	sols = mk()
+	rankByDepol(sols, p, mre, mim, []float64{math.NaN()}, 1.0)
+	if sols.sol[0].id != 0 {
+		t.Errorf("NaN target must not reorder solutions")
+	}
+}
+
 // TestDepolFunctional: строка ограничения δ_l в функционале приближает
 // модельное δ_l к измеренному; w=0 — ограничение не добавляется.
 func TestDepolFunctional(t *testing.T) {
@@ -561,6 +598,19 @@ func TestArgs(t *testing.T) {
 		checkClose(t, "--depol-ratio-w", a.DepolRatioW, 2.5, 0)
 		if _, err := ParseArgs([]string{"--tables", "dir", "--depol-ratio-w=-1"}); err == nil {
 			t.Errorf("negative --depol-ratio-w must be rejected")
+		}
+		if a.DepolRatioMode != depolModeFunc {
+			t.Errorf("default --depol-ratio-mode must be func")
+		}
+		a, err = ParseArgs([]string{"--tables", "dir", "--depol-ratio-mode", "rank"})
+		if err != nil {
+			t.Fatalf("--depol-ratio-mode rank: %v", err)
+		}
+		if a.DepolRatioMode != depolModeRank {
+			t.Errorf("--depol-ratio-mode rank not parsed")
+		}
+		if _, err := ParseArgs([]string{"--tables", "dir", "--depol-ratio-mode", "bad"}); err == nil {
+			t.Errorf("invalid --depol-ratio-mode must be rejected")
 		}
 	}
 	{
