@@ -54,6 +54,7 @@ type outSolution struct {
 	R1     jfloat   `json:"r1"`
 	Gamma  jfloat   `json:"gamma"`
 	Err    jfloat   `json:"err"`
+	Frac   jfloat   `json:"f_sphere"`
 	C      []jfloat `json:"C"`
 }
 
@@ -78,6 +79,18 @@ type outDepol struct {
 	DeltaL []jfloat `json:"delta_l_percent"`
 }
 
+// outMixture — параметры смеси «сферы + несферическая компонента».
+// enabled = false означает обычный (однокомпонентный) поиск.
+type outMixture struct {
+	Enabled   bool   `json:"enabled"`
+	NonSphere string `json:"non_sphere_component"`
+	Sphere    string `json:"sphere_component"`
+	FMin      jfloat `json:"f_min"`
+	FMax      jfloat `json:"f_max"`
+	FN        int    `json:"f_n"`
+	FAvg      jfloat `json:"f_avg"`
+}
+
 type outFile struct {
 	MAvg           outMAvg       `json:"m_avg"`
 	Moments        outMoments    `json:"moments"`
@@ -89,6 +102,7 @@ type outFile struct {
 	NAvgRaw        []jfloat      `json:"n_avg_raw"`
 	Modes          outModes      `json:"modes"`
 	Depolarization outDepol      `json:"depolarization"`
+	Mixture        outMixture    `json:"mixture"`
 }
 
 func toJ(vals []float64) []jfloat {
@@ -122,9 +136,9 @@ func outModeFrom(m csMode) outMode {
 }
 
 // writeJSON — запись результатов (структура как в Python-версии).
-func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw []float64,
+func writeJSON(a *Args, path string, sols *solutions, rGrid, nAvg, nAvgRaw []float64,
 	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64,
-	mom moments, md modes, deltaWlUm, deltaL []float64) {
+	mom moments, md modes, deltaWlUm, deltaL []float64, fracAvg float64) {
 
 	out := outFile{
 		MAvg: outMAvg{Real: jfloat(mAvgRe), Imag: jfloat(mAvgIm)},
@@ -146,6 +160,15 @@ func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw []float64,
 			Coarse:  outModeFrom(md.Coarse),
 			Overall: outModeFrom(md.Overall),
 		},
+	}
+	out.Mixture = outMixture{Sphere: "sphere"}
+	if a.mixEnabled() {
+		out.Mixture.Enabled = true
+		out.Mixture.NonSphere = mixtureTail(a.Mix)
+		out.Mixture.FMin = jfloat(a.FMin)
+		out.Mixture.FMax = jfloat(a.FMax)
+		out.Mixture.FN = a.FN
+		out.Mixture.FAvg = jfloat(fracAvg)
 	}
 	out.Channels = make([]outChannel, len(ch))
 	for j := range ch {
@@ -172,6 +195,7 @@ func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw []float64,
 			R1:     jfloat(s.r1),
 			Gamma:  jfloat(s.gamma),
 			Err:    jfloat(s.err),
+			Frac:   jfloat(s.frac),
 			C:      toJ(s.C),
 		}
 	}

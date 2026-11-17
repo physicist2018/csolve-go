@@ -8,6 +8,8 @@ type profile struct {
 	nBest      [][]float64
 	nBestCount int
 	mRe, mIm   float64
+	fracAvg    float64 // средняя доля сфер по лучшим решениям (0 вне смеси)
+	mix        bool    // включена ли смесь
 	gFit       []float64
 	moments    moments
 	modes      modes
@@ -26,11 +28,11 @@ func mIndex(mre, mim []float64, re, im float64) int {
 }
 
 // profileFinalize — итоговый профиль одной высоты (общий код одиночного и
-// пакетного режимов). ds — ядра S11/S22 для δ_l (nil — не считаются).
-func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
-	sols *solutions, geom []*geom, rMin, rMax float64, ds *depolSet) *profile {
+// пакетного режимов). kn — ядра компонентов смеси и S11/S22 (см. kernels).
+func profileFinalize(a *Args, ch []channel, kn *kernels, sols *solutions,
+	geom []*geom, rMin, rMax float64) *profile {
 	_ = ch
-	p := &profile{}
+	p := &profile{mix: kn != nil && kn.mix}
 	nr := a.NrOut
 	p.nr = nr
 	p.rGrid = geomspace(rMin, rMax, nr)
@@ -55,12 +57,19 @@ func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
 	p.nBestCount = G
 
 	bestIdx := make([]int, G)
+	fracs := make([]float64, G)
 	for t := 0; t < G; t++ {
-		bestIdx[t] = mIndex(mre, mim, sols.sol[t].mRe, sols.sol[t].mIm)
+		s := &sols.sol[t]
+		bestIdx[t] = mIndex(kn.mre, kn.mim, s.mRe, s.mIm)
 		if bestIdx[t] < 0 {
 			fatal("internal error: m = %g%+gj is missing from the kernel grid",
-				sols.sol[t].mRe, sols.sol[t].mIm)
+				s.mRe, s.mIm)
 		}
+		fracs[t] = s.frac
+		p.fracAvg += s.frac
+	}
+	if G > 0 {
+		p.fracAvg /= float64(G)
 	}
 
 	rq, wq := quadratureGrid([]float64{rMin, rMax}, a.QuadOrder, a.LogSpan)
@@ -82,7 +91,12 @@ func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
 		for k := range rq {
 			ksum := 0.0
 			for t := 0; t < G; t++ {
-				ksum += ktableKernel(kts[bestIdx[t]], j, rq[k])
+				kv := ktableKernel(kn.kts[bestIdx[t]], j, rq[k])
+				if kn.mix && kn.kts2 != nil {
+					kv = (1.0-fracs[t])*kv +
+						fracs[t]*ktableKernel(kn.kts2[bestIdx[t]], j, rq[k])
+				}
+				ksum += kv
 			}
 			kavg := ksum / float64(G)
 			r := rq[k]
@@ -93,9 +107,16 @@ func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
 	}
 
 	// δ_l — свёртка S11/S22 с тем же средним распределением
-	if depolSetAvailable(ds) {
-		p.deltaLwl = append([]float64(nil), ds.wl...)
-		_, _, p.deltaL = depolFromProfile(ds, bestIdx, rq, wq, nqVals)
+	if depolSetAvailable(kn.ds) || depolSetAvailable(kn.ds2) {
+		wl := depolWlsUm
+		if depolSetAvailable(kn.ds) {
+			wl = kn.ds.wl
+		} else {
+			wl = kn.ds2.wl
+		}
+		p.deltaLwl = append([]float64(nil), wl...)
+		_, _, p.deltaL = depolFromProfileMix(kn.ds, kn.ds2, bestIdx, fracs,
+			rq, wq, nqVals)
 	}
 
 	p.moments = sizeMoments(p.nAvg, p.rGrid)

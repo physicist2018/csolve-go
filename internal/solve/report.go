@@ -4,30 +4,50 @@ import "fmt"
 
 // reportSummary — сводка по ансамблю решений и согласию по каналам.
 func reportSummary(a *Args, sols *solutions, g1 []float64, ch []channel,
-	nAvg, gFit, rGrid []float64, mAvgRe, mAvgIm float64) {
+	nAvg, gFit, rGrid []float64, mAvgRe, mAvgIm, fracAvg float64) {
 	nch := len(ch)
 	G := a.Best
 	if G > sols.n {
 		G = sols.n
 	}
-	fmt.Printf("\n=== Solution ensemble (scan over m, r0, r1) ===\n")
+	mix := a.mixEnabled()
+	title := "=== Solution ensemble (scan over m, r0, r1) ==="
+	if mix {
+		title = "=== Solution ensemble (scan over m, r0, r1, f) ==="
+	}
+	fmt.Printf("\n%s\n", title)
 	fmt.Printf("variants scanned: %d; averaging: G = %d\n", sols.n, G)
-	fmt.Printf("%4s %13s %7s %9s %9s %10s %9s\n",
-		"rank", "m", "degree", "r0, µm", "r1, µm", "gamma", "Err")
+	if mix {
+		fmt.Printf("%4s %13s %7s %9s %9s %10s %9s %7s\n",
+			"rank", "m", "degree", "r0, µm", "r1, µm", "gamma", "Err", "f")
+	} else {
+		fmt.Printf("%4s %13s %7s %9s %9s %10s %9s\n",
+			"rank", "m", "degree", "r0, µm", "r1, µm", "gamma", "Err")
+	}
 	for t := 0; t < sols.n; t++ {
 		s := &sols.sol[t]
 		mark := ""
 		if t == 0 {
 			mark = " <--"
 		}
-		fmt.Printf("%4d %6.3f%+7.3fj %7d %9.4g %9.4g %10.3g %9.5f%s\n",
-			t+1, s.mRe, s.mIm, s.degree, s.r0, s.r1, s.gamma, s.err, mark)
+		if mix {
+			fmt.Printf("%4d %6.3f%+7.3fj %7d %9.4g %9.4g %10.3g %9.5f %7.3f%s\n",
+				t+1, s.mRe, s.mIm, s.degree, s.r0, s.r1, s.gamma, s.err,
+				s.frac, mark)
+		} else {
+			fmt.Printf("%4d %6.3f%+7.3fj %7d %9.4g %9.4g %10.3g %9.5f%s\n",
+				t+1, s.mRe, s.mIm, s.degree, s.r0, s.r1, s.gamma, s.err, mark)
+		}
 		if t+1 >= G {
 			break
 		}
 	}
 	fmt.Printf("\nmean refractive index (over %d best): m = %.3f%+.3fj\n",
 		G, mAvgRe, mAvgIm)
+	if mix {
+		fmt.Printf("mean sphere fraction (over %d best): f = %.3f\n", G,
+			fracAvg)
+	}
 
 	fmt.Printf("\n=== Mean distribution function (dV/dln r) ===\n")
 	fmt.Printf("key points (full grid — in --json, if requested):\n")

@@ -235,8 +235,23 @@ func run(a *Args) {
 	}
 
 	// ---- сетка m из таблиц ----
-	src := a.tableSource()
-	mre, mim := tableMGrid(src)
+	src, srcSph := a.tableSources()
+	re1, im1 := tableMGrid(src)
+	g1full := mGrid{src: src, re: re1, im: im1}
+	grids := []mGrid{g1full}
+	mre, mim := re1, im1
+	var mre2, mim2 []float64
+	reportMixSetup(a)
+	if srcSph != nil {
+		re2, im2 := tableMGrid(srcSph)
+		var snapped int
+		mre, mim, mre2, mim2, snapped = alignMGrid(re1, im1, re2, im2,
+			a.MixMSnap)
+		grids[0].re, grids[0].im = mre, mim
+		grids = append(grids, mGrid{src: srcSph, re: mre2, im: mim2})
+		reportMixGrid(a, g1full, mGrid{src: srcSph, re: re2, im: im2},
+			len(mre), snapped)
+	}
 	nm := len(mre)
 	if nm == 0 {
 		fatal("refractive index grid is empty")
@@ -257,14 +272,7 @@ func run(a *Args) {
 		cbackScale = 1.0 / (4.0 * csPi)
 	}
 	fmt.Printf("building kernel tables (%d m values)...\n", nm)
-	capmin := math.Inf(1)
-	for i := 0; i < nm; i++ {
-		chs := loadTableChannels(src, mre[i], mim[i], baseCh,
-			a.TableExtrapolate, a.TableRefWl, cbackScale)
-		if chs.cap < capmin {
-			capmin = chs.cap
-		}
-	}
+	capmin := coverageCap(a, grids, baseCh, cbackScale)
 	r1MaxEff := math.Min(a.R1Max, capmin)
 	if r1MaxEff < a.R1Min {
 		fatal("table coverage in x limits r1_max = %g µm < "+
@@ -293,31 +301,38 @@ func run(a *Args) {
 	fmt.Printf("  effective r1_max = %g µm (requested: %g) — windows and "+
 		"r grid limited\n", r1MaxEff, a.R1Max)
 
-	kts := make([]*ktable, nm)
 	tPhase := nowSec()
-	for i := 0; i < nm; i++ {
-		chs := loadTableChannels(src, mre[i], mim[i], baseCh,
-			a.TableExtrapolate, a.TableRefWl, cbackScale)
-		kts[i] = ktableBuild(chs, a.R0Min, r1MaxEff, a.DxMax)
+	kts := buildComponentKernels(a, grids[0], baseCh, r1MaxEff, cbackScale)
+	var kts2 []*ktable
+	if len(grids) > 1 {
+		kts2 = buildComponentKernels(a, grids[1], baseCh, r1MaxEff, cbackScale)
 	}
 	fmt.Printf("  table: %d points in r per m\n", kts[0].n)
 	phase("kernels", tPhase)
 
 	// ядра S11/S22 для линейной деполяризации (независимо от каналов)
 	tPhase = nowSec()
-	ds := depolSetBuild(src, mre, mim, a.TableRefWl, a.R0Min, r1MaxEff,
-		a.DxMax, a.TableExtrapolate)
+	ds := buildComponentDepolSet(a, grids[0], r1MaxEff)
 	depolSetReport(ds, src, nm)
+	var ds2 *depolSet
+	if len(grids) > 1 {
+		ds2 = buildComponentDepolSet(a, grids[1], r1MaxEff)
+		depolSetReportLabel(ds2, srcSph, nm, "sphere")
+	}
 	phase("depolarization", tPhase)
 
 	// измеренное δ_l для ограничения --depol-ratio-cons
 	var depIw, depCol []int
 	if a.DepolRatioCons {
-		if !depolSetAvailable(ds) {
+		if !depolSetAvailable(ds) && !depolSetAvailable(ds2) {
 			fmt.Fprintf(os.Stderr, "[warning] --depol-ratio-cons: tables have no "+
 				"valid S11/S22 columns; constraint is not applied\n")
 		} else {
-			depIw, depCol = depolColumnMatch(ds, depWl, "input data")
+			depWlSrc := ds
+			if !depolSetAvailable(depWlSrc) {
+				depWlSrc = ds2
+			}
+			depIw, depCol = depolColumnMatch(depWlSrc, depWl, "input data")
 			if len(depIw) == 0 {
 				fmt.Fprintf(os.Stderr, "[warning] --depol-ratio-cons: no measured "+
 					"depolarization matching S11/S22 wavelengths; constraint is "+
@@ -331,8 +346,8 @@ func run(a *Args) {
 					if k > 0 {
 						sb.WriteString(", ")
 					}
-					fmt.Fprintf(&sb, "%.6g nm = %g %%", ds.wl[depIw[k]]*1e3,
-						depVal[c])
+					fmt.Fprintf(&sb, "%.6g nm = %g %%",
+						depWlSrc.wl[depIw[k]]*1e3, depVal[c])
 				}
 				fmt.Printf("depolarization ratio constraint δ_l: enabled "+
 					"(weight %g, mode %s; measured %s)\n", a.DepolRatioW,
@@ -343,20 +358,45 @@ func run(a *Args) {
 
 	// ---- измерения ----
 	var nTrueFn func(float64) float64
+	fTrue := 0.0
+	if a.mixEnabled() {
+		fTrue = 0.5
+		if a.HasFTrue {
+			fTrue = a.FTrue
+			if fTrue < a.FMin || fTrue > a.FMax {
+				fmt.Fprintf(os.Stderr, "[warning] --f-true=%g is outside the "+
+					"scanned range [%g, %g]\n", fTrue, a.FMin, a.FMax)
+			}
+		}
+		if fTrue < a.FMin {
+			fTrue = a.FMin
+		}
+		if fTrue > a.FMax {
+			fTrue = a.FMax
+		}
+	}
 	if demo {
 		idx := mIndexOf(mre, mim, trueRe, trueIm)
-		var tk *ktable
+		var tk, tk2 *ktable
 		if idx >= 0 {
 			tk = kts[idx]
+			if kts2 != nil {
+				tk2 = kts2[idx]
+			}
 		} else {
 			fmt.Printf("  building table for demo true m: m = %g%+gj\n",
 				trueRe, trueIm)
 			chs := loadTableChannels(src, trueRe, trueIm, baseCh,
 				a.TableExtrapolate, a.TableRefWl, cbackScale)
 			tk = ktableBuild(chs, a.R0Min, r1MaxEff, a.DxMax)
+			if srcSph != nil {
+				chs2 := loadTableChannels(srcSph, trueRe, trueIm, baseCh,
+					a.TableExtrapolate, a.TableRefWl, cbackScale)
+				tk2 = ktableBuild(chs2, a.R0Min, r1MaxEff, a.DxMax)
+			}
 		}
-		g1 = forwardMeasurements(tk, demoTrueDistribution, a.R0Min,
-			r1MaxEff, 24, 0.05)
+		g1 = forwardMeasurementsMix(tk, tk2, fTrue, demoTrueDistribution,
+			a.R0Min, r1MaxEff, 24, 0.05)
 		if a.Noise > 0 {
 			if a.Seed != 0 {
 				rngState = uint64(a.Seed)*6364136223846793005 +
@@ -367,6 +407,10 @@ func run(a *Args) {
 			for j := range g1 {
 				g1[j] *= 1.0 + a.Noise*rngNormal()
 			}
+		}
+		if a.mixEnabled() {
+			fmt.Printf("demo mixture: %s + spheres, f_true = %g\n",
+				mixtureTail(a.Mix), fTrue)
 		}
 		var b strings.Builder
 		b.WriteString("measured coefficients g1: [")
@@ -385,18 +429,28 @@ func run(a *Args) {
 	r0Grid := geomspace(a.R0Min, a.R0Max, a.NR0)
 	r1Grid := geomspace(a.R1Min, r1MaxEff, a.NR1)
 
-	fmt.Printf("scan (m, r0, r1, degree)...\n")
+	scanTitle := "scan (m, r0, r1, degree)..."
+	if a.mixEnabled() {
+		scanTitle = "scan (m, r0, r1, degree, f)..."
+	}
+	fmt.Printf("%s\n", scanTitle)
 	tPhase = nowSec()
 	design := designBuild(baseCh, nch, kts, mre, mim, a.Degrees, r0Grid,
 		r1Grid, a.MinRatio, a.NBasis, !a.NoZeroBoundary, a.QuadOrder,
 		a.LogSpan)
+	if kts2 != nil {
+		d2 := designBuild(baseCh, nch, kts2, mre2, mim2, a.Degrees, r0Grid,
+			r1Grid, a.MinRatio, a.NBasis, !a.NoZeroBoundary, a.QuadOrder,
+			a.LogSpan)
+		design.mixWith(d2, a.mixFractions())
+	}
 	phase("design", tPhase)
 
 	// ограничение по измеренному δ_l: строка в функционале или ранжирование
 	var depProj *depolProj
 	var depTargets []float64
 	if a.DepolRatioCons && len(depIw) > 0 && a.DepolRatioW > 0 {
-		if proj := depolProjBuild(ds, design, depIw); proj != nil {
+		if proj := depolProjBuildMix(ds, ds2, design, depIw); proj != nil {
 			depProj = proj
 			depTargets = make([]float64, len(depCol))
 			for k, c := range depCol {
@@ -421,12 +475,21 @@ func run(a *Args) {
 	}
 
 	tPhase = nowSec()
-	prof := profileFinalize(a, baseCh, kts, mre, mim, sols, design.geom,
-		a.R0Min, r1MaxEff, ds)
+	kn := &kernels{
+		mix:  a.mixEnabled(),
+		mre:  mre,
+		mim:  mim,
+		kts:  kts,
+		kts2: kts2,
+		ds:   ds,
+		ds2:  ds2,
+	}
+	prof := profileFinalize(a, baseCh, kn, sols, design.geom, a.R0Min,
+		r1MaxEff)
 	phase("output", tPhase)
 
 	reportSummary(a, sols, g1, baseCh, prof.nAvg, prof.gFit, prof.rGrid,
-		prof.mRe, prof.mIm)
+		prof.mRe, prof.mIm, prof.fracAvg)
 	reportMoments(prof.moments)
 	reportDepolarization(prof)
 
@@ -439,9 +502,9 @@ func run(a *Args) {
 	reportModes(prof.modes, a.RSplit, modeName)
 
 	if a.JSON != "" {
-		writeJSON(a.JSON, sols, prof.rGrid, prof.nAvg, prof.nAvgRaw, baseCh,
+		writeJSON(a, a.JSON, sols, prof.rGrid, prof.nAvg, prof.nAvgRaw, baseCh,
 			g1, prof.gFit, prof.mRe, prof.mIm, prof.moments, prof.modes,
-			prof.deltaLwl, prof.deltaL)
+			prof.deltaLwl, prof.deltaL, prof.fracAvg)
 		fmt.Printf("results saved: %s\n", a.JSON)
 	}
 

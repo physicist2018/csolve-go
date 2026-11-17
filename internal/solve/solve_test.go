@@ -283,7 +283,7 @@ func TestDepolProjection(t *testing.T) {
 		}
 	}
 	_, _, delta := depolFromProfile(ds, []int{0}, g.nodes, g.weights, nq)
-	got := p.depolModel(0, 0, 0, C)
+	got := p.depolModel(0, 0, 0, C, 0)
 	checkClose(t, "delta_l from projections vs convolution", got,
 		delta[1], 1e-10)
 }
@@ -336,7 +336,7 @@ func TestDepolFunctional(t *testing.T) {
 	const nch = 2
 
 	c0 := solveGamma(A, nch, p.nu, 0, weights, g1n, false)
-	d0 := p.depolModel(0, 0, 0, c0)
+	d0 := p.depolModel(0, 0, 0, c0, 0)
 	checkClose(t, "channel-only delta_l", d0, 50.0, 1e-9)
 
 	// без дополнительных строк результат тот же
@@ -346,38 +346,38 @@ func TestDepolFunctional(t *testing.T) {
 	}
 
 	dc := &depolCons{proj: p, w: 1, targets: []float64{60}}
-	extra, nExtra := dc.rows(0, 0, c0)
+	extra, nExtra := dc.rows(0, 0, 0, c0)
 	if nExtra != 1 || len(extra) != p.nu {
 		t.Fatalf("expected 1 row of length %d, got %d rows / %d values",
 			p.nu, nExtra, len(extra))
 	}
 	c1 := solveGammaRows(A, nch, p.nu, 0, weights, g1n, false, extra, nExtra)
-	d1 := p.depolModel(0, 0, 0, c1)
+	d1 := p.depolModel(0, 0, 0, c1, 0)
 	if !(d1 > d0 && d1 < 60) {
 		t.Errorf("delta_l must move towards the measurement: %g -> %g", d0, d1)
 	}
 
 	// большой вес — ограничение выполняется почти точно
 	dc.w = 1e4
-	extra, nExtra = dc.rows(0, 0, c0)
+	extra, nExtra = dc.rows(0, 0, 0, c0)
 	c2 := solveGammaRows(A, nch, p.nu, 0, weights, g1n, false, extra, nExtra)
-	checkClose(t, "large weight delta_l", p.depolModel(0, 0, 0, c2), 60.0, 1e-3)
+	checkClose(t, "large weight delta_l", p.depolModel(0, 0, 0, c2, 0), 60.0, 1e-3)
 
 	// w = 0 — строки нет
 	zero := &depolCons{proj: p, w: 0, targets: []float64{60}}
-	if _, n := zero.rows(0, 0, c0); n != 0 {
+	if _, n := zero.rows(0, 0, 0, c0); n != 0 {
 		t.Errorf("zero weight must add no rows, got %d", n)
 	}
 	// невалидные цели — строк нет
 	for _, target := range []float64{math.NaN(), 100.0, -100.0} {
 		bad := &depolCons{proj: p, w: 1, targets: []float64{target}}
-		if _, n := bad.rows(0, 0, c0); n != 0 {
+		if _, n := bad.rows(0, 0, 0, c0); n != 0 {
 			t.Errorf("target %g must be skipped, got %d rows", target, n)
 		}
 	}
 	// nil-получатель безопасен (ограничение выключено)
 	var nilDC *depolCons
-	if _, n := nilDC.rows(0, 0, c0); n != 0 {
+	if _, n := nilDC.rows(0, 0, 0, c0); n != 0 {
 		t.Errorf("nil constraint must add no rows")
 	}
 }

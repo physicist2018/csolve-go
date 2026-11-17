@@ -72,6 +72,15 @@ type Args struct {
 	DepolRatioCons bool
 	DepolRatioW    float64
 	DepolRatioMode int
+
+	// Смесь «сферы + несферические частицы»: A(f) = (1-f)A_non + fA_sphere.
+	Mix          string  // none | sphere+spheroid | sphere+agglomerate
+	SphereTables string  // --tables-sphere: внешние таблицы сфер
+	MixMSnap     float64 // допуск сопоставления m компонент, 0 — точное
+	FMin, FMax   float64 // диапазон доли сфер f
+	FN           int     // число интервалов по f
+	FTrue        float64 // истинная доля сфер в демо-режиме
+	HasFTrue     bool
 }
 
 var errHelp = errors.New("help requested")
@@ -133,14 +142,30 @@ Options:
   -h, --help                     show this help and exit
 
   --data <JSON>                  measured coefficients; demo data if omitted
-  --type {sphere|spheroid|agglomerate}
-                                 built-in cross-section tables [agglomerate]
+  --type {sphere|spheroid|agglomerate|sphere+spheroid|sphere+agglomerate}
+                                 built-in cross-section tables [agglomerate];
+                                 sphere+... selects a mixture of table sets
   --tables <DIR>                 external tables: directory with
                                  mre_<real>_mim_<imag>/data.txt (mutually
                                  exclusive with --type)
   --table-extrapolate            allow cross-section extrapolation in x
   --table-ref-lambda-um <X>      reference wavelength of tables, um [2pi]
   --table-cback {dsigma|4pi}     Cback column convention [dsigma]
+
+  --mix {none|sphere+spheroid|sphere+agglomerate}
+                                 mixture of spheres with a non-spherical
+                                 component; the response matrix is blended
+                                 as A(f) = (1-f)A_non + fA_sphere [none]
+  --tables-sphere <DIR>          external tables of the sphere component of
+                                 a mixture [built-in sphere]
+  --mix-m-snap <X>               pair nearest m of the two table sets,
+                                 absolute tolerance in Re and Im,
+                                 0 = exact match [0]
+  --f-min <X>                    min sphere fraction f, 0..1 [0]
+  --f-max <X>                    max sphere fraction f, 0..1 [1]
+  --f-n <N>                      number of f intervals, >= 1 [4]
+  --f-true <X>                   true sphere fraction for demo data, 0..1
+                                 [middle of the f range]
 
   --degree <1|2|3|4>             B-spline degree (single value) [1]
   --n-basis <N>                  basis functions per window [number of channels]
@@ -239,6 +264,10 @@ func ParseArgs(argv []string) (*Args, error) {
 		LidarRatioIter: 3,
 		DepolRatioW:    1.0,
 		DepolRatioMode: depolModeFunc,
+		Mix:            mixNone,
+		FMin:           0.0,
+		FMax:           1.0,
+		FN:             4,
 	}
 
 	fs := flag.NewFlagSet("csolve", flag.ContinueOnError)
@@ -250,8 +279,17 @@ func ParseArgs(argv []string) (*Args, error) {
 
 	fs.StringVar(&a.Data, "data", "", "")
 	fs.StringVar(&a.Tables, "tables", "", "")
-	tableType := &enumFlag{allowed: builtinTypeNames, value: defaultTableType}
+	tableType := &enumFlag{allowed: tableTypeNames, value: defaultTableType}
 	fs.Var(tableType, "type", "")
+	mixFlag := &enumFlag{allowed: mixNames, value: mixNone}
+	fs.Var(mixFlag, "mix", "")
+	fs.StringVar(&a.SphereTables, "tables-sphere", "", "")
+	fs.Float64Var(&a.MixMSnap, "mix-m-snap", a.MixMSnap, "")
+	fs.Float64Var(&a.FMin, "f-min", a.FMin, "")
+	fs.Float64Var(&a.FMax, "f-max", a.FMax, "")
+	fs.IntVar(&a.FN, "f-n", a.FN, "")
+	fTrue := math.NaN()
+	fs.Float64Var(&fTrue, "f-true", math.NaN(), "")
 	fs.BoolVar(&a.TableExtrapolate, "table-extrapolate", false, "")
 	fs.Float64Var(&a.TableRefWl, "table-ref-lambda-um", a.TableRefWl, "")
 	tableCback := &enumFlag{allowed: []string{"dsigma", "4pi"}, value: "dsigma"}
@@ -333,8 +371,63 @@ func ParseArgs(argv []string) (*Args, error) {
 	seen := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
 
-	if seen["tables"] && seen["type"] {
+	mix := mixFlag.value
+	typeMix := mixtureFromTypeName(tableType.value)
+	if typeMix != "" {
+		if seen["tables"] {
+			return nil, fmt.Errorf("option --type=%s selects a mixture of "+
+				"built-in table sets and is mutually exclusive with --tables; use "+
+				"--mix=%s --tables <DIR> --tables-sphere <DIR> for external tables",
+				typeMix, typeMix)
+		}
+		if seen["mix"] && mix != typeMix {
+			return nil, fmt.Errorf("options --mix=%s and --type=%s disagree",
+				mix, typeMix)
+		}
+		mix = typeMix
+	} else if seen["tables"] && seen["type"] {
 		return nil, fmt.Errorf("options --tables and --type are mutually exclusive")
+	}
+	a.Mix = mix
+	if tail := mixtureTail(mix); tail != "" {
+		if typeMix == "" && seen["type"] && tableType.value != tail {
+			return nil, fmt.Errorf("option --type=%s is not the non-spherical "+
+				"component of --mix=%s (expected --type=%s, or omit --type)",
+				tableType.value, mix, tail)
+		}
+		a.Type = tail
+	} else {
+		a.Type = tableType.value
+	}
+	if a.Mix == mixNone {
+		if seen["tables-sphere"] || seen["mix-m-snap"] || seen["f-min"] ||
+			seen["f-max"] || seen["f-n"] || seen["f-true"] {
+			return nil, fmt.Errorf("options --tables-sphere, --mix-m-snap and " +
+				"--f-min/--f-max/--f-n/--f-true require --mix (or --type sphere+...)")
+		}
+	} else {
+		if !(a.FMin >= 0 && a.FMin <= 1) {
+			return nil, fmt.Errorf("option --f-min must be between 0 and 1")
+		}
+		if !(a.FMax >= 0 && a.FMax <= 1) {
+			return nil, fmt.Errorf("option --f-max must be between 0 and 1")
+		}
+		if a.FMax < a.FMin {
+			return nil, fmt.Errorf("option --f-max must be >= --f-min")
+		}
+		if a.FN < 1 || a.FN > 1000 {
+			return nil, fmt.Errorf("option --f-n must be between 1 and 1000")
+		}
+		if !(a.MixMSnap >= 0) {
+			return nil, fmt.Errorf("option --mix-m-snap must be >= 0")
+		}
+	}
+	if seen["f-true"] {
+		if !(fTrue >= 0 && fTrue <= 1) {
+			return nil, fmt.Errorf("option --f-true must be between 0 and 1")
+		}
+		a.HasFTrue = true
+		a.FTrue = fTrue
 	}
 
 	if degree.set {
@@ -349,7 +442,6 @@ func ParseArgs(argv []string) (*Args, error) {
 		a.MImag = mImag
 	}
 	a.TableCback4pi = tableCback.value == "4pi"
-	a.Type = tableType.value
 	a.GammaSelect = map[string]int{"fixed": gammaFixed, "cv": gammaCV,
 		"err": gammaErr}[gammaSelect.value]
 	a.Modes = map[string]int{"auto": 0, "fit": 1, "stat": 2}[modesFlag.value]

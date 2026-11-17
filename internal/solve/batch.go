@@ -588,6 +588,9 @@ func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
 	path := filepath.Join(outDir, fmt.Sprintf("dist_%s.txt", cG(h)))
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# altitude H = %g m\n", h)
+	if p.mix {
+		fmt.Fprintf(&sb, "# mixture: sphere fraction f = %g\n", p.fracAvg)
+	}
 	sb.WriteString("# input data (β [1/(m·sr)], α [1/m]): ")
 	for j := 0; j < b.nch; j++ {
 		if j > 0 {
@@ -650,6 +653,7 @@ type metrics struct {
 	Nc             []float64
 	sgf, sgc, sgo  []float64
 	mRe, mIm       []float64
+	frac           []float64   // доля сфер (nil вне смеси)
 	S              []float64   // nl x nAlt
 	dpol           [][]float64 // ndepol x nAlt, δ_l, %
 	dpolWl         []float64   // длины волн δ_l, µm
@@ -659,11 +663,10 @@ type metrics struct {
 }
 
 func emitProfile(a *Args, outDir string, h float64, b *batchInput,
-	solveCh []channel, g1 []float64, sols *solutions, kts []*ktable,
-	mre, mim []float64, geom []*geom, r1Max float64, common []commonWl,
-	nl int, writeLidar bool, met *metrics, hi int, ds *depolSet) {
-	prof := profileFinalize(a, solveCh, kts, mre, mim, sols, geom, a.R0Min,
-		r1Max, ds)
+	solveCh []channel, g1 []float64, sols *solutions, kn *kernels,
+	geom []*geom, r1Max float64, common []commonWl,
+	nl int, writeLidar bool, met *metrics, hi int) {
+	prof := profileFinalize(a, solveCh, kn, sols, geom, a.R0Min, r1Max)
 	dd := distDepol{calc: math.NaN(), meas: math.NaN()}
 	if i := depolWlIndex(prof.deltaLwl, 0.532); i >= 0 && i < len(prof.deltaL) {
 		dd.calc = prof.deltaL[i]
@@ -674,11 +677,17 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 	}
 	err := writeProfile(outDir, h, b, g1, prof, dd)
 
+	if kn.mix {
+		ff := openAppend(filepath.Join(outDir, "fraction.txt"))
+		fmt.Fprintf(ff, "%s  %s\n", cG(h), cG(prof.fracAvg))
+		ff.Close()
+	}
+
 	dStr := ""
-	if ds != nil && len(ds.wl) > 0 {
+	if len(prof.deltaLwl) > 0 {
 		fd := openAppend(filepath.Join(outDir, "delpol.txt"))
 		fmt.Fprintf(fd, "%s", cG(h))
-		for i := range ds.wl {
+		for i := range prof.deltaLwl {
 			v := math.NaN()
 			if i < len(prof.deltaL) {
 				v = prof.deltaL[i]
@@ -719,6 +728,9 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 	if met != nil {
 		met.err[hi] = err
 		met.V[hi] = prof.moments.VolConcUm3PerCm3
+		if met.frac != nil {
+			met.frac[hi] = prof.fracAvg
+		}
 		met.Vc[hi] = prof.modes.Coarse.V / cm3PerM3
 		met.Vf[hi] = prof.modes.Fine.V / cm3PerM3
 		met.rmf[hi] = prof.modes.Fine.Rm
@@ -770,8 +782,12 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 		sStr = acc.String()
 	}
 
-	fmt.Printf("  altitude %s m: ⟨m⟩ = %.3f%+.3fj, N = %.3g cm⁻³%s%s\n",
-		cG(h), prof.mRe, prof.mIm, prof.moments.NCm3, sStr, dStr)
+	fStr := ""
+	if kn.mix {
+		fStr = fmt.Sprintf(", f = %.3g", prof.fracAvg)
+	}
+	fmt.Printf("  altitude %s m: ⟨m⟩ = %.3f%+.3fj, N = %.3g cm⁻³%s%s%s\n",
+		cG(h), prof.mRe, prof.mIm, prof.moments.NCm3, fStr, sStr, dStr)
 }
 
 // ---------------- основной сценарий ----------------
@@ -781,9 +797,7 @@ func runBatch(a *Args) {
 		fatal("option --depol-ratio-cons requires a dep<nm> column in the " +
 			"batch file (e.g. dep532), got none")
 	}
-	src := a.tableSource()
-	mre, mim := tableMGrid(src)
-	nm := len(mre)
+	src, srcSph := a.tableSources()
 
 	fmt.Printf("batch processing: %s\n", a.Batch)
 	fmt.Printf("  altitudes: %d; channels: %d\n", b.nAlt, b.nch)
@@ -807,6 +821,28 @@ func runBatch(a *Args) {
 		fmt.Printf("lidar ratio S=α/β smoothness constraint along altitude: " +
 			"disabled\n")
 	}
+	reportMixSetup(a)
+
+	// сетка m (общая для компонент смеси)
+	re1, im1 := tableMGrid(src)
+	g1full := mGrid{src: src, re: re1, im: im1}
+	grids := []mGrid{g1full}
+	mre, mim := re1, im1
+	var mre2, mim2 []float64
+	if srcSph != nil {
+		re2, im2 := tableMGrid(srcSph)
+		var snapped int
+		mre, mim, mre2, mim2, snapped = alignMGrid(re1, im1, re2, im2,
+			a.MixMSnap)
+		grids[0].re, grids[0].im = mre, mim
+		grids = append(grids, mGrid{src: srcSph, re: mre2, im: mim2})
+		reportMixGrid(a, g1full, mGrid{src: srcSph, re: re2, im: im2},
+			len(mre), snapped)
+	}
+	nm := len(mre)
+	if nm == 0 {
+		fatal("refractive index grid is empty")
+	}
 
 	// каналы решения
 	solveCh := make([]channel, b.nch)
@@ -820,14 +856,7 @@ func runBatch(a *Args) {
 	}
 
 	// покрытие таблиц -> r1_max_eff
-	capmin := math.Inf(1)
-	for i := 0; i < nm; i++ {
-		chs := loadTableChannels(src, mre[i], mim[i], solveCh,
-			a.TableExtrapolate, a.TableRefWl, cbackScale)
-		if chs.cap < capmin {
-			capmin = chs.cap
-		}
-	}
+	capmin := coverageCap(a, grids, solveCh, cbackScale)
 	r1MaxEff := math.Min(a.R1Max, capmin)
 	if r1MaxEff < a.R1Min {
 		fatal("table coverage in x limits r1_max = %g µm < "+
@@ -858,18 +887,21 @@ func runBatch(a *Args) {
 
 	// таблицы ядер — один раз на пакет
 	fmt.Printf("building kernel tables (%d m values, once per batch)...\n", nm)
-	kts := make([]*ktable, nm)
-	for i := 0; i < nm; i++ {
-		chs := loadTableChannels(src, mre[i], mim[i], solveCh,
-			a.TableExtrapolate, a.TableRefWl, cbackScale)
-		kts[i] = ktableBuild(chs, a.R0Min, r1MaxEff, a.DxMax)
+	kts := buildComponentKernels(a, grids[0], solveCh, r1MaxEff, cbackScale)
+	var kts2 []*ktable
+	if len(grids) > 1 {
+		kts2 = buildComponentKernels(a, grids[1], solveCh, r1MaxEff, cbackScale)
 	}
 	fmt.Printf("  table: %d r points per m\n", kts[0].n)
 
 	// ядра S11/S22 для линейной деполяризации — тоже один раз на пакет
-	ds := depolSetBuild(src, mre, mim, a.TableRefWl, a.R0Min, r1MaxEff,
-		a.DxMax, a.TableExtrapolate)
+	ds := buildComponentDepolSet(a, grids[0], r1MaxEff)
 	depolSetReport(ds, src, nm)
+	var ds2 *depolSet
+	if len(grids) > 1 {
+		ds2 = buildComponentDepolSet(a, grids[1], r1MaxEff)
+		depolSetReportLabel(ds2, srcSph, nm, "sphere")
+	}
 
 	// матрицы A — тоже один раз
 	r0Grid := geomspace(a.R0Min, a.R0Max, a.NR0)
@@ -877,16 +909,40 @@ func runBatch(a *Args) {
 	design := designBuild(solveCh, b.nch, kts, mre, mim, a.Degrees, r0Grid,
 		r1Grid, a.MinRatio, a.NBasis, !a.NoZeroBoundary, a.QuadOrder,
 		a.LogSpan)
-	fmt.Printf("  matrices A precomputed: %d windows × %d m\n", design.nW, nm)
+	if kts2 != nil {
+		d2 := designBuild(solveCh, b.nch, kts2, mre2, mim2, a.Degrees, r0Grid,
+			r1Grid, a.MinRatio, a.NBasis, !a.NoZeroBoundary, a.QuadOrder,
+			a.LogSpan)
+		design.mixWith(d2, a.mixFractions())
+	}
+	fmt.Printf("  matrices A precomputed: %d windows × %d m", design.nW, nm)
+	if design.nf > 1 {
+		fmt.Printf(" × %d f", design.nf)
+	}
+	fmt.Printf("\n")
+
+	kn := &kernels{
+		mix:  a.mixEnabled(),
+		mre:  mre,
+		mim:  mim,
+		kts:  kts,
+		kts2: kts2,
+		ds:   ds,
+		ds2:  ds2,
+	}
 
 	// ограничение по измеренному δ_l добавляется в функционал
 	var depIw, depCol []int
+	depWlSrc := ds
+	if !depolSetAvailable(depWlSrc) {
+		depWlSrc = ds2
+	}
 	if a.DepolRatioCons {
-		if !depolSetAvailable(ds) {
+		if !depolSetAvailable(ds) && !depolSetAvailable(ds2) {
 			fmt.Fprintf(os.Stderr, "[warning] --depol-ratio-cons: tables have no "+
 				"valid S11/S22 columns; constraint is not applied\n")
 		} else {
-			depIw, depCol = depolColumnMatch(ds, b.depWl, a.Batch)
+			depIw, depCol = depolColumnMatch(depWlSrc, b.depWl, a.Batch)
 			if len(depIw) == 0 {
 				fmt.Fprintf(os.Stderr, "[warning] --depol-ratio-cons: no measured "+
 					"depolarization matching S11/S22 wavelengths; constraint is "+
@@ -899,14 +955,14 @@ func runBatch(a *Args) {
 	}
 	var depProj *depolProj
 	if len(depIw) > 0 && a.DepolRatioW > 0 {
-		depProj = depolProjBuild(ds, design, depIw)
+		depProj = depolProjBuildMix(ds, ds2, design, depIw)
 		if depProj != nil {
 			var sb strings.Builder
 			for k := range depIw {
 				if k > 0 {
 					sb.WriteString(", ")
 				}
-				fmt.Fprintf(&sb, "%.6g nm", ds.wl[depIw[k]]*1e3)
+				fmt.Fprintf(&sb, "%.6g nm", depWlSrc.wl[depIw[k]]*1e3)
 			}
 			fmt.Printf("depolarization ratio constraint δ_l: enabled "+
 				"(weight %g, mode %s; measured at %s)\n", a.DepolRatioW,
@@ -954,6 +1010,10 @@ func runBatch(a *Args) {
 		"# H  Vf  Vc  V  rmf  rmc  rm  reff  N  sigma_f  sigma_c  sigma\n"+
 			"# V — µm³/cm³; rm/reff — µm; N — cm⁻³; sigma — dimensionless.\n")
 	writeHeader("refractive.txt", "# H  Re(m)  Im(m)\n")
+	if a.mixEnabled() {
+		writeHeader("fraction.txt",
+			"# H  f\n# f — доля сфер в смеси (0..1)\n")
+	}
 	{
 		var sb strings.Builder
 		sb.WriteString("# H  ")
@@ -977,7 +1037,7 @@ func runBatch(a *Args) {
 	{
 		var sb strings.Builder
 		sb.WriteString("# H")
-		for _, wl := range ds.wl {
+		for _, wl := range depolWavelengths(ds, ds2) {
 			fmt.Fprintf(&sb, "  delta_l_%g", wl*1e3)
 		}
 		for _, wl := range b.depWl {
@@ -985,7 +1045,7 @@ func runBatch(a *Args) {
 		}
 		sb.WriteString("\n# linear depolarization at 180 deg, % " +
 			"(delta_l = (S11-S22)/(S11+S22)*100)\n")
-		if !depolSetAvailable(ds) {
+		if !depolSetAvailable(ds) && !depolSetAvailable(ds2) {
 			sb.WriteString("# nan: tables have no valid S11/S22 columns\n")
 		}
 		if b.ndep > 0 {
@@ -1010,9 +1070,12 @@ func runBatch(a *Args) {
 	met.mRe = make([]float64, b.nAlt)
 	met.mIm = make([]float64, b.nAlt)
 	met.S = make([]float64, b.nAlt*max(nl, 1))
-	if depolSetAvailable(ds) {
-		met.dpolWl = append([]float64(nil), ds.wl...)
-		met.dpol = make([][]float64, len(ds.wl))
+	if a.mixEnabled() {
+		met.frac = make([]float64, b.nAlt)
+	}
+	if wl := depolWavelengths(ds, ds2); len(wl) > 0 {
+		met.dpolWl = append([]float64(nil), wl...)
+		met.dpol = make([][]float64, len(wl))
 		for i := range met.dpol {
 			met.dpol[i] = make([]float64, b.nAlt)
 		}
@@ -1083,9 +1146,8 @@ func runBatch(a *Args) {
 
 		for h := 0; h < b.nAlt; h++ {
 			g1 := b.data[h*b.nch:]
-			emitProfile(a, outDir, b.alt[h], b, solveCh, g1, per[h], kts,
-				mre, mim, design.geom, r1MaxEff, common, nl, writeLidar,
-				&met, h, ds)
+			emitProfile(a, outDir, b.alt[h], b, solveCh, g1, per[h], kn,
+				design.geom, r1MaxEff, common, nl, writeLidar, &met, h)
 		}
 	} else {
 		if a.LidarRatioCons {
@@ -1109,9 +1171,8 @@ func runBatch(a *Args) {
 			}
 			rankDepolAt(sols, h)
 			fmt.Printf("  altitude %g m: %d variants\n", b.alt[h], sols.n)
-			emitProfile(a, outDir, b.alt[h], b, solveCh, g1, sols, kts,
-				mre, mim, design.geom, r1MaxEff, common, nl, writeLidar,
-				&met, h, ds)
+			emitProfile(a, outDir, b.alt[h], b, solveCh, g1, sols, kn,
+				design.geom, r1MaxEff, common, nl, writeLidar, &met, h)
 		}
 	}
 
@@ -1152,6 +1213,12 @@ func runBatch(a *Args) {
 		plotProfiles(&po, pp, "Lognormal mode widths", "sigma", 3, b.alt,
 			[][]float64{met.sgf, met.sgc, met.sgo},
 			[]string{"sigma_f", "sigma_c", "sigma"}, true)
+
+		if len(met.frac) > 0 {
+			pp = filepath.Join(outDir, "fraction."+ext)
+			plotProfiles(&po, pp, "Sphere fraction of the mixture", "f", 1,
+				b.alt, [][]float64{met.frac}, []string{"f"}, false)
+		}
 
 		if nl > 0 {
 			nSer := nl

@@ -182,10 +182,26 @@ type depolProj struct {
 	nu  int
 	a11 [][]float64
 	a22 [][]float64
+	// вторая (сферическая) компонента смеси; nil вне смеси
+	a11b [][]float64
+	a22b [][]float64
 }
 
 func depolProjBuild(ds *depolSet, d *design, iwDep []int) *depolProj {
-	if ds == nil || d == nil || d.nW <= 0 || d.nu <= 0 || len(iwDep) == 0 {
+	return depolProjBuildMix(ds, nil, d, iwDep)
+}
+
+// depolProjBuildMix — проекции S11/S22 обоих компонентов смеси (ds2 может
+// быть nil). Итоговая проекция для доли сфер f: (1-f)·a + f·b.
+func depolProjBuildMix(ds, ds2 *depolSet, d *design, iwDep []int) *depolProj {
+	if d == nil || d.nW <= 0 || d.nu <= 0 || len(iwDep) == 0 {
+		return nil
+	}
+	wlSrc := ds
+	if !depolSetAvailable(wlSrc) {
+		wlSrc = ds2
+	}
+	if !depolSetAvailable(wlSrc) {
 		return nil
 	}
 	p := &depolProj{
@@ -195,42 +211,34 @@ func depolProjBuild(ds *depolSet, d *design, iwDep []int) *depolProj {
 		nu: d.nu,
 	}
 	for _, iw := range iwDep {
-		p.wl = append(p.wl, ds.wl[iw])
+		p.wl = append(p.wl, wlSrc.wl[iw])
 	}
 	sz := d.nM * d.nW * d.nu
+	hasSecond := depolSetAvailable(ds2)
 	p.a11 = make([][]float64, len(iwDep))
 	p.a22 = make([][]float64, len(iwDep))
+	if hasSecond {
+		p.a11b = make([][]float64, len(iwDep))
+		p.a22b = make([][]float64, len(iwDep))
+	}
 	for k := range iwDep {
 		p.a11[k] = make([]float64, sz)
 		p.a22[k] = make([]float64, sz)
+		if hasSecond {
+			p.a11b[k] = make([]float64, sz)
+			p.a22b[k] = make([]float64, sz)
+		}
 	}
 	for im := 0; im < d.nM; im++ {
-		if im >= len(ds.kt) {
-			break
-		}
 		for w := 0; w < d.nW; w++ {
 			g := d.geom[w]
 			base := (im*d.nW + w) * d.nu
 			for k, iw := range iwDep {
-				kt := ds.kt[im][iw]
-				if kt == nil {
-					continue
-				}
-				a11 := p.a11[k][base : base+d.nu]
-				a22 := p.a22[k][base : base+d.nu]
-				for q := 0; q < g.nNodes; q++ {
-					r := g.nodes[q]
-					wgt := g.weights[q] * g.dvol[q]
-					if wgt == 0 {
-						continue
-					}
-					s11 := ktableKernel(kt, 0, r)
-					s22 := ktableKernel(kt, 1, r)
-					bv := g.values[q*d.nu : (q+1)*d.nu]
-					for i := 0; i < d.nu; i++ {
-						a11[i] += wgt * s11 * bv[i]
-						a22[i] += wgt * s22 * bv[i]
-					}
+				projectInto(p.a11[k][base:base+d.nu], p.a22[k][base:base+d.nu],
+					ds, im, iw, g, d.nu)
+				if hasSecond {
+					projectInto(p.a11b[k][base:base+d.nu],
+						p.a22b[k][base:base+d.nu], ds2, im, iw, g, d.nu)
 				}
 			}
 		}
@@ -238,10 +246,36 @@ func depolProjBuild(ds *depolSet, d *design, iwDep []int) *depolProj {
 	return p
 }
 
+// projectInto — проекции ядер S11/S22 одного набора на базис окна.
+func projectInto(a11, a22 []float64, ds *depolSet, im, iw int, g *geom, nu int) {
+	if ds == nil || im < 0 || im >= len(ds.kt) || iw < 0 || iw >= len(ds.kt[im]) {
+		return
+	}
+	kt := ds.kt[im][iw]
+	if kt == nil {
+		return
+	}
+	for q := 0; q < g.nNodes; q++ {
+		r := g.nodes[q]
+		wgt := g.weights[q] * g.dvol[q]
+		if wgt == 0 {
+			continue
+		}
+		s11 := ktableKernel(kt, 0, r)
+		s22 := ktableKernel(kt, 1, r)
+		bv := g.values[q*nu : (q+1)*nu]
+		for i := 0; i < nu; i++ {
+			a11[i] += wgt * s11 * bv[i]
+			a22[i] += wgt * s22 * bv[i]
+		}
+	}
+}
+
 // d11d22 — свёртки S11/S22 с коэффициентами C (абсолютные единицы) для
-// проекции k в окне iwGeom при показателе m с индексом im.
-func (p *depolProj) d11d22(im, iwGeom, k int, C []float64) (d11, d22 float64,
-	ok bool) {
+// проекции k в окне iwGeom при показателе m с индексом im. Для смеси ядра
+// смешиваются с долей сфер frac: (1-f)·a + f·b.
+func (p *depolProj) d11d22(im, iwGeom, k int, C []float64, frac float64) (
+	d11, d22 float64, ok bool) {
 	if p == nil || k < 0 || k >= len(p.a11) {
 		return 0, 0, false
 	}
@@ -251,9 +285,19 @@ func (p *depolProj) d11d22(im, iwGeom, k int, C []float64) (d11, d22 float64,
 	base := (im*p.nW + iwGeom) * p.nu
 	a11 := p.a11[k][base : base+p.nu]
 	a22 := p.a22[k][base : base+p.nu]
+	b11, b22 := a11, a22
+	if p.a11b != nil {
+		b11 = p.a11b[k][base : base+p.nu]
+		b22 = p.a22b[k][base : base+p.nu]
+	}
 	for i := 0; i < p.nu && i < len(C); i++ {
-		d11 += C[i] * a11[i]
-		d22 += C[i] * a22[i]
+		v11, v22 := a11[i], a22[i]
+		if p.a11b != nil {
+			v11 = (1.0-frac)*v11 + frac*b11[i]
+			v22 = (1.0-frac)*v22 + frac*b22[i]
+		}
+		d11 += C[i] * v11
+		d22 += C[i] * v22
 	}
 	if !isFinite(d11) || !isFinite(d22) {
 		return 0, 0, false
@@ -262,9 +306,9 @@ func (p *depolProj) d11d22(im, iwGeom, k int, C []float64) (d11, d22 float64,
 }
 
 // depolModel — модельное δ_l, %, для решения с коэффициентами C в окне
-// iwGeom при показателе m с индексом im для проекции k.
-func (p *depolProj) depolModel(im, iwGeom, k int, C []float64) float64 {
-	s11, s22, ok := p.d11d22(im, iwGeom, k, C)
+// iwGeom при показателе m с индексом im для проекции k и доли сфер frac.
+func (p *depolProj) depolModel(im, iwGeom, k int, C []float64, frac float64) float64 {
+	s11, s22, ok := p.d11d22(im, iwGeom, k, C, frac)
 	if !ok {
 		return math.NaN()
 	}
@@ -284,9 +328,10 @@ type depolCons struct {
 }
 
 // rows — строки ограничения (nExtra × nu) для опорного решения C
-// (абсолютные единицы). Для δ_l = t: r = t/100, ρ = (1+r)/(1−r), строка
-// w·(a11 − ρ·a22)/(ρ·D22) даёт относительную невязку D11/D22.
-func (dc *depolCons) rows(im, iwGeom int, C []float64) ([]float64, int) {
+// (абсолютные единицы) при доле сфер frac. Для δ_l = t: r = t/100,
+// ρ = (1+r)/(1−r), строка w·(a11 − ρ·a22)/(ρ·D22) даёт относительную
+// невязку D11/D22.
+func (dc *depolCons) rows(im, iwGeom int, frac float64, C []float64) ([]float64, int) {
 	if dc == nil || dc.proj == nil || !(dc.w > 0) {
 		return nil, 0
 	}
@@ -308,7 +353,7 @@ func (dc *depolCons) rows(im, iwGeom int, C []float64) ([]float64, int) {
 		if !isFinite(rho) || !(rho > 0) {
 			continue
 		}
-		d11, d22, ok := p.d11d22(im, iwGeom, k, C)
+		d11, d22, ok := p.d11d22(im, iwGeom, k, C, frac)
 		if !ok {
 			continue
 		}
@@ -322,8 +367,18 @@ func (dc *depolCons) rows(im, iwGeom int, C []float64) ([]float64, int) {
 		base := (im*p.nW + iwGeom) * p.nu
 		a11 := p.a11[k][base : base+p.nu]
 		a22 := p.a22[k][base : base+p.nu]
+		b11, b22 := a11, a22
+		if p.a11b != nil {
+			b11 = p.a11b[k][base : base+p.nu]
+			b22 = p.a22b[k][base : base+p.nu]
+		}
 		for i := 0; i < p.nu; i++ {
-			out = append(out, dc.w*(a11[i]-rho*a22[i])/den)
+			v11, v22 := a11[i], a22[i]
+			if p.a11b != nil {
+				v11 = (1.0-frac)*v11 + frac*b11[i]
+				v22 = (1.0-frac)*v22 + frac*b22[i]
+			}
+			out = append(out, dc.w*(v11-rho*v22)/den)
 		}
 		cnt++
 	}
@@ -333,7 +388,8 @@ func (dc *depolCons) rows(im, iwGeom int, C []float64) ([]float64, int) {
 // depolDeviation — среднее относительное отклонение модельного δ_l от
 // измеренных значений (targets выровнен с p.wl). Пары с нефинитными или
 // неположительными измерениями пропускаются; при отсутствии пар — NaN.
-func depolDeviation(p *depolProj, im, iwGeom int, C, targets []float64) float64 {
+func depolDeviation(p *depolProj, im, iwGeom int, C, targets []float64,
+	frac float64) float64 {
 	if p == nil {
 		return math.NaN()
 	}
@@ -347,7 +403,7 @@ func depolDeviation(p *depolProj, im, iwGeom int, C, targets []float64) float64 
 		if !isFinite(t) || !(t > 0) {
 			continue
 		}
-		v := p.depolModel(im, iwGeom, k, C)
+		v := p.depolModel(im, iwGeom, k, C, frac)
 		if !isFinite(v) {
 			continue
 		}
@@ -374,7 +430,7 @@ func depolPenaltyVector(sols *solutions, p *depolProj, mre, mim,
 			continue
 		}
 		im := mIndex(mre, mim, s.mRe, s.mIm)
-		dev := depolDeviation(p, im, s.geomIndex, s.C, targets)
+		dev := depolDeviation(p, im, s.geomIndex, s.C, targets, s.frac)
 		if isFinite(dev) {
 			pen[s.id] = w * dev
 		}
@@ -399,12 +455,31 @@ func rankByDepol(sols *solutions, p *depolProj, mre, mim, targets []float64,
 	return pen
 }
 
+// depolWavelengths — длины волн δ_l из первого доступного набора ядер.
+func depolWavelengths(ds, ds2 *depolSet) []float64 {
+	if depolSetAvailable(ds) {
+		return ds.wl
+	}
+	if depolSetAvailable(ds2) {
+		return ds2.wl
+	}
+	return nil
+}
+
 // depolSetReport — диагностика доступности столбцов S11/S22.
 func depolSetReport(ds *depolSet, src *tableSource, nm int) {
+	depolSetReportLabel(ds, src, nm, "")
+}
+
+// depolSetReportLabel — то же с меткой компонента смеси.
+func depolSetReportLabel(ds *depolSet, src *tableSource, nm int, comp string) {
 	if ds == nil || len(ds.wl) == 0 {
 		return
 	}
 	label := src.label
+	if comp != "" {
+		label = comp + " component, " + label
+	}
 	if ds.nOK == 0 {
 		fmt.Fprintf(os.Stderr, "[warning] tables in %s have no valid S11/S22 "+
 			"columns (or they contain nan) — linear depolarization is not "+
@@ -435,9 +510,18 @@ func depolSetReport(ds *depolSet, src *tableSource, nm int) {
 // ансамбля, у которых есть столбцы S11/S22.
 func depolFromProfile(ds *depolSet, mIdx []int, rq, wq, nq []float64) (
 	d11, d22, delta []float64) {
+	return depolFromProfileMix(ds, nil, mIdx, nil, rq, wq, nq)
+}
+
+// depolFromProfileMix — то же для смеси: ядра S11/S22 сферической компоненты
+// (ds2, может быть nil) смешиваются с первыми по доле сфер fracs[t].
+func depolFromProfileMix(ds, ds2 *depolSet, mIdx []int, fracs []float64,
+	rq, wq, nq []float64) (d11, d22, delta []float64) {
 	nw := 0
 	if ds != nil {
 		nw = len(ds.wl)
+	} else if ds2 != nil {
+		nw = len(ds2.wl)
 	}
 	d11 = make([]float64, nw)
 	d22 = make([]float64, nw)
@@ -453,13 +537,15 @@ func depolFromProfile(ds *depolSet, mIdx []int, rq, wq, nq []float64) (
 
 	for iw := 0; iw < nw; iw++ {
 		s11, s22, cnt := 0.0, 0.0, 0
-		for _, im := range mIdx {
-			if im < 0 || im >= len(ds.kt) {
+		for ti, im := range mIdx {
+			kt1 := depolKernelAt(ds, im, iw)
+			kt2 := depolKernelAt(ds2, im, iw)
+			if kt1 == nil && kt2 == nil {
 				continue
 			}
-			kt := ds.kt[im][iw]
-			if kt == nil {
-				continue
+			f := 0.0
+			if ti < len(fracs) {
+				f = fracs[ti]
 			}
 			a, b := 0.0, 0.0
 			for k := range rq {
@@ -467,8 +553,17 @@ func depolFromProfile(ds *depolSet, mIdx []int, rq, wq, nq []float64) (
 				if w == 0 {
 					continue
 				}
-				a += w * ktableKernel(kt, 0, rq[k])
-				b += w * ktableKernel(kt, 1, rq[k])
+				var k11, k22 float64
+				if kt1 != nil {
+					k11 = ktableKernel(kt1, 0, rq[k])
+					k22 = ktableKernel(kt1, 1, rq[k])
+				}
+				if kt2 != nil {
+					k11 = (1.0-f)*k11 + f*ktableKernel(kt2, 0, rq[k])
+					k22 = (1.0-f)*k22 + f*ktableKernel(kt2, 1, rq[k])
+				}
+				a += w * k11
+				b += w * k22
 			}
 			s11 += a
 			s22 += b
@@ -488,4 +583,12 @@ func depolFromProfile(ds *depolSet, mIdx []int, rq, wq, nq []float64) (
 		}
 	}
 	return d11, d22, delta
+}
+
+// depolKernelAt — ядра S11/S22 для m с индексом im и длины волны iw.
+func depolKernelAt(ds *depolSet, im, iw int) *ktable {
+	if ds == nil || im < 0 || im >= len(ds.kt) || iw < 0 || iw >= len(ds.kt[im]) {
+		return nil
+	}
+	return ds.kt[im][iw]
 }

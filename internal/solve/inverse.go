@@ -25,6 +25,7 @@ type solution struct {
 	geomIndex int
 	err       float64
 	gFit      []float64
+	frac      float64 // доля сфер в смеси (0 вне смеси)
 	id        int
 }
 
@@ -268,7 +269,11 @@ func scanVariants(d *design, g1 []float64, nch, gammaSelect int,
 
 	nu := d.nu
 	nm, nw := d.nM, d.nW
-	total := nm * nw
+	nf := d.nf
+	if nf < 1 {
+		nf = 1
+	}
+	total := nm * nw * nf
 
 	var grel []float64
 	if gammaSelect == gammaFixed {
@@ -290,86 +295,92 @@ func scanVariants(d *design, g1 []float64, nch, gammaSelect int,
 	out.scale = scale
 
 	t := 0
-	for im := 0; im < nm; im++ {
-		for iw := 0; iw < nw; iw++ {
-			off := (im*nw + iw) * nch * nu
-			A := d.A[off : off+nch*nu]
-			s0 := d.s0[im*nw+iw]
-			gamma := 0.0
-			var cNorm []float64
+	var mixBuf []float64
+	if nf > 1 {
+		mixBuf = make([]float64, nch*nu)
+	}
+	for v := 0; v < total; v++ {
+		// Раскладка: v = ((im*nw)+iw)*nf + kf.
+		kf := v % nf
+		im := v / (nw * nf)
+		iw := (v / nf) % nw
+		A, s0 := d.block(im, iw, kf, mixBuf)
+		frac := d.fracAt(kf)
+		gamma := 0.0
+		var cNorm []float64
 
-			if gammaSelect == gammaFixed {
-				gamma = grel[0] * s0
-				cNorm = solveGamma(A, nch, nu, gamma, weights, g1n, nonneg)
-			} else {
-				best := math.Inf(1)
-				for k := 0; k < len(grel); k++ {
-					gk := grel[k] * s0
-					var score float64
-					if gammaSelect == gammaCV {
-						if nonneg {
-							score = cvBruteforce(A, nch, nu, gk, weights, g1n, true)
-						} else {
-							sc, ok := cvClosed(A, nch, nu, gk, weights, g1n)
-							if !ok {
-								score = cvBruteforce(A, nch, nu, gk, weights, g1n, false)
-							} else {
-								score = sc
-							}
-						}
+		if gammaSelect == gammaFixed {
+			gamma = grel[0] * s0
+			cNorm = solveGamma(A, nch, nu, gamma, weights, g1n, nonneg)
+		} else {
+			best := math.Inf(1)
+			for k := 0; k < len(grel); k++ {
+				gk := grel[k] * s0
+				var score float64
+				if gammaSelect == gammaCV {
+					if nonneg {
+						score = cvBruteforce(A, nch, nu, gk, weights, g1n, true)
 					} else {
-						c := solveGamma(A, nch, nu, gk, weights, g1n, nonneg)
-						score = residualErr(A, nch, nu, c, g1n)
+						sc, ok := cvClosed(A, nch, nu, gk, weights, g1n)
+						if !ok {
+							score = cvBruteforce(A, nch, nu, gk, weights, g1n, false)
+						} else {
+							score = sc
+						}
 					}
-					if score < best {
-						best = score
-						gamma = gk
-					}
+				} else {
+					c := solveGamma(A, nch, nu, gk, weights, g1n, nonneg)
+					score = residualErr(A, nch, nu, c, g1n)
 				}
-				cNorm = solveGamma(A, nch, nu, gamma, weights, g1n, nonneg)
-			}
-
-			cAbs := make([]float64, nu)
-			for i := 0; i < nu; i++ {
-				cAbs[i] = cNorm[i] * scale
-			}
-			// второй проход: то же γ, но с строкой ограничения δ_l
-			if extra, nExtra := dc.rows(im, iw, cAbs); nExtra > 0 {
-				c2 := solveGammaRows(A, nch, nu, gamma, weights, g1n,
-					nonneg, extra, nExtra)
-				for i := 0; i < nu; i++ {
-					cAbs[i] = c2[i] * scale
+				if score < best {
+					best = score
+					gamma = gk
 				}
 			}
-			gfit := make([]float64, nch)
-			for j := 0; j < nch; j++ {
-				p := 0.0
-				for i := 0; i < nu; i++ {
-					p += A[j*nu+i] * cAbs[i]
-				}
-				gfit[j] = p
-			}
-			err := 0.0
-			for j := 0; j < nch; j++ {
-				err += math.Abs(gfit[j]-g1[j]) / g1[j]
-			}
-			err /= float64(nch)
-
-			so := &out.sol[t]
-			so.mRe = d.mRe[im]
-			so.mIm = d.mIm[im]
-			so.degree = d.degree[iw]
-			so.r0 = d.r0[iw]
-			so.r1 = d.r1[iw]
-			so.gamma = gamma
-			so.C = append([]float64(nil), cAbs...)
-			so.nu = nu
-			so.geomIndex = iw
-			so.err = err
-			so.gFit = append([]float64(nil), gfit...)
-			so.id = t
-			t++
+			cNorm = solveGamma(A, nch, nu, gamma, weights, g1n, nonneg)
 		}
+
+		cAbs := make([]float64, nu)
+		for i := 0; i < nu; i++ {
+			cAbs[i] = cNorm[i] * scale
+		}
+		// второй проход: то же γ, но с строкой ограничения δ_l
+		if extra, nExtra := dc.rows(im, iw, frac, cAbs); nExtra > 0 {
+			c2 := solveGammaRows(A, nch, nu, gamma, weights, g1n,
+				nonneg, extra, nExtra)
+			for i := 0; i < nu; i++ {
+				cAbs[i] = c2[i] * scale
+			}
+		}
+		gfit := make([]float64, nch)
+		for j := 0; j < nch; j++ {
+			p := 0.0
+			for i := 0; i < nu; i++ {
+				p += A[j*nu+i] * cAbs[i]
+			}
+			gfit[j] = p
+		}
+		err := 0.0
+		for j := 0; j < nch; j++ {
+			err += math.Abs(gfit[j]-g1[j]) / g1[j]
+		}
+		err /= float64(nch)
+
+		so := &out.sol[t]
+		so.mRe = d.mRe[im]
+		so.mIm = d.mIm[im]
+		so.degree = d.degree[iw]
+		so.r0 = d.r0[iw]
+		so.r1 = d.r1[iw]
+		so.gamma = gamma
+		so.C = append([]float64(nil), cAbs...)
+		so.nu = nu
+		so.geomIndex = iw
+		so.err = err
+		so.gFit = append([]float64(nil), gfit...)
+		so.frac = frac
+		so.id = t
+		t++
 	}
 
 	sortSolutions(out.sol)

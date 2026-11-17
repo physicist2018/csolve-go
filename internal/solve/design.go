@@ -16,6 +16,11 @@ type design struct {
 	order           int
 	maxLogSpan      float64
 	nBasis          int
+
+	// Смесь сфер с несферической компонентой: A(f) = (1-f)A + f*A2.
+	A2    []float64 // матрица второй (сферической) компоненты
+	fracs []float64 // доли сфер f_k, k = 0..nf-1
+	nf    int
 }
 
 func designBuild(ch []channel, nch int, kts []*ktable, mRe, mIm []float64,
@@ -107,4 +112,48 @@ func designBuild(ch []channel, nch int, kts []*ktable, mRe, mIm []float64,
 		}
 	}
 	return d
+}
+
+// mixWith — включает смесь: вторая матрица d2 (сферическая компонента) и
+// доли сфер fracs. Обе матрицы должны быть построены на одинаковых окнах и
+// сетке m, т.е. одним и тем же вызовом designBuild.
+func (d *design) mixWith(d2 *design, fracs []float64) {
+	if d2 == nil || len(fracs) == 0 {
+		return
+	}
+	if d2.nM != d.nM || d2.nW != d.nW || d2.nch != d.nch || d2.nu != d.nu {
+		fatal("internal error: mixture designs have different shapes")
+	}
+	d.A2 = d2.A
+	d.fracs = append([]float64(nil), fracs...)
+	d.nf = len(d.fracs)
+}
+
+// fracAt — доля сфер для индекса kf (0 вне смеси).
+func (d *design) fracAt(kf int) float64 {
+	if d == nil || d.nf <= 1 || kf < 0 || kf >= len(d.fracs) {
+		return 0
+	}
+	return d.fracs[kf]
+}
+
+// block — матрица отклика A(f) для (m, окно, доля сфер) и её спектральная
+// норма. Вне смеси возвращается готовый блок без копирования.
+func (d *design) block(im, iw, kf int, scratch []float64) ([]float64, float64) {
+	off := (im*d.nW + iw) * d.nch * d.nu
+	size := d.nch * d.nu
+	if d.nf <= 1 || d.A2 == nil {
+		return d.A[off : off+size], d.s0[im*d.nW+iw]
+	}
+	f := d.fracAt(kf)
+	a1 := d.A[off : off+size]
+	a2 := d.A2[off : off+size]
+	buf := scratch
+	if len(buf) < size {
+		buf = make([]float64, size)
+	}
+	for i := 0; i < size; i++ {
+		buf[i] = (1.0-f)*a1[i] + f*a2[i]
+	}
+	return buf, svdNorm2(buf, d.nch, d.nu)
 }
