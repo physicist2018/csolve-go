@@ -934,6 +934,9 @@ func runBatch(a *Args) {
 
 	outDir := a.BatchOutDir
 	if outDir == "" {
+		outDir = a.OutDir
+	}
+	if outDir == "" {
 		outDir = defaultOutDir(a.Batch)
 	}
 	mkdirP(outDir)

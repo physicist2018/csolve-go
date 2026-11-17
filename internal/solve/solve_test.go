@@ -672,6 +672,46 @@ func TestArgs(t *testing.T) {
 			t.Errorf("--nr0 0 must be rejected")
 		}
 	}
+	{
+		a, err := ParseArgs([]string{"--tables", "dir", "--out-dir", "out"})
+		if err != nil {
+			t.Fatalf("--out-dir: %v", err)
+		}
+		if a.OutDir != "out" {
+			t.Errorf("--out-dir not parsed: %q", a.OutDir)
+		}
+		if _, err := ParseArgs([]string{"--tables", "dir", "--out-dir", "out",
+			"--batch-out-dir", "batch"}); err == nil {
+			t.Errorf("--out-dir with --batch-out-dir must be rejected")
+		} else if !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Errorf("unexpected error for --out-dir with --batch-out-dir: %v", err)
+		}
+	}
+}
+
+// TestResolveOutPath: относительные выходные пути складываются с каталогом
+// вывода, абсолютные и пустые — нет.
+func TestResolveOutPath(t *testing.T) {
+	cases := []struct {
+		dir, path, want string
+		used            bool
+	}{
+		{"", "result.pdf", "result.pdf", false},
+		{"out", "result.pdf", filepath.Join("out", "result.pdf"), true},
+		{"out", "", "", false},
+	}
+	for _, c := range cases {
+		got, used := resolveOutPath(c.dir, c.path)
+		if got != c.want || used != c.used {
+			t.Errorf("resolveOutPath(%q, %q) = (%q, %v), want (%q, %v)",
+				c.dir, c.path, got, used, c.want, c.used)
+		}
+	}
+	abs := filepath.Join(string(filepath.Separator), "tmp", "result.pdf")
+	if got, used := resolveOutPath("out", abs); got != abs || used {
+		t.Errorf("resolveOutPath with absolute path = (%q, %v), want (%q, false)",
+			got, used, abs)
+	}
 }
 
 func TestBuiltinTables(t *testing.T) {

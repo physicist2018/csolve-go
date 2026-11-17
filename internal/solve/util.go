@@ -3,6 +3,7 @@ package solve
 import (
 	"fmt"
 	"math"
+	"path/filepath"
 )
 
 const (
@@ -66,6 +67,16 @@ func cG(v float64) string {
 
 func isFinite(v float64) bool {
 	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+// resolveOutPath — итоговый путь выходного файла: относительный path
+// помещается в каталог dir, абсолютный — остаётся как есть. Второе значение
+// сообщает, был ли задействован каталог dir (чтобы не создавать его зря).
+func resolveOutPath(dir, path string) (string, bool) {
+	if dir == "" || path == "" || filepath.IsAbs(path) {
+		return path, false
+	}
+	return filepath.Join(dir, path), true
 }
 
 func trapz(y, x []float64) float64 {

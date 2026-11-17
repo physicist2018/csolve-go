@@ -436,11 +436,26 @@ func run(a *Args) {
 	}
 	reportModes(prof.modes, a.RSplit, modeName)
 
+	// ---- выходные файлы ----
+	var plotPath string
+	var plotInDir bool
+	if !a.NoPlot {
+		name := a.Out
+		if name == "" {
+			name = "result." + plotFormatExt(a.PlotFormat)
+		}
+		plotPath, plotInDir = resolveOutPath(a.OutDir, name)
+	}
+	jsonPath, jsonInDir := resolveOutPath(a.OutDir, a.JSON)
+	if plotInDir || jsonInDir {
+		mkdirP(a.OutDir)
+	}
+
 	if a.JSON != "" {
-		writeJSON(a.JSON, sols, prof.rGrid, prof.nAvg, prof.nAvgRaw, baseCh,
+		writeJSON(jsonPath, sols, prof.rGrid, prof.nAvg, prof.nAvgRaw, baseCh,
 			g1, prof.gFit, prof.mRe, prof.mIm, prof.moments, prof.modes,
 			prof.deltaLwl, prof.deltaL)
-		fmt.Printf("results saved: %s\n", a.JSON)
+		fmt.Printf("results saved: %s\n", jsonPath)
 	}
 
 	if !a.NoPlot {
@@ -453,11 +468,7 @@ func run(a *Args) {
 		}
 		po := plotOpts{fmt: a.PlotFormat, dpi: a.PlotDpi,
 			fontSize: a.PlotFontSize, backend: a.Plotting}
-		outPath := a.Out
-		if outPath == "" {
-			outPath = "result." + plotFormatExt(a.PlotFormat)
-		}
-		plotResults(&po, outPath, prof.rGrid, nTrueVals, prof.nAvg,
+		plotResults(&po, plotPath, prof.rGrid, nTrueVals, prof.nAvg,
 			prof.nAvgRaw, prof.nBest, prof.nBestCount, baseCh, g1,
 			prof.gFit, prof.mRe, prof.mIm)
 	}

@@ -55,6 +55,7 @@ type Args struct {
 	Noise float64
 	Seed  int
 
+	OutDir       string
 	Out          string
 	JSON         string
 	NoPlot       bool
@@ -195,6 +196,10 @@ Options:
   --noise <X>                    demo noise level [0]
   --seed <N>                     RNG seed [1]
 
+  --out-dir <DIR>                directory for output files; relative
+                                 --out/--json paths are placed inside it;
+                                 batch results also go here unless
+                                 --batch-out-dir is given [current dir]
   --out <FILE>                   plot output file [result.<fmt>]
   --json <JSON>                  save results to JSON
   --plotting {internal|gnuplot}
@@ -208,7 +213,8 @@ Options:
 
   --batch <TXT>                  batch processing from txt
                                  (Altitude b<nm>... a<nm>...)
-  --batch-out-dir <DIR>          batch output directory [next to TXT]
+  --batch-out-dir <DIR>          batch output directory [next to TXT];
+                                 mutually exclusive with --out-dir
   --lidar-ratio-cons             constrain smoothness of S = alpha/beta
   --lidar-ratio-w <X>            weight of S deviation penalty, >= 0 [0.5]
   --lidar-ratio-iter <N>         iterations to refine reference S, >= 1 [3]
@@ -316,6 +322,7 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.Float64Var(&a.Noise, "noise", 0, "")
 	fs.IntVar(&a.Seed, "seed", a.Seed, "")
 
+	fs.StringVar(&a.OutDir, "out-dir", "", "")
 	fs.StringVar(&a.Out, "out", "", "")
 	fs.StringVar(&a.JSON, "json", "", "")
 	plotFormat := &enumFlag{allowed: []string{"png", "pdf", "svg"}, value: "png"}
@@ -353,6 +360,10 @@ func ParseArgs(argv []string) (*Args, error) {
 
 	if seen["tables"] && seen["type"] {
 		return nil, fmt.Errorf("options --tables and --type are mutually exclusive")
+	}
+	if seen["out-dir"] && seen["batch-out-dir"] {
+		return nil, fmt.Errorf("options --out-dir and --batch-out-dir are " +
+			"mutually exclusive")
 	}
 
 	if degree.set {
