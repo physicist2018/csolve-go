@@ -2,6 +2,7 @@ package solve
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"os"
 	"strconv"
@@ -124,7 +125,7 @@ func outModeFrom(m csMode) outMode {
 // writeJSON — запись результатов (структура как в Python-версии).
 func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw []float64,
 	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64,
-	mom moments, md modes, deltaWlUm, deltaL []float64) {
+	mom moments, md modes, deltaWlUm, deltaL []float64) error {
 
 	out := outFile{
 		MAvg: outMAvg{Real: jfloat(mAvgRe), Imag: jfloat(mAvgIm)},
@@ -188,10 +189,11 @@ func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw []float64,
 
 	data, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
-		fatal("failed to encode JSON: %v", err)
+		return fmt.Errorf("failed to encode JSON: %w", err)
 	}
 	data = append(data, '\n')
 	if err := os.WriteFile(path, data, 0644); err != nil {
-		fatal("failed to open file for writing: %s", path)
+		return fmt.Errorf("failed to open file for writing: %w", err)
 	}
+	return nil
 }

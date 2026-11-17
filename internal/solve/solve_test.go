@@ -75,7 +75,10 @@ func TestQuadrature(t *testing.T) {
 }
 
 func TestBSpline(t *testing.T) {
-	g := geomBuild(0.1, 10.0, 3, 6, false, 24, 0.1)
+	g, err := geomBuild(0.1, 10.0, 3, 6, false, 24, 0.1)
+	if err != nil {
+		t.Fatalf("geomBuild: %v", err)
+	}
 	for k := 0; k < 25; k++ {
 		tt := 0.1 * math.Pow(100.0, float64(k)/24.0)
 		full := bsplineValues(g.knots, g.degree, tt)
@@ -156,7 +159,10 @@ func TestTableParse(t *testing.T) {
 		"0.5 8.0 2.0 0.6 5\n" +
 		"1.0 9.0 4.0 0.7 5\n" +
 		"2.0 10.0 16.0 0.8 5\n"
-	tb, _ := parseTable([]byte(content), "table.txt", false)
+	tb, _, err := parseTable([]byte(content), "table.txt", false)
+	if err != nil {
+		t.Fatalf("parseTable: %v", err)
+	}
 	if !tb.hasCext || !tb.hasCback {
 		t.Fatalf("both columns must be found")
 	}
@@ -176,7 +182,10 @@ func TestTableParseS11S22(t *testing.T) {
 		"0.5 2.0 0.1 8.0 0.6 0.1 3.8 8.0 2.0 5\n" +
 		"1.0 4.0 0.1 9.0 0.7 0.1 4.0 9.0 1.0 5\n" +
 		"2.0 16.0 0.1 10.0 0.8 0.1 4.2 10.0 0.5 5\n"
-	tb, _ := parseTable([]byte(content), "data.txt", false)
+	tb, _, err := parseTable([]byte(content), "data.txt", false)
+	if err != nil {
+		t.Fatalf("parseTable: %v", err)
+	}
 	if !tb.hasS11 || !tb.hasS22 {
 		t.Fatalf("S11/S22 columns must be parsed (new table format)")
 	}
@@ -187,7 +196,10 @@ func TestTableParseS11S22(t *testing.T) {
 
 	// nan в S22 (mkbase пишет nan, если столбца s22 нет) — колонка отбрасывается
 	bad := strings.Replace(content, "7.0 3.5 5", "7.0 nan 5", 1)
-	tbNaN, _ := parseTable([]byte(bad), "data.txt", false)
+	tbNaN, _, err := parseTable([]byte(bad), "data.txt", false)
+	if err != nil {
+		t.Fatalf("parseTable: %v", err)
+	}
 	if tbNaN.hasS22 || !tbNaN.hasS11 {
 		t.Errorf("nan in S22 must disable the S22 column only")
 	}
@@ -204,7 +216,10 @@ func TestDepol(t *testing.T) {
 	for _, x := range xs {
 		fmt.Fprintf(&sb, "%.17g %.6g 0 1 0 0 0 %.17g 1\n", x, x, x)
 	}
-	tb, _ := parseTable([]byte(sb.String()), "data.txt", false)
+	tb, _, err := parseTable([]byte(sb.String()), "data.txt", false)
+	if err != nil {
+		t.Fatalf("parseTable: %v", err)
+	}
 	if !tb.hasS11 || !tb.hasS22 {
 		t.Fatalf("S11/S22 must be available")
 	}
@@ -216,7 +231,11 @@ func TestDepol(t *testing.T) {
 	ds := &depolSet{wl: append([]float64(nil), depolWlsUm...),
 		kt: make([][2]*ktable, 1)}
 	for iw, wl := range ds.wl {
-		ds.kt[0][iw] = depolKtableBuild(tb, wl, tableRefWlUm, rq)
+		kt, err := depolKtableBuild(tb, wl, tableRefWlUm, rq)
+		if err != nil {
+			t.Fatalf("depolKtableBuild: %v", err)
+		}
+		ds.kt[0][iw] = kt
 	}
 	ds.nOK = 1
 	if !depolSetAvailable(ds) {
@@ -259,15 +278,28 @@ func TestDepolProjection(t *testing.T) {
 	for _, x := range xs {
 		fmt.Fprintf(&sb, "%.17g %.6g 0 1 0 0 0 %.17g 1\n", x, x, x)
 	}
-	tb, _ := parseTable([]byte(sb.String()), "data.txt", false)
+	tb, _, err := parseTable([]byte(sb.String()), "data.txt", false)
+	if err != nil {
+		t.Fatalf("parseTable: %v", err)
+	}
 
-	g := geomBuild(1.0, 2.0, 1, 4, false, 24, 0.1)
+	g, err := geomBuild(1.0, 2.0, 1, 4, false, 24, 0.1)
+	if err != nil {
+		t.Fatalf("geomBuild: %v", err)
+	}
 	d := &design{nM: 1, nW: 1, nu: g.nUnknown, geom: []*geom{g}}
-	r := rGridFor(1.0, 2.0, 0.1, 0.355)
+	r, err := rGridFor(1.0, 2.0, 0.1, 0.355)
+	if err != nil {
+		t.Fatalf("rGridFor: %v", err)
+	}
 	ds := &depolSet{wl: append([]float64(nil), depolWlsUm...),
 		kt: make([][2]*ktable, 1)}
 	for iw, wl := range ds.wl {
-		ds.kt[0][iw] = depolKtableBuild(tb, wl, tableRefWlUm, r)
+		kt, err := depolKtableBuild(tb, wl, tableRefWlUm, r)
+		if err != nil {
+			t.Fatalf("depolKtableBuild: %v", err)
+		}
+		ds.kt[0][iw] = kt
 	}
 	ds.nOK = 1
 
@@ -392,8 +424,10 @@ func TestWriteProfileDepolColumns(t *testing.T) {
 	g1 := []float64{1e-4, 3e-4}
 	prof := &profile{nr: 2, rGrid: []float64{0.1, 0.2},
 		nAvg: []float64{1, 2}, gFit: append([]float64(nil), g1...)}
-	writeProfile(dir, 500, b, g1, prof,
-		distDepol{calc: 6.25, meas: 7.5, hasMeas: true})
+	if _, err := writeProfile(dir, 500, b, g1, prof,
+		distDepol{calc: 6.25, meas: 7.5, hasMeas: true}); err != nil {
+		t.Fatalf("writeProfile: %v", err)
+	}
 
 	data, err := os.ReadFile(filepath.Join(dir, "dist_500.txt"))
 	if err != nil {
@@ -424,7 +458,9 @@ func TestWriteProfileDepolColumns(t *testing.T) {
 	// без измерения — только колонка расчёта (nan при отсутствии S11/S22)
 	b2 := &batchInput{nch: 2, nAlt: 1,
 		ch: []batchChannel{{chBeta, 0.532, "b532"}, {chAlpha, 0.532, "a532"}}}
-	writeProfile(dir, 700, b2, g1, prof, distDepol{calc: math.NaN()})
+	if _, err := writeProfile(dir, 700, b2, g1, prof, distDepol{calc: math.NaN()}); err != nil {
+		t.Fatalf("writeProfile: %v", err)
+	}
 	data, err = os.ReadFile(filepath.Join(dir, "dist_700.txt"))
 	if err != nil {
 		t.Fatalf("read dist file: %v", err)
@@ -465,8 +501,11 @@ func TestBatchParseDepol(t *testing.T) {
 		return p
 	}
 
-	b := parseBatchTxt(write(t, "Altitude b532 a532 dep532\n"+
+	b, err := parseBatchTxt(write(t, "Altitude b532 a532 dep532\n"+
 		"500 1e-4 3e-4 12.5\n700 1.1e-4 3.1e-4 nan\n"))
+	if err != nil {
+		t.Fatalf("parseBatchTxt: %v", err)
+	}
 	if b.nch != 2 || b.ndep != 1 {
 		t.Fatalf("nch/ndep = %d/%d, want 2/1", b.nch, b.ndep)
 	}
@@ -483,8 +522,11 @@ func TestBatchParseDepol(t *testing.T) {
 	checkClose(t, "data[2]", b.data[2], 1.1e-4, 0)
 
 	// произвольный порядок столбцов
-	b = parseBatchTxt(write(t, "Altitude dep355 a532 b532\n"+
+	b, err = parseBatchTxt(write(t, "Altitude dep355 a532 b532\n"+
 		"500 8.0 3e-4 1e-4\n"))
+	if err != nil {
+		t.Fatalf("parseBatchTxt: %v", err)
+	}
 	if b.nch != 2 || b.ndep != 1 {
 		t.Fatalf("nch/ndep = %d/%d, want 2/1", b.nch, b.ndep)
 	}
@@ -728,16 +770,25 @@ func TestBuiltinTables(t *testing.T) {
 		{"agglomerate-cs", "large_aggl_100_cs/average", 56, 100, [2]float64{0.05, 80.0}},
 	}
 	for _, c := range cases {
-		src := builtinTableSource(c.kind)
+		src, err := builtinTableSource(c.kind)
+		if err != nil {
+			t.Fatalf("%s: %v", c.kind, err)
+		}
 		if src.origin != c.dir {
 			t.Errorf("%s: origin = %q, want %q", c.kind, src.origin, c.dir)
 		}
-		mre, mim := tableMGrid(src)
+		mre, mim, err := tableMGrid(src)
+		if err != nil {
+			t.Fatalf("%s: %v", c.kind, err)
+		}
 		if len(mre) != c.nM || len(mim) != c.nM {
 			t.Fatalf("%s: %d/%d m values, want %d", c.kind, len(mre),
 				len(mim), c.nM)
 		}
-		tab := tableCacheGet(src, mre[0], mim[0], false)
+		tab, err := tableCacheGet(src, mre[0], mim[0], false)
+		if err != nil {
+			t.Fatalf("%s: %v", c.kind, err)
+		}
 		if !tab.hasCext || !tab.hasCback || !tab.hasS11 || !tab.hasS22 {
 			t.Errorf("%s: table %s must have Cext/Cback/S11/S22", c.kind,
 				tab.path)
@@ -762,8 +813,11 @@ func TestEmbeddedGzipMatchesSource(t *testing.T) {
 		t.Skip("bases/ is not available (run 'go generate ./bases' first)")
 	}
 	for kind, dir := range builtinTableDirs {
-		src := builtinTableSource(kind)
-		err := fs.WalkDir(src.fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		src, err := builtinTableSource(kind)
+		if err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+		err = fs.WalkDir(src.fsys, ".", func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}

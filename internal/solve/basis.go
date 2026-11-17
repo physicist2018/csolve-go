@@ -1,6 +1,9 @@
 package solve
 
-import "math"
+import (
+	"errors"
+	"math"
+)
 
 // glNodesWeights — узлы и веса Гаусса–Лежандра на [-1, 1] (по возрастанию).
 func glNodesWeights(order int) ([]float64, []float64) {
@@ -79,7 +82,8 @@ func bsplineValues(knots []float64, p int, t float64) []float64 {
 	}
 	span := findSpan(knots, nbf, p, u)
 	if p+1 > 16 {
-		fatal("B-spline degree too large")
+		// Инвариант: степень B-сплайна проверяется в ParseArgs (1..4).
+		panic("B-spline degree too large")
 	}
 	var N, left, right [17]float64
 	N[0] = 1.0
@@ -228,13 +232,13 @@ type geom struct {
 	dvol                     []float64 // nNodes
 }
 
-func geomBuild(r0, r1 float64, degree, nBasis int, interiorOnly bool, order int, maxLogSpan float64) *geom {
+func geomBuild(r0, r1 float64, degree, nBasis int, interiorOnly bool, order int, maxLogSpan float64) (*geom, error) {
 	pInternal := nBasis - degree - 1
 	if pInternal < 0 {
-		fatal("expected n_basis >= degree + 1")
+		return nil, errors.New("expected n_basis >= degree + 1")
 	}
 	if interiorOnly && nBasis < 3 {
-		fatal("boundary conditions n(r0)=n(r1)=0 require n_basis >= 3")
+		return nil, errors.New("boundary conditions n(r0)=n(r1)=0 require n_basis >= 3")
 	}
 
 	nk := nBasis + degree + 1
@@ -294,5 +298,5 @@ func geomBuild(r0, r1 float64, degree, nBasis int, interiorOnly bool, order int,
 		weights:      weights,
 		values:       values,
 		dvol:         dvol,
-	}
+	}, nil
 }

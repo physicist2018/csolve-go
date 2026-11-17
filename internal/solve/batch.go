@@ -2,6 +2,7 @@ package solve
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -38,10 +39,10 @@ type batchColSpec struct {
 	name string
 }
 
-func parseBatchTxt(path string) *batchInput {
+func parseBatchTxt(path string) (*batchInput, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		fatal("failed to open file: %s", path)
+		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
 	defer f.Close()
 
@@ -63,19 +64,19 @@ func parseBatchTxt(path string) *batchInput {
 		if !haveHeader {
 			low := strings.ToLower(toks[0])
 			if low != "altitude" && low != "alt" && low != "h" {
-				fatal("first header field must be 'Altitude', got '%s'", toks[0])
+				return nil, fmt.Errorf("first header field must be 'Altitude', got '%s'", toks[0])
 			}
 			specs = make([]batchColSpec, 0, len(toks)-1)
 			for i := 1; i < len(toks); i++ {
 				spec, ok := parseBatchColumnName(toks[i])
 				if !ok {
-					fatal("unknown column name '%s' (expected b<nm>, a<nm> or dep<nm>)",
+					return nil, fmt.Errorf("unknown column name '%s' (expected b<nm>, a<nm> or dep<nm>)",
 						toks[i])
 				}
 				if spec.dep {
 					for _, prev := range specs {
 						if prev.dep && prev.wlUm == spec.wlUm {
-							fatal("duplicate depolarization column '%s'", toks[i])
+							return nil, fmt.Errorf("duplicate depolarization column '%s'", toks[i])
 						}
 					}
 					b.depWl = append(b.depWl, spec.wlUm)
@@ -87,25 +88,25 @@ func parseBatchTxt(path string) *batchInput {
 			b.nch = len(b.ch)
 			b.ndep = len(b.depWl)
 			if b.nch <= 0 {
-				fatal("no channels in header (expected b/a<nm>)")
+				return nil, errors.New("no channels in header (expected b/a<nm>)")
 			}
 			haveHeader = true
 			continue
 		}
 
 		if len(toks) != len(specs)+1 {
-			fatal("expected %d values per row, got %d: '%s'",
+			return nil, fmt.Errorf("expected %d values per row, got %d: '%s'",
 				len(specs), len(toks)-1, s)
 		}
 		hv, err := strconv.ParseFloat(toks[0], 64)
 		if err != nil {
-			fatal("failed to parse line '%s'", s)
+			return nil, fmt.Errorf("failed to parse line '%s'", s)
 		}
 		b.alt = append(b.alt, hv)
 		for i, spec := range specs {
 			v, err := strconv.ParseFloat(toks[i+1], 64)
 			if err != nil {
-				fatal("failed to parse line '%s'", s)
+				return nil, fmt.Errorf("failed to parse line '%s'", s)
 			}
 			if spec.dep {
 				b.dep = append(b.dep, v)
@@ -116,16 +117,16 @@ func parseBatchTxt(path string) *batchInput {
 		haveRow = true
 	}
 	if err := scan.Err(); err != nil {
-		fatal("failed to read file %s: %v", path, err)
+		return nil, fmt.Errorf("failed to read file %s: %w", path, err)
 	}
 	if !haveHeader {
-		fatal("file %s is empty", path)
+		return nil, fmt.Errorf("file %s is empty", path)
 	}
 	if !haveRow {
-		fatal("no altitude rows in file %s", path)
+		return nil, fmt.Errorf("no altitude rows in file %s", path)
 	}
 	b.nAlt = len(b.alt)
-	return b
+	return b, nil
 }
 
 // parseBatchColumnName — разбор имени столбца: b<nm> (β), a<nm> (α) или
@@ -551,26 +552,35 @@ func applyLidarConstraint(per []*solutions, nAlt int, alt []float64, nl int,
 }
 
 // ---------------- вывод файлов ----------------
-func mkdirP(path string) {
+func mkdirP(path string) error {
 	if err := os.MkdirAll(path, 0777); err != nil {
-		fatal("failed to create directory %s: %v", path, err)
+		return fmt.Errorf("failed to create directory: %w", err)
 	}
+	return nil
 }
 
-func defaultOutDir(batchPath string) string {
+func defaultOutDir(batchPath string) (string, error) {
 	abs, err := filepath.Abs(batchPath)
 	if err != nil {
-		fatal("failed to get current directory")
+		return "", errors.New("failed to get current directory")
 	}
-	return filepath.Dir(abs)
+	return filepath.Dir(abs), nil
 }
 
-func openAppend(path string) *os.File {
+func openAppend(path string) (*os.File, error) {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		fatal("failed to open file for writing: %s", path)
+		return nil, fmt.Errorf("failed to open file for writing: %w", err)
 	}
-	return f
+	return f, nil
+}
+
+// closeFile закрывает файл и сообщает ошибку записи, отложенную до Close.
+func closeFile(f *os.File) error {
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+	return nil
 }
 
 // distDepol — скалярные δ_l на 532 нм для файла dist_<H>.txt.
@@ -581,7 +591,7 @@ type distDepol struct {
 }
 
 func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
-	p *profile, dd distDepol) float64 {
+	p *profile, dd distDepol) (float64, error) {
 	path := filepath.Join(outDir, fmt.Sprintf("dist_%s.txt", formatG6(h)))
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# altitude H = %g m\n", h)
@@ -609,25 +619,38 @@ func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
 		}
 	}
 	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
-		fatal("failed to open file for writing: %s", path)
+		return 0, fmt.Errorf("failed to open file for writing: %w", err)
 	}
 
 	mf := &p.modes.Fine
 	mc := &p.modes.Coarse
 	mo := &p.modes.Overall
-	fm := openAppend(filepath.Join(outDir, "moments.txt"))
+	fm, err := openAppend(filepath.Join(outDir, "moments.txt"))
+	if err != nil {
+		return 0, err
+	}
 	fmt.Fprintf(fm, "%s  %s  %s  %s  %s  %s  %s  %s  %s  %s  %s  %s\n",
 		formatG6(h), formatG6(mf.V/cm3PerM3), formatG6(mc.V/cm3PerM3),
 		formatG6(p.moments.VolConcUm3PerCm3), formatG6(mf.Rm), formatG6(mc.Rm), formatG6(mo.Rm),
 		formatG6(p.moments.REffUm), formatG6(p.moments.NCm3), formatG6(mf.Sigma),
 		formatG6(mc.Sigma), formatG6(mo.Sigma))
-	fm.Close()
+	if err := closeFile(fm); err != nil {
+		return 0, err
+	}
 
-	fr := openAppend(filepath.Join(outDir, "refractive.txt"))
+	fr, err := openAppend(filepath.Join(outDir, "refractive.txt"))
+	if err != nil {
+		return 0, err
+	}
 	fmt.Fprintf(fr, "%s  %s  %s\n", formatG6(h), formatG6(p.mRe), formatG6(p.mIm))
-	fr.Close()
+	if err := closeFile(fr); err != nil {
+		return 0, err
+	}
 
-	fe := openAppend(filepath.Join(outDir, "errors.txt"))
+	fe, err := openAppend(filepath.Join(outDir, "errors.txt"))
+	if err != nil {
+		return 0, err
+	}
 	fmt.Fprintf(fe, "%s", formatG6(h))
 	errSum := 0.0
 	for j := 0; j < b.nch; j++ {
@@ -637,8 +660,10 @@ func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
 	}
 	errSum /= float64(b.nch)
 	fmt.Fprintf(fe, "  %s\n", formatG6(errSum))
-	fe.Close()
-	return errSum
+	if err := closeFile(fe); err != nil {
+		return 0, err
+	}
+	return errSum, nil
 }
 
 type metrics struct {
@@ -658,9 +683,12 @@ type metrics struct {
 func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 	solveCh []channel, g1 []float64, sols *solutions, kts []*ktable,
 	mre, mim []float64, geom []*geom, r1Max float64, common []commonWl,
-	nl int, writeLidar bool, met *metrics, hi int, ds *depolSet) {
-	prof := profileFinalize(a, solveCh, kts, mre, mim, sols, geom, a.R0Min,
+	nl int, writeLidar bool, met *metrics, hi int, ds *depolSet) error {
+	prof, err := profileFinalize(a, solveCh, kts, mre, mim, sols, geom, a.R0Min,
 		r1Max, ds)
+	if err != nil {
+		return err
+	}
 	dd := distDepol{calc: math.NaN(), meas: math.NaN()}
 	if i := depolWlIndex(prof.deltaLwl, 0.532); i >= 0 && i < len(prof.deltaL) {
 		dd.calc = prof.deltaL[i]
@@ -669,11 +697,17 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 		dd.meas = b.dep[hi*b.ndep+k]
 		dd.hasMeas = true
 	}
-	err := writeProfile(outDir, h, b, g1, prof, dd)
+	errSum, err := writeProfile(outDir, h, b, g1, prof, dd)
+	if err != nil {
+		return err
+	}
 
 	dStr := ""
 	if ds != nil && len(ds.wl) > 0 {
-		fd := openAppend(filepath.Join(outDir, "delpol.txt"))
+		fd, err := openAppend(filepath.Join(outDir, "delpol.txt"))
+		if err != nil {
+			return err
+		}
 		fmt.Fprintf(fd, "%s", formatG6(h))
 		for i := range ds.wl {
 			v := math.NaN()
@@ -685,10 +719,10 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 		for k := 0; k < b.ndep; k++ {
 			fmt.Fprintf(fd, "  %s", formatG6(b.dep[hi*b.ndep+k]))
 		}
-		if _, err := fd.WriteString("\n"); err != nil {
-			fatal("failed to write %s: %v", fd.Name(), err)
+		fmt.Fprint(fd, "\n")
+		if err := closeFile(fd); err != nil {
+			return err
 		}
-		fd.Close()
 	}
 
 	if len(prof.deltaL) > 0 {
@@ -716,7 +750,7 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 	}
 
 	if met != nil {
-		met.err[hi] = err
+		met.err[hi] = errSum
 		met.V[hi] = prof.moments.VolConcUm3PerCm3
 		met.Vc[hi] = prof.modes.Coarse.V / cm3PerM3
 		met.Vf[hi] = prof.modes.Fine.V / cm3PerM3
@@ -744,16 +778,19 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 
 	sStr := ""
 	if writeLidar {
-		fl := openAppend(filepath.Join(outDir, "lidar_ratios.txt"))
+		fl, err := openAppend(filepath.Join(outDir, "lidar_ratios.txt"))
+		if err != nil {
+			return err
+		}
 		fmt.Fprintf(fl, "%s", formatG6(h))
 		for k := 0; k < nl; k++ {
 			v := lidarRatioValue(prof.gFit, common, k)
 			fmt.Fprintf(fl, "  %s", formatG6(v))
 		}
-		if _, err := fl.WriteString("\n"); err != nil {
-			fatal("failed to write %s: %v", fl.Name(), err)
+		fmt.Fprint(fl, "\n")
+		if err := closeFile(fl); err != nil {
+			return err
 		}
-		fl.Close()
 
 		var acc strings.Builder
 		acc.WriteString("  S = ")
@@ -773,17 +810,27 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 
 	fmt.Printf("  altitude %s m: ⟨m⟩ = %.3f%+.3fj, N = %.3g cm⁻³%s%s\n",
 		formatG6(h), prof.mRe, prof.mIm, prof.moments.NCm3, sStr, dStr)
+	return nil
 }
 
 // ---------------- основной сценарий ----------------
-func runBatch(a *Args) {
-	b := parseBatchTxt(a.Batch)
+func runBatch(a *Args) error {
+	b, err := parseBatchTxt(a.Batch)
+	if err != nil {
+		return err
+	}
 	if a.DepolRatioCons && b.ndep == 0 {
-		fatal("option --depol-ratio-cons requires a dep<nm> column in the " +
+		return errors.New("option --depol-ratio-cons requires a dep<nm> column in the " +
 			"batch file (e.g. dep532), got none")
 	}
-	src := a.tableSource()
-	mre, mim := tableMGrid(src)
+	src, err := a.tableSource()
+	if err != nil {
+		return err
+	}
+	mre, mim, err := tableMGrid(src)
+	if err != nil {
+		return err
+	}
 	nm := len(mre)
 
 	fmt.Printf("batch processing: %s\n", a.Batch)
@@ -828,15 +875,18 @@ func runBatch(a *Args) {
 	// покрытие таблиц -> r1_max_eff
 	capmin := math.Inf(1)
 	for i := 0; i < nm; i++ {
-		chs := loadTableChannels(src, mre[i], mim[i], solveCh,
+		chs, err := loadTableChannels(src, mre[i], mim[i], solveCh,
 			a.TableExtrapolate, a.TableRefWl, cbackScale)
+		if err != nil {
+			return err
+		}
 		if chs.cap < capmin {
 			capmin = chs.cap
 		}
 	}
 	r1MaxEff := math.Min(a.R1Max, capmin)
 	if r1MaxEff < a.R1Min {
-		fatal("table coverage in x limits r1_max = %g µm < "+
+		return fmt.Errorf("table coverage in x limits r1_max = %g µm < "+
 			"r1_min = %g — decrease --r1-min, choose another --type, "+
 			"or extend the tables (%s)", r1MaxEff, a.R1Min, src.describe())
 	}
@@ -851,8 +901,11 @@ func runBatch(a *Args) {
 		fmt.Printf("  Cback convention = dsigma\n")
 	}
 	{
-		c0 := loadTableChannels(src, mre[0], mim[0], solveCh,
+		c0, err := loadTableChannels(src, mre[0], mim[0], solveCh,
 			a.TableExtrapolate, a.TableRefWl, cbackScale)
+		if err != nil {
+			return err
+		}
 		for j := 0; j < b.nch; j++ {
 			fmt.Printf("  %-14s x_max = %g, r_max = %.3g µm\n",
 				c0.ch[j].name(), c0.ch[j].tab.xMax,
@@ -866,23 +919,36 @@ func runBatch(a *Args) {
 	fmt.Printf("building kernel tables (%d m values, once per batch)...\n", nm)
 	kts := make([]*ktable, nm)
 	for i := 0; i < nm; i++ {
-		chs := loadTableChannels(src, mre[i], mim[i], solveCh,
+		chs, err := loadTableChannels(src, mre[i], mim[i], solveCh,
 			a.TableExtrapolate, a.TableRefWl, cbackScale)
-		kts[i] = ktableBuild(chs, a.R0Min, r1MaxEff, a.DxMax)
+		if err != nil {
+			return err
+		}
+		kt, err := ktableBuild(chs, a.R0Min, r1MaxEff, a.DxMax)
+		if err != nil {
+			return err
+		}
+		kts[i] = kt
 	}
 	fmt.Printf("  table: %d r points per m\n", kts[0].n)
 
 	// ядра S11/S22 для линейной деполяризации — тоже один раз на пакет
-	ds := depolSetBuild(src, mre, mim, a.TableRefWl, a.R0Min, r1MaxEff,
+	ds, err := depolSetBuild(src, mre, mim, a.TableRefWl, a.R0Min, r1MaxEff,
 		a.DxMax, a.TableExtrapolate)
+	if err != nil {
+		return err
+	}
 	depolSetReport(ds, src, nm)
 
 	// матрицы A — тоже один раз
 	r0Grid := geomspace(a.R0Min, a.R0Max, a.NR0)
 	r1Grid := geomspace(a.R1Min, r1MaxEff, a.NR1)
-	design := designBuild(solveCh, b.nch, kts, mre, mim, a.Degrees, r0Grid,
+	design, err := designBuild(solveCh, b.nch, kts, mre, mim, a.Degrees, r0Grid,
 		r1Grid, a.MinRatio, a.NBasis, !a.NoZeroBoundary, a.QuadOrder,
 		a.LogSpan)
+	if err != nil {
+		return err
+	}
 	fmt.Printf("  matrices A precomputed: %d windows × %d m\n", design.nW, nm)
 	reportEnsembleSize(a, design.nW*design.nM)
 
@@ -949,21 +1015,31 @@ func runBatch(a *Args) {
 		outDir = a.OutDir
 	}
 	if outDir == "" {
-		outDir = defaultOutDir(a.Batch)
-	}
-	mkdirP(outDir)
-
-	// шапки общих файлов
-	writeHeader := func(name, content string) {
-		path := filepath.Join(outDir, name)
-		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-			fatal("failed to open file for writing: %s", path)
+		outDir, err = defaultOutDir(a.Batch)
+		if err != nil {
+			return err
 		}
 	}
-	writeHeader("moments.txt",
+	if err := mkdirP(outDir); err != nil {
+		return err
+	}
+
+	// шапки общих файлов
+	writeHeader := func(name, content string) error {
+		path := filepath.Join(outDir, name)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			return fmt.Errorf("failed to open file for writing: %w", err)
+		}
+		return nil
+	}
+	if err := writeHeader("moments.txt",
 		"# H  Vf  Vc  V  rmf  rmc  rm  reff  N  sigma_f  sigma_c  sigma\n"+
-			"# V — µm³/cm³; rm/reff — µm; N — cm⁻³; sigma — dimensionless.\n")
-	writeHeader("refractive.txt", "# H  Re(m)  Im(m)\n")
+			"# V — µm³/cm³; rm/reff — µm; N — cm⁻³; sigma — dimensionless.\n"); err != nil {
+		return err
+	}
+	if err := writeHeader("refractive.txt", "# H  Re(m)  Im(m)\n"); err != nil {
+		return err
+	}
 	{
 		var sb strings.Builder
 		sb.WriteString("# H  ")
@@ -975,7 +1051,9 @@ func runBatch(a *Args) {
 		}
 		sb.WriteString("  Err\n# relative errors |g_fit-g1|/g1 " +
 			"(Err = mean over channels)\n")
-		writeHeader("errors.txt", sb.String())
+		if err := writeHeader("errors.txt", sb.String()); err != nil {
+			return err
+		}
 	}
 
 	common := commonWavelengths(b)
@@ -1002,7 +1080,9 @@ func runBatch(a *Args) {
 			sb.WriteString("# delta_l_meas_* — measured depolarization from " +
 				"the dep<nm> columns\n")
 		}
-		writeHeader("delpol.txt", sb.String())
+		if err := writeHeader("delpol.txt", sb.String()); err != nil {
+			return err
+		}
 	}
 
 	met := metrics{nAlt: b.nAlt, nl: nl}
@@ -1048,7 +1128,9 @@ func runBatch(a *Args) {
 			fmt.Fprintf(&sb, "S_%g", common[k].wl*1e3)
 		}
 		sb.WriteString("\n# retrieved lidar ratio S = α/β at common wavelengths\n")
-		writeHeader("lidar_ratios.txt", sb.String())
+		if err := writeHeader("lidar_ratios.txt", sb.String()); err != nil {
+			return err
+		}
 	}
 
 	if retain {
@@ -1057,11 +1139,14 @@ func runBatch(a *Args) {
 		for h := 0; h < b.nAlt; h++ {
 			g1 := b.data[h*b.nch:]
 			fmt.Printf("  scanning altitude %g m...\n", b.alt[h])
-			per[h] = scanVariants(design, g1, b.nch, a.GammaSelect,
+			per[h], err = scanVariants(design, g1, b.nch, a.GammaSelect,
 				a.GammaRel, a.GammaMin, a.GammaMax, a.NGamma, a.Nonneg,
 				!a.Absolute, depolAt(h))
+			if err != nil {
+				return err
+			}
 			if per[h].n == 0 {
-				fatal("no valid [r0, r1] window")
+				return errors.New("no valid [r0, r1] window")
 			}
 			depPen[h] = rankDepolAt(per[h], h)
 		}
@@ -1092,9 +1177,11 @@ func runBatch(a *Args) {
 
 		for h := 0; h < b.nAlt; h++ {
 			g1 := b.data[h*b.nch:]
-			emitProfile(a, outDir, b.alt[h], b, solveCh, g1, per[h], kts,
+			if err := emitProfile(a, outDir, b.alt[h], b, solveCh, g1, per[h], kts,
 				mre, mim, design.geom, r1MaxEff, common, nl, writeLidar,
-				&met, h, ds)
+				&met, h, ds); err != nil {
+				return err
+			}
 		}
 	} else {
 		if a.LidarRatioCons {
@@ -1110,16 +1197,21 @@ func runBatch(a *Args) {
 		for h := 0; h < b.nAlt; h++ {
 			g1 := b.data[h*b.nch:]
 			fmt.Printf("  scanning altitude %g m...\n", b.alt[h])
-			sols := scanVariants(design, g1, b.nch, a.GammaSelect,
+			sols, err := scanVariants(design, g1, b.nch, a.GammaSelect,
 				a.GammaRel, a.GammaMin, a.GammaMax, a.NGamma, a.Nonneg,
 				!a.Absolute, depolAt(h))
+			if err != nil {
+				return err
+			}
 			if sols.n == 0 {
-				fatal("no valid [r0, r1] window")
+				return errors.New("no valid [r0, r1] window")
 			}
 			rankDepolAt(sols, h)
-			emitProfile(a, outDir, b.alt[h], b, solveCh, g1, sols, kts,
+			if err := emitProfile(a, outDir, b.alt[h], b, solveCh, g1, sols, kts,
 				mre, mim, design.geom, r1MaxEff, common, nl, writeLidar,
-				&met, h, ds)
+				&met, h, ds); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1202,4 +1294,5 @@ func runBatch(a *Args) {
 	}
 
 	fmt.Printf("batch processing finished; results: %s\n", outDir)
+	return nil
 }

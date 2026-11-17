@@ -1,6 +1,9 @@
 package solve
 
-import "math"
+import (
+	"fmt"
+	"math"
+)
 
 type profile struct {
 	nr         int
@@ -35,7 +38,7 @@ func mIndex(mre, mim []float64, re, im float64) int {
 // profileFinalize — итоговый профиль одной высоты (общий код одиночного и
 // пакетного режимов). ds — ядра S11/S22 для δ_l (nil — не считаются).
 func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
-	sols *solutions, geom []*geom, rMin, rMax float64, ds *depolSet) *profile {
+	sols *solutions, geom []*geom, rMin, rMax float64, ds *depolSet) (*profile, error) {
 	_ = ch
 	p := &profile{}
 	nr := a.NrOut
@@ -59,7 +62,7 @@ func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
 	for t := 0; t < G; t++ {
 		bestIdx[t] = mIndex(mre, mim, sols.sol[t].mRe, sols.sol[t].mIm)
 		if bestIdx[t] < 0 {
-			fatal("internal error: m = %g%+gj is missing from the kernel grid",
+			return nil, fmt.Errorf("internal error: m = %g%+gj is missing from the kernel grid",
 				sols.sol[t].mRe, sols.sol[t].mIm)
 		}
 	}
@@ -110,5 +113,5 @@ func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
 		}
 	}
 	p.modes = modeAnalysis(p.rGrid, p.nAvg, a.RSplit, p.count, a.Modes)
-	return p
+	return p, nil
 }

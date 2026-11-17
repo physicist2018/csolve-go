@@ -247,9 +247,8 @@ Options:
 
 // DefaultArgs — параметры по умолчанию (как при запуске без опций).
 // Используется интерактивным режимом, чтобы не дублировать значения.
-func DefaultArgs() *Args {
-	a, _ := ParseArgs(nil)
-	return a
+func DefaultArgs() (*Args, error) {
+	return ParseArgs(nil)
 }
 
 // ParseArgs — разбор аргументов; --degree принимает ровно одно значение.

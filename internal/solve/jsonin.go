@@ -2,6 +2,8 @@ package solve
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 )
 
@@ -33,14 +35,14 @@ type measurementInput struct {
 }
 
 // loadJSONInput — чтение измерений из JSON (структура как в Python-версии).
-func loadJSONInput(path string) measurementInput {
+func loadJSONInput(path string) (measurementInput, error) {
 	text, err := os.ReadFile(path)
 	if err != nil {
-		fatal("failed to open file: %s", path)
+		return measurementInput{}, fmt.Errorf("failed to open file: %w", err)
 	}
 	var root jsonInput
 	if err := json.Unmarshal(text, &root); err != nil {
-		fatal("failed to parse input JSON %s: %v", path, err)
+		return measurementInput{}, fmt.Errorf("failed to parse input JSON %s: %w", path, err)
 	}
 
 	var in measurementInput
@@ -49,9 +51,9 @@ func loadJSONInput(path string) measurementInput {
 		in.mIm = root.M.Imag
 	}
 
-	add := func(grp *jsonGroup, kind chKind) {
+	add := func(grp *jsonGroup, kind chKind) error {
 		if grp == nil {
-			return
+			return nil
 		}
 		cnt := len(grp.WavelengthsNm)
 		if len(grp.Coefficients) < cnt {
@@ -59,7 +61,7 @@ func loadJSONInput(path string) measurementInput {
 		}
 		for i := 0; i < cnt; i++ {
 			if len(in.channels) >= 32 {
-				fatal("too many channels in input data")
+				return errors.New("too many channels in input data")
 			}
 			in.channels = append(in.channels, channel{
 				kind:       kind,
@@ -70,11 +72,16 @@ func loadJSONInput(path string) measurementInput {
 			})
 			in.g1 = append(in.g1, grp.Coefficients[i])
 		}
+		return nil
 	}
-	add(root.Backscatter, chBeta)
-	add(root.Extinction, chAlpha)
+	if err := add(root.Backscatter, chBeta); err != nil {
+		return measurementInput{}, err
+	}
+	if err := add(root.Extinction, chAlpha); err != nil {
+		return measurementInput{}, err
+	}
 	if len(in.channels) == 0 {
-		fatal("no channels in data")
+		return measurementInput{}, errors.New("no channels in data")
 	}
 
 	if grp := root.Depolarization; grp != nil {
@@ -87,5 +94,5 @@ func loadJSONInput(path string) measurementInput {
 			in.depVal = append(in.depVal, grp.Coefficients[i])
 		}
 	}
-	return in
+	return in, nil
 }

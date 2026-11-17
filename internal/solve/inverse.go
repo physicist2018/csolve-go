@@ -1,6 +1,7 @@
 package solve
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -239,15 +240,15 @@ func sortSolutions(sol []solution) {
 // задано, в систему добавляется строка ограничения по измеренному δ_l.
 func scanVariants(d *design, g1 []float64, nch int, gammaSel gammaSelect,
 	gammaRelFixed, gammaExpMin, gammaExpMax float64, nGamma int,
-	nonneg, relative bool, dc *depolCons) *solutions {
+	nonneg, relative bool, dc *depolCons) (*solutions, error) {
 	out := &solutions{}
 	if d.nW == 0 || d.nM == 0 {
 		out.scale = 1.0
-		return out
+		return out, nil
 	}
 	for j := 0; j < nch; j++ {
 		if !(g1[j] > 0) {
-			fatal("all measured coefficients g1 must be positive")
+			return nil, errors.New("all measured coefficients g1 must be positive")
 		}
 	}
 	scale := g1[0]
@@ -379,5 +380,5 @@ func scanVariants(d *design, g1 []float64, nch int, gammaSel gammaSelect,
 	}
 
 	sortSolutions(out.sol)
-	return out
+	return out, nil
 }

@@ -32,7 +32,7 @@ func sameToDecimals(a, b float64, decimals int) bool {
 }
 
 // resolveDemoM — приведение запрошенного m к ближайшему значению сетки таблиц.
-func resolveDemoM(trueRe, trueIm float64, a *Args, mre, mim []float64) (float64, float64) {
+func resolveDemoM(trueRe, trueIm float64, a *Args, mre, mim []float64) (float64, float64, error) {
 	var cand []int
 	for i := range mre {
 		ok := true
@@ -51,7 +51,7 @@ func resolveDemoM(trueRe, trueIm float64, a *Args, mre, mim []float64) (float64,
 		for i := range mre {
 			parts[i] = fmt.Sprintf("%g%+gj", mre[i], mim[i])
 		}
-		fatal("demo true m = %g%+gj is missing from the tabular m grid: %s — "+
+		return 0, 0, fmt.Errorf("demo true m = %g%+gj is missing from the tabular m grid: %s — "+
 			"set --m-real/--m-imag from this list", trueRe, trueIm,
 			strings.Join(parts, ", "))
 	}
@@ -67,7 +67,7 @@ func resolveDemoM(trueRe, trueIm float64, a *Args, mre, mim []float64) (float64,
 		fmt.Printf("[tabular mode] demo true m: using %g%+gj (closest to "+
 			"%g%+gj in tables)\n", mre[best], mim[best], trueRe, trueIm)
 	}
-	return mre[best], mim[best]
+	return mre[best], mim[best], nil
 }
 
 // forwardMeasurements — прямой расчёт g по демонстрационному распределению.
@@ -110,20 +110,8 @@ func rngNormal() float64 {
 	return math.Sqrt(-2.0*math.Log(u1)) * math.Cos(2.0*math.Pi*u2)
 }
 
-// Main — точка входа; fatalError печатается как "error: ...".
-func Main(argv []string) (code int) {
-	code = 0
-	defer func() {
-		if r := recover(); r != nil {
-			if fe, ok := r.(fatalError); ok {
-				fmt.Fprintf(os.Stderr, "error: %s\n", fe.msg)
-				code = 1
-				return
-			}
-			panic(r)
-		}
-	}()
-
+// Main — точка входа; ошибки печатаются как "error: ...".
+func Main(argv []string) int {
 	a, err := ParseArgs(argv)
 	if errors.Is(err, errHelp) {
 		return 0
@@ -133,11 +121,14 @@ func Main(argv []string) (code int) {
 			"information.\n", err)
 		return 1
 	}
-	run(a)
+	if err := run(a); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
 	return 0
 }
 
-func run(a *Args) {
+func run(a *Args) error {
 	timeEnabled = os.Getenv("CSOLVE_TIME") != ""
 	tAll := nowSec()
 
@@ -150,9 +141,9 @@ func run(a *Args) {
 	}
 
 	if a.Batch != "" {
-		runBatch(a)
+		err := runBatch(a)
 		phase("total", tAll)
-		return
+		return err
 	}
 
 	// ---- каналы и измерения ----
@@ -163,7 +154,10 @@ func run(a *Args) {
 	trueRe, trueIm := 1.45, -0.005
 
 	if !demo {
-		in := loadJSONInput(a.Data)
+		in, err := loadJSONInput(a.Data)
+		if err != nil {
+			return err
+		}
 		baseCh, g1, depWl, depVal = in.channels, in.g1, in.depWl, in.depVal
 		if in.mRe != nil {
 			trueRe = *in.mRe
@@ -203,11 +197,11 @@ func run(a *Args) {
 
 	if a.DepolRatioCons && len(depVal) == 0 {
 		if demo {
-			fatal("option --depol-ratio-cons requires measured " +
+			return errors.New("option --depol-ratio-cons requires measured " +
 				"depolarization, but demo data has none — provide --data JSON " +
 				"with a \"depolarization\" group")
 		}
-		fatal("option --depol-ratio-cons requires measured depolarization: " +
+		return errors.New("option --depol-ratio-cons requires measured depolarization: " +
 			"add a \"depolarization\" group with wavelengths_nm/coefficients " +
 			"to the input JSON")
 	}
@@ -242,14 +236,23 @@ func run(a *Args) {
 	}
 
 	// ---- сетка m из таблиц ----
-	src := a.tableSource()
-	mre, mim := tableMGrid(src)
+	src, err := a.tableSource()
+	if err != nil {
+		return err
+	}
+	mre, mim, err := tableMGrid(src)
+	if err != nil {
+		return err
+	}
 	nm := len(mre)
 	if nm == 0 {
-		fatal("refractive index grid is empty")
+		return errors.New("refractive index grid is empty")
 	}
 	if demo {
-		trueRe, trueIm = resolveDemoM(trueRe, trueIm, a, mre, mim)
+		trueRe, trueIm, err = resolveDemoM(trueRe, trueIm, a, mre, mim)
+		if err != nil {
+			return err
+		}
 	}
 
 	fmt.Printf("refractive index m (initial/true) = %g %+gj\n", trueRe, trueIm)
@@ -266,15 +269,18 @@ func run(a *Args) {
 	fmt.Printf("building kernel tables (%d m values)...\n", nm)
 	capmin := math.Inf(1)
 	for i := 0; i < nm; i++ {
-		chs := loadTableChannels(src, mre[i], mim[i], baseCh,
+		chs, err := loadTableChannels(src, mre[i], mim[i], baseCh,
 			a.TableExtrapolate, a.TableRefWl, cbackScale)
+		if err != nil {
+			return err
+		}
 		if chs.cap < capmin {
 			capmin = chs.cap
 		}
 	}
 	r1MaxEff := math.Min(a.R1Max, capmin)
 	if r1MaxEff < a.R1Min {
-		fatal("table coverage in x limits r1_max = %g µm < "+
+		return fmt.Errorf("table coverage in x limits r1_max = %g µm < "+
 			"r1_min = %g — decrease --r1-min, choose another --type, "+
 			"or extend the tables (%s)", r1MaxEff, a.R1Min, src.describe())
 	}
@@ -289,8 +295,11 @@ func run(a *Args) {
 		fmt.Printf("  Cback convention = dsigma\n")
 	}
 	{
-		c0 := loadTableChannels(src, mre[0], mim[0], baseCh,
+		c0, err := loadTableChannels(src, mre[0], mim[0], baseCh,
 			a.TableExtrapolate, a.TableRefWl, cbackScale)
+		if err != nil {
+			return err
+		}
 		for j := 0; j < nch; j++ {
 			fmt.Printf("  %-14s x_max = %g, r_max = %.3g µm\n",
 				c0.ch[j].name(), c0.ch[j].tab.xMax,
@@ -303,17 +312,27 @@ func run(a *Args) {
 	kts := make([]*ktable, nm)
 	tPhase := nowSec()
 	for i := 0; i < nm; i++ {
-		chs := loadTableChannels(src, mre[i], mim[i], baseCh,
+		chs, err := loadTableChannels(src, mre[i], mim[i], baseCh,
 			a.TableExtrapolate, a.TableRefWl, cbackScale)
-		kts[i] = ktableBuild(chs, a.R0Min, r1MaxEff, a.DxMax)
+		if err != nil {
+			return err
+		}
+		kt, err := ktableBuild(chs, a.R0Min, r1MaxEff, a.DxMax)
+		if err != nil {
+			return err
+		}
+		kts[i] = kt
 	}
 	fmt.Printf("  table: %d points in r per m\n", kts[0].n)
 	phase("kernels", tPhase)
 
 	// ядра S11/S22 для линейной деполяризации (независимо от каналов)
 	tPhase = nowSec()
-	ds := depolSetBuild(src, mre, mim, a.TableRefWl, a.R0Min, r1MaxEff,
+	ds, err := depolSetBuild(src, mre, mim, a.TableRefWl, a.R0Min, r1MaxEff,
 		a.DxMax, a.TableExtrapolate)
+	if err != nil {
+		return err
+	}
 	depolSetReport(ds, src, nm)
 	phase("depolarization", tPhase)
 
@@ -359,9 +378,15 @@ func run(a *Args) {
 		} else {
 			fmt.Printf("  building table for demo true m: m = %g%+gj\n",
 				trueRe, trueIm)
-			chs := loadTableChannels(src, trueRe, trueIm, baseCh,
+			chs, err := loadTableChannels(src, trueRe, trueIm, baseCh,
 				a.TableExtrapolate, a.TableRefWl, cbackScale)
-			tk = ktableBuild(chs, a.R0Min, r1MaxEff, a.DxMax)
+			if err != nil {
+				return err
+			}
+			tk, err = ktableBuild(chs, a.R0Min, r1MaxEff, a.DxMax)
+			if err != nil {
+				return err
+			}
 		}
 		g1 = forwardMeasurements(tk, demoTrueDistribution, a.R0Min,
 			r1MaxEff, 24, 0.05)
@@ -395,9 +420,12 @@ func run(a *Args) {
 
 	fmt.Printf("scan (m, r0, r1, degree)...\n")
 	tPhase = nowSec()
-	design := designBuild(baseCh, nch, kts, mre, mim, a.Degrees, r0Grid,
+	design, err := designBuild(baseCh, nch, kts, mre, mim, a.Degrees, r0Grid,
 		r1Grid, a.MinRatio, a.NBasis, !a.NoZeroBoundary, a.QuadOrder,
 		a.LogSpan)
+	if err != nil {
+		return err
+	}
 	phase("design", tPhase)
 
 	// ограничение по измеренному δ_l: строка в функционале или ранжирование
@@ -418,11 +446,14 @@ func run(a *Args) {
 	}
 
 	tPhase = nowSec()
-	sols := scanVariants(design, g1, nch, a.GammaSelect, a.GammaRel,
+	sols, err := scanVariants(design, g1, nch, a.GammaSelect, a.GammaRel,
 		a.GammaMin, a.GammaMax, a.NGamma, a.Nonneg, !a.Absolute, dc)
+	if err != nil {
+		return err
+	}
 	phase("scan", tPhase)
 	if sols.n == 0 {
-		fatal("no valid window [r0, r1] — check the bounds and min-ratio")
+		return errors.New("no valid window [r0, r1] — check the bounds and min-ratio")
 	}
 	reportEnsembleSize(a, sols.n)
 	if depProj != nil && a.DepolRatioMode == depolModeRank {
@@ -430,8 +461,11 @@ func run(a *Args) {
 	}
 
 	tPhase = nowSec()
-	prof := profileFinalize(a, baseCh, kts, mre, mim, sols, design.geom,
+	prof, err := profileFinalize(a, baseCh, kts, mre, mim, sols, design.geom,
 		a.R0Min, r1MaxEff, ds)
+	if err != nil {
+		return err
+	}
 	phase("output", tPhase)
 
 	reportSummary(a, sols, g1, baseCh, prof.nAvg, prof.gFit, prof.rGrid,
@@ -453,13 +487,17 @@ func run(a *Args) {
 	}
 	jsonPath, jsonInDir := resolveOutPath(a.OutDir, a.JSON)
 	if plotInDir || jsonInDir {
-		mkdirP(a.OutDir)
+		if err := mkdirP(a.OutDir); err != nil {
+			return err
+		}
 	}
 
 	if a.JSON != "" {
-		writeJSON(jsonPath, sols, prof.rGrid, prof.nAvg, prof.nAvgRaw, baseCh,
+		if err := writeJSON(jsonPath, sols, prof.rGrid, prof.nAvg, prof.nAvgRaw, baseCh,
 			g1, prof.gFit, prof.mRe, prof.mIm, prof.moments, prof.modes,
-			prof.deltaLwl, prof.deltaL)
+			prof.deltaLwl, prof.deltaL); err != nil {
+			return err
+		}
 		fmt.Printf("results saved: %s\n", jsonPath)
 	}
 
@@ -479,4 +517,5 @@ func run(a *Args) {
 	}
 
 	phase("total", tAll)
+	return nil
 }

@@ -20,7 +20,7 @@ type design struct {
 
 func designBuild(ch []channel, nch int, kts []*ktable, mRe, mIm []float64,
 	degrees []int, r0Grid, r1Grid []float64, minRatio float64,
-	nBasisIn int, zeroBoundary bool, order int, maxLogSpan float64) *design {
+	nBasisIn int, zeroBoundary bool, order int, maxLogSpan float64) (*design, error) {
 	_ = ch
 	d := &design{
 		nch:          nch,
@@ -58,8 +58,12 @@ func designBuild(ch []channel, nch int, kts []*ktable, mRe, mIm []float64,
 
 	d.geom = make([]*geom, d.nW)
 	for w := 0; w < d.nW; w++ {
-		d.geom[w] = geomBuild(r0s[w], r1s[w], deg[w], d.nBasis,
+		g, err := geomBuild(r0s[w], r1s[w], deg[w], d.nBasis,
 			zeroBoundary, order, maxLogSpan)
+		if err != nil {
+			return nil, err
+		}
+		d.geom[w] = g
 	}
 
 	nu := 0
@@ -106,5 +110,5 @@ func designBuild(ch []channel, nch int, kts []*ktable, mRe, mIm []float64,
 			d.s0[im*d.nW+w] = svdNorm2(Ab, nch, nunk)
 		}
 	}
-	return d
+	return d, nil
 }

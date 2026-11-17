@@ -37,13 +37,13 @@ func depolSetAvailable(ds *depolSet) bool { return ds != nil && ds.nOK > 0 }
 // depolSetBuild — построение ядер деполяризации по всем m из таблиц. Сетка r
 // совпадает с сеткой основных ядер (dxMax, минимальная длина волны).
 func depolSetBuild(src *tableSource, mre, mim []float64, refWl, rMin, rMax,
-	dxMax float64, extrapolate bool) *depolSet {
+	dxMax float64, extrapolate bool) (*depolSet, error) {
 	ds := &depolSet{
 		wl: append([]float64(nil), depolWlsUm...),
 		kt: make([][2]*ktable, len(mre)),
 	}
 	if !(rMax > rMin) || len(mre) == 0 {
-		return ds
+		return ds, nil
 	}
 	lamMin := ds.wl[0]
 	for _, wl := range ds.wl {
@@ -51,22 +51,32 @@ func depolSetBuild(src *tableSource, mre, mim []float64, refWl, rMin, rMax,
 			lamMin = wl
 		}
 	}
-	r := rGridFor(rMin, rMax, dxMax, lamMin)
+	r, err := rGridFor(rMin, rMax, dxMax, lamMin)
+	if err != nil {
+		return nil, err
+	}
 	for i := range mre {
-		tab := tableCacheGet(src, mre[i], mim[i], extrapolate)
+		tab, err := tableCacheGet(src, mre[i], mim[i], extrapolate)
+		if err != nil {
+			return nil, err
+		}
 		if !tab.hasS11 || !tab.hasS22 {
 			continue
 		}
 		for iw, wl := range ds.wl {
-			ds.kt[i][iw] = depolKtableBuild(tab, wl, refWl, r)
+			kt, err := depolKtableBuild(tab, wl, refWl, r)
+			if err != nil {
+				return nil, err
+			}
+			ds.kt[i][iw] = kt
 		}
 		ds.nOK++
 	}
-	return ds
+	return ds, nil
 }
 
 // depolKtableBuild — ядра S11/S22 на сетке r для длины волны wl.
-func depolKtableBuild(tab *table, wl, refWl float64, r []float64) *ktable {
+func depolKtableBuild(tab *table, wl, refWl float64, r []float64) (*ktable, error) {
 	kt := &ktable{
 		n:    len(r),
 		r:    r,
@@ -87,14 +97,14 @@ func depolKtableBuild(tab *table, wl, refWl float64, r []float64) *ktable {
 			x := 2.0 * math.Pi * r[i] / wl
 			K := scale * tableSColumn(tab, cols[j], x, wl)
 			if !(K > 0) || !isFinite(K) {
-				fatal("%s: depolarization kernel S(r) must be positive and "+
+				return nil, fmt.Errorf("%s: depolarization kernel S(r) must be positive and "+
 					"finite (x = %g, λ = %g nm)", tab.path, x, wl*1e3)
 			}
 			val[i] = math.Log(K)
 		}
 		kt.sp[j] = newSpline(lr, val)
 	}
-	return kt
+	return kt, nil
 }
 
 // tableSColumn — значение S11/S22 при заданном x. В отличие от Cext/Cback

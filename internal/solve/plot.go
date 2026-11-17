@@ -129,9 +129,11 @@ func plotTempDir() (string, bool) {
 	return dir, true
 }
 
+// writeDataFile — служебный файл для gnuplot. Ошибка записи не прерывает
+// расчёт: отрисовка всё равно завершится предупреждением.
 func writeDataFile(path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		fatal("failed to write %s", path)
+		fmt.Fprintf(os.Stderr, "[warning] failed to write %s: %v\n", path, err)
 	}
 }
 

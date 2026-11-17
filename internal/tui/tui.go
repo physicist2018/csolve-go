@@ -13,7 +13,10 @@ var errCancelled = errors.New("cancelled by user")
 
 // Run starts the interactive UI and returns the process exit code.
 func Run() int {
-	s := newState()
+	s, err := newState()
+	if err != nil {
+		return abortCode(err)
+	}
 
 presetLoop:
 	for {

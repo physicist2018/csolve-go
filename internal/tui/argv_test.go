@@ -5,8 +5,18 @@ import (
 	"testing"
 )
 
+// newTestState — состояние с параметрами по умолчанию для тестов.
+func newTestState(t *testing.T) *state {
+	t.Helper()
+	s, err := newState()
+	if err != nil {
+		t.Fatalf("newState: %v", err)
+	}
+	return s
+}
+
 func TestBuildArgvDefaults(t *testing.T) {
-	s := newState()
+	s := newTestState(t)
 	argv, a, err := buildArgv(s)
 	if err != nil {
 		t.Fatalf("default state: %v", err)
@@ -23,7 +33,7 @@ func TestBuildArgvDefaults(t *testing.T) {
 }
 
 func TestPresetDemoSphere(t *testing.T) {
-	s := newState()
+	s := newTestState(t)
 	presetByKey("demo-spheres").apply(s)
 
 	_, a, err := buildArgv(s)
@@ -45,7 +55,7 @@ func TestPresetDemoSphere(t *testing.T) {
 }
 
 func TestInputFileRequired(t *testing.T) {
-	s := newState()
+	s := newTestState(t)
 	s.mode = modeData
 	if _, _, err := buildArgv(s); err == nil {
 		t.Fatal("expected an error for a missing JSON file")
@@ -62,7 +72,7 @@ func TestInputFileRequired(t *testing.T) {
 }
 
 func TestBatchLidarConstraint(t *testing.T) {
-	s := newState()
+	s := newTestState(t)
 	s.mode = modeBatch
 	s.batchPath = "measurements.txt"
 	s.lidarCons = true
@@ -81,7 +91,7 @@ func TestBatchLidarConstraint(t *testing.T) {
 }
 
 func TestLidarConstraintOnlyInBatch(t *testing.T) {
-	s := newState()
+	s := newTestState(t)
 	s.lidarCons = true
 
 	argv, _, err := buildArgv(s)
@@ -94,7 +104,7 @@ func TestLidarConstraintOnlyInBatch(t *testing.T) {
 }
 
 func TestExternalTablesRequireDirectory(t *testing.T) {
-	s := newState()
+	s := newTestState(t)
 	s.tablesKind = tablesExternal
 	if _, _, err := buildArgv(s); err == nil {
 		t.Fatal("expected an error for a missing tables directory")
@@ -114,7 +124,7 @@ func TestExternalTablesRequireDirectory(t *testing.T) {
 }
 
 func TestInternalRendererRejectsNonPDF(t *testing.T) {
-	s := newState()
+	s := newTestState(t)
 	s.out = "result.png"
 	if _, _, err := buildArgv(s); err == nil {
 		t.Fatal("expected an error for a PNG output with the internal renderer")
@@ -127,7 +137,7 @@ func TestInternalRendererRejectsNonPDF(t *testing.T) {
 }
 
 func TestBestFraction(t *testing.T) {
-	s := newState()
+	s := newTestState(t)
 	s.best = "0.1"
 	_, a, err := buildArgv(s)
 	if err != nil {
@@ -139,7 +149,7 @@ func TestBestFraction(t *testing.T) {
 }
 
 func TestDescribeOutputs(t *testing.T) {
-	s := newState()
+	s := newTestState(t)
 	s.outDir = "out"
 	s.jsonOut = "res.json"
 

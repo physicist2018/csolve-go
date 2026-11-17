@@ -88,10 +88,14 @@ type state struct {
 	noPlot       bool
 }
 
-func newState() *state {
-	s := &state{def: solve.DefaultArgs()}
+func newState() (*state, error) {
+	def, err := solve.DefaultArgs()
+	if err != nil {
+		return nil, err
+	}
+	s := &state{def: def}
 	s.reset()
-	return s
+	return s, nil
 }
 
 // reset restores the solver defaults.

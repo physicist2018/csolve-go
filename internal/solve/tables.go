@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -114,28 +115,28 @@ func externalTableSource(dir string) *tableSource {
 }
 
 // builtinTableSource — встроенный набор таблиц по значению --type.
-func builtinTableSource(kind string) *tableSource {
+func builtinTableSource(kind string) (*tableSource, error) {
 	dir, ok := builtinTableDirs[kind]
 	if !ok {
-		fatal("unknown built-in table set %q (expected one of: %s)",
+		return nil, fmt.Errorf("unknown built-in table set %q (expected one of: %s)",
 			kind, strings.Join(builtinTypeNames, ", "))
 	}
 	sub, err := fs.Sub(bases.FS, dir)
 	if err != nil {
-		fatal("built-in table set %s is not embedded: %v", dir, err)
+		return nil, fmt.Errorf("built-in table set %s is not embedded: %w", dir, err)
 	}
 	return &tableSource{
 		fsys:   sub,
 		label:  "builtin:" + kind,
 		key:    "builtin:" + kind,
 		origin: dir,
-	}
+	}, nil
 }
 
 // tableSource — выбор источника: --tables (внешние) или встроенный по --type.
-func (a *Args) tableSource() *tableSource {
+func (a *Args) tableSource() (*tableSource, error) {
 	if a.Tables != "" {
-		return externalTableSource(a.Tables)
+		return externalTableSource(a.Tables), nil
 	}
 	return builtinTableSource(a.Type)
 }
@@ -282,23 +283,26 @@ func loadColumnSplines(t *table) {
 }
 
 // tableLoad — загрузка таблицы для m-каталога mdir из источника src.
-func tableLoad(src *tableSource, mdir string, extrapolate bool) *table {
+func tableLoad(src *tableSource, mdir string, extrapolate bool) (*table, error) {
 	data, disp, err := src.readTable(mdir)
 	if err != nil {
-		fatal("cross-section table file not found: %s (expected %s[.gz] — "+
+		return nil, fmt.Errorf("cross-section table file not found: %s (expected %s[.gz] — "+
 			"mkbase/mkbase_spheres format)", src.display(path.Join(mdir, tableFileName)),
 			tableFileName)
 	}
-	t, dxMax := parseTable(data, disp, extrapolate)
+	t, dxMax, err := parseTable(data, disp, extrapolate)
+	if err != nil {
+		return nil, err
+	}
 	if dxMax > 1.0 {
 		src.warnLargeStep(disp, dxMax)
 	}
-	return t
+	return t, nil
 }
 
 // parseTable — разбор содержимого data.txt. Возвращает таблицу и максимальный
 // шаг по x (для диагностики разрешения Mie-ряби).
-func parseTable(data []byte, disp string, extrapolate bool) (*table, float64) {
+func parseTable(data []byte, disp string, extrapolate bool) (*table, float64, error) {
 	ics := make(map[string]int, len(tableColumnNames))
 	ixs := make(map[string]int, len(tableColumnNames))
 	for _, n := range tableColumnNames {
@@ -326,10 +330,10 @@ func parseTable(data []byte, disp string, extrapolate bool) (*table, float64) {
 		}
 	}
 	if err := scan.Err(); err != nil {
-		fatal("%s: failed to read table: %v", disp, err)
+		return nil, 0, fmt.Errorf("%s: failed to read table: %w", disp, err)
 	}
 	if ics["Cext"] < 0 && ics["Cback"] < 0 {
-		fatal("%s: mkbase-format header with columns 'x' and 'Cext' not found "+
+		return nil, 0, fmt.Errorf("%s: mkbase-format header with columns 'x' and 'Cext' not found "+
 			"(expected, for example, '# x Cext Cabs Cback Qext Qabs Qback S11 S22 n')",
 			disp)
 	}
@@ -342,7 +346,7 @@ func parseTable(data []byte, disp string, extrapolate bool) (*table, float64) {
 		if ix < 0 {
 			ix = ixs[n]
 		} else if ixs[n] != ix {
-			fatal("%s: columns Cext/Cback/S11/S22 come from headers with "+
+			return nil, 0, fmt.Errorf("%s: columns Cext/Cback/S11/S22 come from headers with "+
 				"different x positions — ambiguous table format", disp)
 		}
 		if ics[n]+1 > need {
@@ -365,11 +369,11 @@ func parseTable(data []byte, disp string, extrapolate bool) (*table, float64) {
 		s = strings.TrimRight(s, " \t\r\n\v\f")
 		toks := strings.Fields(s)
 		if len(toks) < need {
-			fatal("%s: no required column in row: '%s'", disp, s)
+			return nil, 0, fmt.Errorf("%s: no required column in row: '%s'", disp, s)
 		}
 		xv, err := strconv.ParseFloat(toks[ix], 64)
 		if err != nil {
-			fatal("%s: failed to parse column x in row: '%s'", disp, s)
+			return nil, 0, fmt.Errorf("%s: failed to parse column x in row: '%s'", disp, s)
 		}
 		xs = append(xs, xv)
 		for _, n := range tableColumnNames {
@@ -378,22 +382,22 @@ func parseTable(data []byte, disp string, extrapolate bool) (*table, float64) {
 			}
 			v, err := strconv.ParseFloat(toks[ics[n]], 64)
 			if err != nil {
-				fatal("%s: failed to parse %s in row: '%s'", disp, n, s)
+				return nil, 0, fmt.Errorf("%s: failed to parse %s in row: '%s'", disp, n, s)
 			}
 			cols[n] = append(cols[n], v)
 		}
 	}
 	if err := scan.Err(); err != nil {
-		fatal("%s: failed to read table: %v", disp, err)
+		return nil, 0, fmt.Errorf("%s: failed to read table: %w", disp, err)
 	}
 
 	n := len(xs)
 	if n < 3 {
-		fatal("%s: insufficient points (>= 3), found %d", disp, n)
+		return nil, 0, fmt.Errorf("%s: insufficient points (>= 3), found %d", disp, n)
 	}
 	for i := 1; i < n; i++ {
 		if !(xs[i] > xs[i-1]) {
-			fatal("%s: x must be strictly increasing", disp)
+			return nil, 0, fmt.Errorf("%s: x must be strictly increasing", disp)
 		}
 	}
 	for _, nm := range []string{"Cext", "Cback"} {
@@ -402,7 +406,7 @@ func parseTable(data []byte, disp string, extrapolate bool) (*table, float64) {
 		}
 		for _, v := range cols[nm] {
 			if !(v > 0) || !isFinite(v) {
-				fatal("%s: %s cross sections must be > 0 and finite", disp, nm)
+				return nil, 0, fmt.Errorf("%s: %s cross sections must be > 0 and finite", disp, nm)
 			}
 		}
 	}
@@ -450,20 +454,25 @@ func parseTable(data []byte, disp string, extrapolate bool) (*table, float64) {
 		t.s22 = cols["S22"]
 	}
 	loadColumnSplines(t)
-	return t, dxMax
+	return t, dxMax, nil
 }
 
+// tableRangeError — ошибка выхода x за диапазон таблицы (при отключённой
+// экстраполяции).
+func tableRangeError(t *table) error {
+	return fmt.Errorf("size parameter x outside table range [%g, %g] — extend the table "+
+		"range or enable --table-extrapolate (%s)", t.xMin, t.xMax, t.path)
+}
+
+// tableCrossSection — сечение при заданном x. Диапазон проверяет вызывающий
+// (ktableBuild); сюда попадает только корретное x.
 func tableCrossSection(t *table, useCback bool, x float64) float64 {
-	if !t.extrapolate && (x < t.xMin || x > t.xMax) {
-		fatal("size parameter x outside table range [%g, %g] — extend the table "+
-			"range or enable --table-extrapolate (%s)", t.xMin, t.xMax, t.path)
-	}
 	sp := t.spCext
 	if useCback {
 		sp = t.spCback
 	}
 	if sp == nil {
-		fatal("%s: required cross-section column is missing", t.path)
+		panic(fmt.Sprintf("%s: required cross-section column is missing", t.path))
 	}
 	return math.Exp(sp.eval(math.Log(x)))
 }
@@ -560,15 +569,14 @@ func mValuesStr(v []mval) string {
 }
 
 // tableMGrid — все доступные значения m из каталога таблиц.
-func tableMGrid(src *tableSource) (re, im []float64) {
+func tableMGrid(src *tableSource) (re, im []float64, err error) {
 	avail, err := collectAvailable(src)
 	if err != nil {
-		fatal("table directory not found: %s%s", src.label, layoutHint(src))
+		return nil, nil, fmt.Errorf("table directory not found: %s%s", src.label, layoutHint(src))
 	}
 	if len(avail) == 0 {
-		fatal("table directory %s contains no subdirectories "+
-			"mre_<real>_mim_<imag>/%s[.gz]%s", src.label, tableFileName,
-			layoutHint(src))
+		return nil, nil, fmt.Errorf("table directory %s contains no subdirectories "+
+			"mre_<real>_mim_<imag>/%s[.gz]%s", src.label, tableFileName, layoutHint(src))
 	}
 	re = make([]float64, len(avail))
 	im = make([]float64, len(avail))
@@ -576,7 +584,7 @@ func tableMGrid(src *tableSource) (re, im []float64) {
 		re[i] = v.re
 		im[i] = v.im
 	}
-	return re, im
+	return re, im, nil
 }
 
 // ---------------- кэш загруженных таблиц ----------------
@@ -591,52 +599,58 @@ var tableCache = struct {
 	m map[tableCacheKey]*table
 }{m: make(map[tableCacheKey]*table)}
 
-func missingTableError(src *tableSource, mdir string, mre, mim float64) {
+func missingTableError(src *tableSource, mdir string, mre, mim float64) error {
 	dir := mTableDirname(mre, mim)
 	msg := fmt.Sprintf("table directory not found: %s (expected %s/%s[.gz] — "+
 		"mkbase/mkbase_spheres format)", src.display(mdir), dir, tableFileName)
 	if src.builtin() {
 		avail, err := collectAvailable(src)
 		if err == nil && len(avail) > 0 {
-			fatal("%s; available m in %s: %s", msg, src.label, mValuesStr(avail))
+			return fmt.Errorf("%s; available m in %s: %s", msg, src.label, mValuesStr(avail))
 		}
-		fatal("%s; built-in set %s is empty", msg, src.label)
+		return fmt.Errorf("%s; built-in set %s is empty", msg, src.label)
 	}
 	if _, err := fs.Stat(src.fsys, "."); err != nil {
-		fatal("%s%s", msg, layoutHint(src))
+		return errors.New(msg + layoutHint(src))
 	}
 	avail, _ := collectAvailable(src)
 	if len(avail) > 0 {
-		fatal("%s; available m in %s: %s", msg, src.label, mValuesStr(avail))
+		return fmt.Errorf("%s; available m in %s: %s", msg, src.label, mValuesStr(avail))
 	}
-	fatal("%s%s", msg, layoutHint(src))
+	return errors.New(msg + layoutHint(src))
 }
 
-func tableCacheGet(src *tableSource, re, im float64, extrapolate bool) *table {
+func tableCacheGet(src *tableSource, re, im float64, extrapolate bool) (*table, error) {
 	key := tableCacheKey{src.key, re, im, extrapolate}
 	tableCache.Lock()
 	if t, ok := tableCache.m[key]; ok {
 		tableCache.Unlock()
-		return t
+		return t, nil
 	}
 	tableCache.Unlock()
 
 	mdir := mTableDirname(re, im)
 	if _, err := src.resolveName(mdir); err != nil {
-		missingTableError(src, mdir, re, im)
+		return nil, missingTableError(src, mdir, re, im)
 	}
-	t := tableLoad(src, mdir, extrapolate)
+	t, err := tableLoad(src, mdir, extrapolate)
+	if err != nil {
+		return nil, err
+	}
 
 	tableCache.Lock()
 	tableCache.m[key] = t
 	tableCache.Unlock()
-	return t
+	return t, nil
 }
 
 // loadTableChannels — привязка базовых каналов к таблице для заданного m.
 func loadTableChannels(src *tableSource, mre, mim float64, base []channel,
-	extrapolate bool, refWl, cbackScale float64) *channels {
-	tab := tableCacheGet(src, mre, mim, extrapolate)
+	extrapolate bool, refWl, cbackScale float64) (*channels, error) {
+	tab, err := tableCacheGet(src, mre, mim, extrapolate)
+	if err != nil {
+		return nil, err
+	}
 	out := &channels{
 		ch:  make([]channel, len(base)),
 		cap: math.Inf(1),
@@ -650,12 +664,12 @@ func loadTableChannels(src *tableSource, mre, mim float64, base []channel,
 			ch.cbackScale = 1.0
 		}
 		if ch.kind == chAlpha && !tab.hasCext {
-			fatal("%s: mkbase-format header with columns 'x' and 'Cext' not found "+
+			return nil, fmt.Errorf("%s: mkbase-format header with columns 'x' and 'Cext' not found "+
 				"(expected, for example, '# x Cext Cabs Cback Qext Qabs Qback S11 S22 n')",
 				tab.path)
 		}
 		if ch.kind == chBeta && !tab.hasCback {
-			fatal("%s: mkbase-format header with columns 'x' and 'Cback' not found "+
+			return nil, fmt.Errorf("%s: mkbase-format header with columns 'x' and 'Cback' not found "+
 				"(expected, for example, '# x Cext Cabs Cback Qext Qabs Qback S11 S22 n')",
 				tab.path)
 		}
@@ -665,5 +679,5 @@ func loadTableChannels(src *tableSource, mre, mim float64, base []channel,
 			out.cap = capv
 		}
 	}
-	return out
+	return out, nil
 }

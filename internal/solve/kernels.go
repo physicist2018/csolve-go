@@ -1,6 +1,8 @@
 package solve
 
 import (
+	"errors"
+	"fmt"
 	"math"
 )
 
@@ -16,10 +18,10 @@ type ktable struct {
 
 // rGridFor — сетка радиусов с шагом dr = dxMax*lamMin/(2*pi) (шаг в x не
 // больше dxMax) и последним узлом ровно в rMax.
-func rGridFor(rMin, rMax, dxMax, lamMin float64) []float64 {
+func rGridFor(rMin, rMax, dxMax, lamMin float64) ([]float64, error) {
 	dr := dxMax * lamMin / (2.0 * math.Pi)
 	if !(dr > 0) {
-		fatal("invalid grid step r (dx-max = %g)", dxMax)
+		return nil, fmt.Errorf("invalid grid step r (dx-max = %g)", dxMax)
 	}
 
 	n := int(math.Ceil((rMax - rMin) / dr))
@@ -35,13 +37,13 @@ func rGridFor(rMin, rMax, dxMax, lamMin float64) []float64 {
 		r[nr] = rMax
 		nr++
 	}
-	return r[:nr]
+	return r[:nr], nil
 }
 
-func ktableBuild(chs *channels, rMin, rMax, dxMax float64) *ktable {
+func ktableBuild(chs *channels, rMin, rMax, dxMax float64) (*ktable, error) {
 	nch := len(chs.ch)
 	if nch <= 0 {
-		fatal("no channels")
+		return nil, errors.New("no channels")
 	}
 	lamMin := chs.ch[0].wlUm
 	for j := 1; j < nch; j++ {
@@ -49,7 +51,10 @@ func ktableBuild(chs *channels, rMin, rMax, dxMax float64) *ktable {
 			lamMin = chs.ch[j].wlUm
 		}
 	}
-	r := rGridFor(rMin, rMax, dxMax, lamMin)
+	r, err := rGridFor(rMin, rMax, dxMax, lamMin)
+	if err != nil {
+		return nil, err
+	}
 	nr := len(r)
 
 	kt := &ktable{
@@ -68,25 +73,29 @@ func ktableBuild(chs *channels, rMin, rMax, dxMax float64) *ktable {
 	for j := 0; j < nch; j++ {
 		ch := &chs.ch[j]
 		if ch.tab == nil {
-			fatal("Mie mode is not supported by the C version — specify --tables")
+			// Инвариант: loadTableChannels привязывает таблицу к каждому каналу.
+			panic("solve: channel has no cross-section table")
 		}
 		scale := um2ToM2 * math.Pow(ch.wlUm/ch.refWlUm, 2.0)
 		for i := 0; i < nr; i++ {
 			x := 2.0 * math.Pi * r[i] / ch.wlUm
+			if !ch.tab.extrapolate && (x < ch.tab.xMin || x > ch.tab.xMax) {
+				return nil, tableRangeError(ch.tab)
+			}
 			C := tableCrossSection(ch.tab, ch.kind == chBeta, x)
 			K := scale * C
 			if ch.kind == chBeta {
 				K *= ch.cbackScale
 			}
 			if !(K > 0) {
-				fatal("kernel K(r) must be strictly positive on the grid "+
+				return nil, fmt.Errorf("kernel K(r) must be strictly positive on the grid "+
 					"(channel %d, r = %g)", j, r[i])
 			}
 			val[i] = math.Log(K)
 		}
 		kt.sp[j] = newSpline(lr, val)
 	}
-	return kt
+	return kt, nil
 }
 
 func ktableKernel(kt *ktable, j int, r float64) float64 {
