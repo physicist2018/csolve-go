@@ -1,4 +1,5 @@
 GO ?= go
+GOLANGCI_LINT ?= golangci-lint
 
 ifeq ($(OS),Windows_NT)
 BIN := csolve.exe
@@ -7,7 +8,7 @@ BIN := csolve
 endif
 WIN_BIN := csolve.exe
 
-.PHONY: all build build-windows test fmt vet generate clean
+.PHONY: all build build-windows test fmt vet lint generate clean
 
 all: build
 
@@ -26,6 +27,9 @@ fmt:
 
 vet:
 	$(GO) vet ./...
+
+lint:
+	$(GOLANGCI_LINT) run
 
 # Пересобрать сжатые таблицы для встроенных наборов (bases/*/average).
 # Требуется после изменения bases/*/average/mre_*/data.txt.

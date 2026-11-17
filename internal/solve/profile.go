@@ -1,5 +1,7 @@
 package solve
 
+import "math"
+
 type profile struct {
 	nr         int
 	rGrid      []float64
@@ -16,9 +18,14 @@ type profile struct {
 	deltaLwl   []float64 // длины волн δ_l, µm
 }
 
+// mEps — допуск сравнения m: значения приходят из имён каталогов таблиц,
+// поэтому точное == ненадёжно, а шаг сетки m на порядки больше.
+const mEps = 1e-6
+
+// mIndex — индекс пары (re, im) в сетке m; -1, если пары нет.
 func mIndex(mre, mim []float64, re, im float64) int {
 	for i := range mre {
-		if mre[i] == re && mim[i] == im {
+		if math.Abs(mre[i]-re) <= mEps && math.Abs(mim[i]-im) <= mEps {
 			return i
 		}
 	}
@@ -80,7 +87,7 @@ func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
 			}
 			kavg := ksum / float64(G)
 			r := rq[k]
-			q := 3.0 / (4.0 * csPi * r * r * r * r)
+			q := 3.0 / (4.0 * math.Pi * r * r * r * r)
 			s += wq[k] * kavg * q * nqVals[k]
 		}
 		p.gFit[j] = s

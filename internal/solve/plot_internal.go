@@ -443,7 +443,7 @@ func internalProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
 func internalProfiles(po *plotOpts, outPath, title, xlabel string, nSeries int,
 	alt []float64, vals [][]float64, names []string, dashed []bool,
 	logAuto bool) bool {
-	if len(alt) <= 0 || nSeries <= 0 {
+	if len(alt) == 0 || nSeries <= 0 {
 		return false
 	}
 	lo, hi, hLo, hHi, useLog := profileAxes(alt, vals, nSeries, logAuto)

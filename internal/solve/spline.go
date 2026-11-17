@@ -91,13 +91,13 @@ func newSpline(x, y []float64) *spline {
 	return s
 }
 
-func (s *spline) fillCoeffs(M []float64) {
+func (s *spline) fillCoeffs(m []float64) {
 	for i := 0; i < s.n-1; i++ {
 		h := s.x[i+1] - s.x[i]
 		delta := (s.y[i+1] - s.y[i]) / h
-		s.c[i] = 0.5 * M[i]
-		s.b[i] = delta - (2.0*M[i]+M[i+1])*h/6.0
-		s.d[i] = (M[i+1] - M[i]) / (6.0 * h)
+		s.c[i] = 0.5 * m[i]
+		s.b[i] = delta - (2.0*m[i]+m[i+1])*h/6.0
+		s.d[i] = (m[i+1] - m[i]) / (6.0 * h)
 	}
 }
 
@@ -110,11 +110,12 @@ func (s *spline) eval(t float64) float64 {
 		return s.y[0]
 	}
 	var lo int
-	if t <= s.x[0] {
+	switch {
+	case t <= s.x[0]:
 		lo = 0
-	} else if t >= s.x[n-1] {
+	case t >= s.x[n-1]:
 		lo = n - 2
-	} else {
+	default:
 		hi := n - 1
 		lo = 0
 		for hi-lo > 1 {
@@ -146,11 +147,12 @@ func (s *spline) evalHint(t float64, hint *int) float64 {
 	if lo > n-2 {
 		lo = n - 2
 	}
-	if t <= s.x[0] {
+	switch {
+	case t <= s.x[0]:
 		lo = 0
-	} else if t >= s.x[n-1] {
+	case t >= s.x[n-1]:
 		lo = n - 2
-	} else {
+	default:
 		for lo > 0 && t < s.x[lo] {
 			lo--
 		}

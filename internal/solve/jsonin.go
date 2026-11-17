@@ -22,11 +22,18 @@ type jsonInput struct {
 	Depolarization *jsonGroup  `json:"depolarization"`
 }
 
+// measurementInput — измерения из входного JSON: каналы, коэффициенты и
+// необязательный показатель преломления m (nil — если он не задан).
+type measurementInput struct {
+	channels []channel
+	g1       []float64
+	depWl    []float64 // длины волн измеренной δ_l, µm
+	depVal   []float64 // измеренная δ_l, %
+	mRe, mIm *float64
+}
+
 // loadJSONInput — чтение измерений из JSON (структура как в Python-версии).
-// Дополнительно возвращаются измеренные значения δ_l (проценты) и их длины
-// волн (µm) для --depol-ratio-cons.
-func loadJSONInput(path string, trueRe, trueIm *float64) ([]channel, []float64,
-	[]float64, []float64) {
+func loadJSONInput(path string) measurementInput {
 	text, err := os.ReadFile(path)
 	if err != nil {
 		fatal("failed to open file: %s", path)
@@ -35,17 +42,13 @@ func loadJSONInput(path string, trueRe, trueIm *float64) ([]channel, []float64,
 	if err := json.Unmarshal(text, &root); err != nil {
 		fatal("failed to parse input JSON %s: %v", path, err)
 	}
+
+	var in measurementInput
 	if root.M != nil {
-		if root.M.Real != nil {
-			*trueRe = *root.M.Real
-		}
-		if root.M.Imag != nil {
-			*trueIm = *root.M.Imag
-		}
+		in.mRe = root.M.Real
+		in.mIm = root.M.Imag
 	}
 
-	chans := []channel{}
-	g1 := []float64{}
 	add := func(grp *jsonGroup, kind chKind) {
 		if grp == nil {
 			return
@@ -55,36 +58,34 @@ func loadJSONInput(path string, trueRe, trueIm *float64) ([]channel, []float64,
 			cnt = len(grp.Coefficients)
 		}
 		for i := 0; i < cnt; i++ {
-			if len(chans) >= 32 {
+			if len(in.channels) >= 32 {
 				fatal("too many channels in input data")
 			}
-			chans = append(chans, channel{
+			in.channels = append(in.channels, channel{
 				kind:       kind,
 				wlUm:       grp.WavelengthsNm[i] * 1e-3,
 				tab:        nil,
 				refWlUm:    tableRefWlUm,
 				cbackScale: 1.0,
 			})
-			g1 = append(g1, grp.Coefficients[i])
+			in.g1 = append(in.g1, grp.Coefficients[i])
 		}
 	}
 	add(root.Backscatter, chBeta)
 	add(root.Extinction, chAlpha)
-	if len(chans) == 0 {
+	if len(in.channels) == 0 {
 		fatal("no channels in data")
 	}
 
-	depWl := []float64{}
-	depVal := []float64{}
 	if grp := root.Depolarization; grp != nil {
 		cnt := len(grp.WavelengthsNm)
 		if len(grp.Coefficients) < cnt {
 			cnt = len(grp.Coefficients)
 		}
 		for i := 0; i < cnt; i++ {
-			depWl = append(depWl, grp.WavelengthsNm[i]*1e-3)
-			depVal = append(depVal, grp.Coefficients[i])
+			in.depWl = append(in.depWl, grp.WavelengthsNm[i]*1e-3)
+			in.depVal = append(in.depVal, grp.Coefficients[i])
 		}
 	}
-	return chans, g1, depWl, depVal
+	return in
 }

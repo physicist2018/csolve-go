@@ -6,7 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -201,7 +201,7 @@ func commonWavelengths(b *batchInput) []commonWl {
 			out = append(out, commonWl{wls[i], ibs[i], ias[i]})
 		}
 	}
-	sort.SliceStable(out, func(a, b int) bool { return out[a].wl < out[b].wl })
+	slices.SortStableFunc(out, func(a, b commonWl) int { return compareFloats(a.wl, b.wl) })
 	return out
 }
 
@@ -225,7 +225,7 @@ func nanmedian(v []float64) float64 {
 	if len(tmp) == 0 {
 		return math.NaN()
 	}
-	sort.Float64s(tmp)
+	slices.Sort(tmp)
 	m := len(tmp)
 	if m%2 == 1 {
 		return tmp[m/2]
@@ -234,7 +234,7 @@ func nanmedian(v []float64) float64 {
 }
 
 // windowedMedianRef — скользящая медиана (окно 3, у краёв сужается).
-func windowedMedianRef(S []float64, nAlt, nl int) []float64 {
+func windowedMedianRef(s []float64, nAlt, nl int) []float64 {
 	out := make([]float64, nAlt*nl)
 	col := make([]float64, nAlt)
 	for h := 0; h < nAlt; h++ {
@@ -249,7 +249,7 @@ func windowedMedianRef(S []float64, nAlt, nl int) []float64 {
 		for li := 0; li < nl; li++ {
 			m := 0
 			for k := lo; k < hi; k++ {
-				col[m] = S[k*nl+li]
+				col[m] = s[k*nl+li]
 				m++
 			}
 			out[h*nl+li] = nanmedian(col[:m])
@@ -258,7 +258,7 @@ func windowedMedianRef(S []float64, nAlt, nl int) []float64 {
 	return out
 }
 
-func windowedMedianColumnInto(S []float64, nAlt, nl, li int, out []float64) {
+func windowedMedianColumnInto(s []float64, nAlt, nl, li int, out []float64) {
 	col := make([]float64, nAlt)
 	for h := 0; h < nAlt; h++ {
 		lo := 0
@@ -271,31 +271,34 @@ func windowedMedianColumnInto(S []float64, nAlt, nl, li int, out []float64) {
 		}
 		m := 0
 		for k := lo; k < hi; k++ {
-			col[m] = S[k*nl+li]
+			col[m] = s[k*nl+li]
 			m++
 		}
 		out[h*nl+li] = nanmedian(col[:m])
 	}
 }
 
-// npMaxFloor — np.maximum(v, floor) с сохранением NaN.
-func npMaxFloor(v, floorV float64) float64 {
+// npFloor — нижняя граница перед логарифмированием (как 1e-300 в numpy).
+const npFloor = 1e-300
+
+// npMaxFloor — np.maximum(v, npFloor) с сохранением NaN.
+func npMaxFloor(v float64) float64 {
 	if math.IsNaN(v) {
 		return math.NaN()
 	}
-	if v > floorV {
+	if v > npFloor {
 		return v
 	}
-	return floorV
+	return npFloor
 }
 
-func smoothRefProfile(alt, S []float64, nAlt, nl int) []float64 {
+func smoothRefProfile(alt, s []float64, nAlt, nl int) []float64 {
 	out := make([]float64, nAlt*nl)
 	for i := range out {
 		out[i] = math.NaN()
 	}
 	if nAlt < 5 {
-		return windowedMedianRef(S, nAlt, nl)
+		return windowedMedianRef(s, nAlt, nl)
 	}
 	t := make([]float64, nAlt)
 	for i := 0; i < nAlt; i++ {
@@ -303,7 +306,7 @@ func smoothRefProfile(alt, S []float64, nAlt, nl int) []float64 {
 	}
 	span := t[nAlt-1] - t[0]
 	if !(span > 0) {
-		return windowedMedianRef(S, nAlt, nl)
+		return windowedMedianRef(s, nAlt, nl)
 	}
 	for i := 0; i < nAlt; i++ {
 		t[i] /= span
@@ -312,30 +315,30 @@ func smoothRefProfile(alt, S []float64, nAlt, nl int) []float64 {
 	for li := 0; li < nl; li++ {
 		ok := make([]int, 0, nAlt)
 		for h := 0; h < nAlt; h++ {
-			if isFinite(S[h*nl+li]) {
+			if isFinite(s[h*nl+li]) {
 				ok = append(ok, h)
 			}
 		}
 		cnt := len(ok)
 		if cnt < 5 {
-			windowedMedianColumnInto(S, nAlt, nl, li, out)
+			windowedMedianColumnInto(s, nAlt, nl, li, out)
 			continue
 		}
 		scale := 0.0
 		for _, k := range ok {
-			if v := math.Abs(S[k*nl+li]); v > scale {
+			if v := math.Abs(s[k*nl+li]); v > scale {
 				scale = v
 			}
 		}
 		if !(scale > 0) || !isFinite(scale) {
-			windowedMedianColumnInto(S, nAlt, nl, li, out)
+			windowedMedianColumnInto(s, nAlt, nl, li, out)
 			continue
 		}
 		xv := make([]float64, cnt)
 		yv := make([]float64, cnt)
 		for idx, k := range ok {
 			xv[idx] = t[k]
-			yv[idx] = S[k*nl+li] / scale
+			yv[idx] = s[k*nl+li] / scale
 		}
 		fit := smoothingSplineFit(xv, yv, nil, 1.0, xv)
 		for idx, k := range ok {
@@ -352,8 +355,8 @@ func reorderByScore(sols *solutions, score []float64) {
 	for i := range order {
 		order[i] = i
 	}
-	sort.SliceStable(order, func(a, b int) bool {
-		return score[order[a]] < score[order[b]]
+	slices.SortStableFunc(order, func(a, b int) int {
+		return compareFloats(score[a], score[b])
 	})
 	buf := make([]solution, n)
 	for k := 0; k < n; k++ {
@@ -362,7 +365,7 @@ func reorderByScore(sols *solutions, score []float64) {
 	copy(sols.sol, buf)
 }
 
-func topIdsEqual(sols *solutions, g int, prev []int, off int) bool {
+func topIDsEqual(sols *solutions, g int, prev []int, off int) bool {
 	for k := 0; k < g; k++ {
 		if sols.sol[k].id != prev[off+k] {
 			return false
@@ -371,14 +374,14 @@ func topIdsEqual(sols *solutions, g int, prev []int, off int) bool {
 	return true
 }
 
-func storeTopIds(sols *solutions, g int, prev []int, off int) {
+func storeTopIDs(sols *solutions, g int, prev []int, off int) {
 	for k := 0; k < g; k++ {
 		prev[off+k] = sols.sol[k].id
 	}
 }
 
 func applyLidarConstraint(per []*solutions, nAlt int, alt []float64, nl int,
-	w float64, maxIter int, a *Args, S [][]float64, pen [][]float64) {
+	w float64, maxIter int, a *Args, ratios [][]float64, pen [][]float64) {
 	dbg := os.Getenv("CSOLVE_LIDAR_DEBUG") != ""
 	gEff := make([]int, nAlt)
 	kEff := make([]int, nAlt)
@@ -425,7 +428,7 @@ func applyLidarConstraint(per []*solutions, nAlt int, alt []float64, nl int,
 			k := kEff[h]
 			for li := 0; li < nl; li++ {
 				for t := 0; t < k; t++ {
-					pool[t] = S[h][per[h].sol[t].id*nl+li]
+					pool[t] = ratios[h][per[h].sol[t].id*nl+li]
 				}
 				est[h*nl+li] = nanmedian(pool[:k])
 			}
@@ -466,15 +469,15 @@ func applyLidarConstraint(per []*solutions, nAlt int, alt []float64, nl int,
 			n := per[h].n
 			score := make([]float64, n)
 			for li := 0; li < nl; li++ {
-				rv := npMaxFloor(ref[h*nl+li], 1e-300)
+				rv := npMaxFloor(ref[h*nl+li])
 				logRef[li] = math.Log(rv)
 			}
 			for t := 0; t < n; t++ {
-				sv := S[h][per[h].sol[t].id*nl:]
+				sv := ratios[h][per[h].sol[t].id*nl:]
 				sum := 0.0
 				cnt := 0
 				for li := 0; li < nl; li++ {
-					lv := math.Log(npMaxFloor(sv[li], 1e-300))
+					lv := math.Log(npMaxFloor(sv[li]))
 					d := math.Abs(lv - logRef[li])
 					if isFinite(d) {
 						sum += d
@@ -499,12 +502,12 @@ func applyLidarConstraint(per []*solutions, nAlt int, alt []float64, nl int,
 			if dbg {
 				for t := 0; t < n && t < 3; t++ {
 					s := &per[h].sol[t]
-					sv := S[h][s.id*nl:]
+					sv := ratios[h][s.id*nl:]
 					sum := 0.0
 					cnt := 0
 					for li := 0; li < nl; li++ {
-						lv := math.Log(npMaxFloor(sv[li], 1e-300))
-						rv := math.Log(npMaxFloor(ref[h*nl+li], 1e-300))
+						lv := math.Log(npMaxFloor(sv[li]))
+						rv := math.Log(npMaxFloor(ref[h*nl+li]))
 						d := math.Abs(lv - rv)
 						if isFinite(d) {
 							sum += d
@@ -530,7 +533,7 @@ func applyLidarConstraint(per []*solutions, nAlt int, alt []float64, nl int,
 		changed := !havePrev
 		off := 0
 		for h := 0; h < nAlt; h++ {
-			if havePrev && !topIdsEqual(per[h], gEff[h], prev, off) {
+			if havePrev && !topIDsEqual(per[h], gEff[h], prev, off) {
 				changed = true
 			}
 			off += gmax
@@ -540,7 +543,7 @@ func applyLidarConstraint(per []*solutions, nAlt int, alt []float64, nl int,
 		}
 		off = 0
 		for h := 0; h < nAlt; h++ {
-			storeTopIds(per[h], gEff[h], prev, off)
+			storeTopIDs(per[h], gEff[h], prev, off)
 			off += gmax
 		}
 		havePrev = true
@@ -579,7 +582,7 @@ type distDepol struct {
 
 func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
 	p *profile, dd distDepol) float64 {
-	path := filepath.Join(outDir, fmt.Sprintf("dist_%s.txt", cG(h)))
+	path := filepath.Join(outDir, fmt.Sprintf("dist_%s.txt", formatG6(h)))
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# altitude H = %g m\n", h)
 	sb.WriteString("# input data (β [1/(m·sr)], α [1/m]): ")
@@ -587,7 +590,7 @@ func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
 		if j > 0 {
 			sb.WriteByte(' ')
 		}
-		fmt.Fprintf(&sb, "%s=%s", b.ch[j].name, cG(g1[j]))
+		fmt.Fprintf(&sb, "%s=%s", b.ch[j].name, formatG6(g1[j]))
 	}
 	sb.WriteString("\n# r, µm  dV/dln r, µm³/cm³  depol_calc_532")
 	if dd.hasMeas {
@@ -598,9 +601,9 @@ func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
 	for i := 0; i < p.nr; i++ {
 		nv := p.nAvg[i] / cm3PerM3
 		if isFinite(nv) {
-			fmt.Fprintf(&sb, "%s  %s  %s", cG(p.rGrid[i]), cG(nv), cG(dd.calc))
+			fmt.Fprintf(&sb, "%s  %s  %s", formatG6(p.rGrid[i]), formatG6(nv), formatG6(dd.calc))
 			if dd.hasMeas {
-				fmt.Fprintf(&sb, "  %s", cG(dd.meas))
+				fmt.Fprintf(&sb, "  %s", formatG6(dd.meas))
 			}
 			sb.WriteString("\n")
 		}
@@ -614,26 +617,26 @@ func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
 	mo := &p.modes.Overall
 	fm := openAppend(filepath.Join(outDir, "moments.txt"))
 	fmt.Fprintf(fm, "%s  %s  %s  %s  %s  %s  %s  %s  %s  %s  %s  %s\n",
-		cG(h), cG(mf.V/cm3PerM3), cG(mc.V/cm3PerM3),
-		cG(p.moments.VolConcUm3PerCm3), cG(mf.Rm), cG(mc.Rm), cG(mo.Rm),
-		cG(p.moments.REffUm), cG(p.moments.NCm3), cG(mf.Sigma),
-		cG(mc.Sigma), cG(mo.Sigma))
+		formatG6(h), formatG6(mf.V/cm3PerM3), formatG6(mc.V/cm3PerM3),
+		formatG6(p.moments.VolConcUm3PerCm3), formatG6(mf.Rm), formatG6(mc.Rm), formatG6(mo.Rm),
+		formatG6(p.moments.REffUm), formatG6(p.moments.NCm3), formatG6(mf.Sigma),
+		formatG6(mc.Sigma), formatG6(mo.Sigma))
 	fm.Close()
 
 	fr := openAppend(filepath.Join(outDir, "refractive.txt"))
-	fmt.Fprintf(fr, "%s  %s  %s\n", cG(h), cG(p.mRe), cG(p.mIm))
+	fmt.Fprintf(fr, "%s  %s  %s\n", formatG6(h), formatG6(p.mRe), formatG6(p.mIm))
 	fr.Close()
 
 	fe := openAppend(filepath.Join(outDir, "errors.txt"))
-	fmt.Fprintf(fe, "%s", cG(h))
+	fmt.Fprintf(fe, "%s", formatG6(h))
 	errSum := 0.0
 	for j := 0; j < b.nch; j++ {
 		rel := math.Abs(p.gFit[j]-g1[j]) / g1[j]
-		fmt.Fprintf(fe, "  %s", cG(rel))
+		fmt.Fprintf(fe, "  %s", formatG6(rel))
 		errSum += rel
 	}
 	errSum /= float64(b.nch)
-	fmt.Fprintf(fe, "  %s\n", cG(errSum))
+	fmt.Fprintf(fe, "  %s\n", formatG6(errSum))
 	fe.Close()
 	return errSum
 }
@@ -671,18 +674,20 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 	dStr := ""
 	if ds != nil && len(ds.wl) > 0 {
 		fd := openAppend(filepath.Join(outDir, "delpol.txt"))
-		fmt.Fprintf(fd, "%s", cG(h))
+		fmt.Fprintf(fd, "%s", formatG6(h))
 		for i := range ds.wl {
 			v := math.NaN()
 			if i < len(prof.deltaL) {
 				v = prof.deltaL[i]
 			}
-			fmt.Fprintf(fd, "  %s", cG(v))
+			fmt.Fprintf(fd, "  %s", formatG6(v))
 		}
 		for k := 0; k < b.ndep; k++ {
-			fmt.Fprintf(fd, "  %s", cG(b.dep[hi*b.ndep+k]))
+			fmt.Fprintf(fd, "  %s", formatG6(b.dep[hi*b.ndep+k]))
 		}
-		fd.WriteString("\n")
+		if _, err := fd.WriteString("\n"); err != nil {
+			fatal("failed to write %s: %v", fd.Name(), err)
+		}
 		fd.Close()
 	}
 
@@ -730,22 +735,24 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 	}
 
 	if !a.NoPlot {
-		po := plotOpts{fmt: a.PlotFormat, dpi: a.PlotDpi,
+		po := plotOpts{format: a.PlotFormat, dpi: a.PlotDpi,
 			fontSize: a.PlotFontSize, backend: a.Plotting}
 		pp := filepath.Join(outDir,
-			fmt.Sprintf("plot_%s.%s", cG(h), plotFormatExt(a.PlotFormat)))
+			fmt.Sprintf("plot_%s.%s", formatG6(h), plotFormatExt(a.PlotFormat)))
 		plotProfile(&po, pp, prof.rGrid, prof.nAvg, solveCh, g1, prof.gFit, h)
 	}
 
 	sStr := ""
 	if writeLidar {
 		fl := openAppend(filepath.Join(outDir, "lidar_ratios.txt"))
-		fmt.Fprintf(fl, "%s", cG(h))
+		fmt.Fprintf(fl, "%s", formatG6(h))
 		for k := 0; k < nl; k++ {
 			v := lidarRatioValue(prof.gFit, common, k)
-			fmt.Fprintf(fl, "  %s", cG(v))
+			fmt.Fprintf(fl, "  %s", formatG6(v))
 		}
-		fl.WriteString("\n")
+		if _, err := fl.WriteString("\n"); err != nil {
+			fatal("failed to write %s: %v", fl.Name(), err)
+		}
 		fl.Close()
 
 		var acc strings.Builder
@@ -765,7 +772,7 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 	}
 
 	fmt.Printf("  altitude %s m: ⟨m⟩ = %.3f%+.3fj, N = %.3g cm⁻³%s%s\n",
-		cG(h), prof.mRe, prof.mIm, prof.moments.NCm3, sStr, dStr)
+		formatG6(h), prof.mRe, prof.mIm, prof.moments.NCm3, sStr, dStr)
 }
 
 // ---------------- основной сценарий ----------------
@@ -805,12 +812,17 @@ func runBatch(a *Args) {
 	// каналы решения
 	solveCh := make([]channel, b.nch)
 	for j := 0; j < b.nch; j++ {
-		solveCh[j] = channel{b.ch[j].kind, b.ch[j].wlUm, nil, tableRefWlUm, 1.0}
+		solveCh[j] = channel{
+			kind:       b.ch[j].kind,
+			wlUm:       b.ch[j].wlUm,
+			refWlUm:    tableRefWlUm,
+			cbackScale: 1.0,
+		}
 	}
 
 	cbackScale := 1.0
 	if a.TableCback4pi {
-		cbackScale = 1.0 / (4.0 * csPi)
+		cbackScale = 1.0 / (4.0 * math.Pi)
 	}
 
 	// покрытие таблиц -> r1_max_eff
@@ -844,7 +856,7 @@ func runBatch(a *Args) {
 		for j := 0; j < b.nch; j++ {
 			fmt.Printf("  %-14s x_max = %g, r_max = %.3g µm\n",
 				c0.ch[j].name(), c0.ch[j].tab.xMax,
-				c0.ch[j].tab.xMax*c0.ch[j].wlUm/(2.0*csPi))
+				c0.ch[j].tab.xMax*c0.ch[j].wlUm/(2.0*math.Pi))
 		}
 	}
 	fmt.Printf("  effective r1_max = %g µm (requested: %g) — windows and "+
@@ -1112,7 +1124,7 @@ func runBatch(a *Args) {
 	}
 
 	if !a.NoPlot {
-		po := plotOpts{fmt: a.PlotFormat, dpi: a.PlotDpi,
+		po := plotOpts{format: a.PlotFormat, dpi: a.PlotDpi,
 			fontSize: a.PlotFontSize, backend: a.Plotting}
 		ext := plotFormatExt(a.PlotFormat)
 
@@ -1126,28 +1138,28 @@ func runBatch(a *Args) {
 				errPct[i] = met.err[i] * 100.0
 			}
 			plotProfiles(&po, pp, "Mean relative retrieval error, %",
-				"Err, %", 1, b.alt, [][]float64{errPct}, []string{"Err"}, true)
+				"Err, %", 1, b.alt, [][]float64{errPct}, []string{"Err"})
 		}
 
 		pp = filepath.Join(outDir, "volumes."+ext)
 		plotProfiles(&po, pp, "Volume concentration of modes",
 			"V, µm³/cm³", 3, b.alt,
 			[][]float64{met.V, met.Vc, met.Vf},
-			[]string{"V", "Vc", "Vf"}, true)
+			[]string{"V", "Vc", "Vf"})
 
 		pp = filepath.Join(outDir, "radii."+ext)
 		plotProfiles(&po, pp, "Mode radii", "r, µm", 3, b.alt,
 			[][]float64{met.rmf, met.rmc, met.reff},
-			[]string{"rmf", "rmc", "reff"}, true)
+			[]string{"rmf", "rmc", "reff"})
 
 		pp = filepath.Join(outDir, "concentration."+ext)
 		plotProfiles(&po, pp, "Number concentration", "N, cm⁻³", 1, b.alt,
-			[][]float64{met.Nc}, []string{"N"}, true)
+			[][]float64{met.Nc}, []string{"N"})
 
 		pp = filepath.Join(outDir, "sigma."+ext)
 		plotProfiles(&po, pp, "Lognormal mode widths", "sigma", 3, b.alt,
 			[][]float64{met.sgf, met.sgc, met.sgo},
-			[]string{"sigma_f", "sigma_c", "sigma"}, true)
+			[]string{"sigma_f", "sigma_c", "sigma"})
 
 		if nl > 0 {
 			nSer := nl
@@ -1162,7 +1174,7 @@ func runBatch(a *Args) {
 				snames[k] = fmt.Sprintf("S_{%g}", common[k].wl*1e3)
 			}
 			plotProfiles(&po, pp, "Lidar ratio S = α/β", "S = α/β", nSer,
-				b.alt, svals, snames, true)
+				b.alt, svals, snames)
 		}
 
 		if len(met.dpol) > 0 || len(met.dpolMeas) > 0 {

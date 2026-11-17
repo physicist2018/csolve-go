@@ -7,18 +7,16 @@ import (
 )
 
 const (
-	csPi         = math.Pi
-	csEps        = 2.2204460492503131e-16
+	machineEps   = 2.2204460492503131e-16
 	um2ToM2      = 1e-12
-	tableRefWlUm = 2.0 * csPi
+	tableRefWlUm = 2.0 * math.Pi
 	cm3PerM3     = 1e6
 	um3ToM3      = 1e-18
-	// nextAfterNegativeInf — предел слева, как в C-версии (nextafter(x, -inf)).
 )
 
 func linspace(a, b float64, n int) []float64 {
 	if n <= 0 {
-		return []float64{}
+		return nil
 	}
 	out := make([]float64, n)
 	if n == 1 {
@@ -35,7 +33,7 @@ func linspace(a, b float64, n int) []float64 {
 
 func geomspace(a, b float64, n int) []float64 {
 	if n <= 0 {
-		return []float64{}
+		return nil
 	}
 	out := make([]float64, n)
 	if n == 1 {
@@ -51,9 +49,9 @@ func geomspace(a, b float64, n int) []float64 {
 	return out
 }
 
-// cG повторяет C-формат "%g" (6 значащих цифр, нижний регистр nan/inf).
+// formatG6 повторяет C-формат "%g" (6 значащих цифр, нижний регистр nan/inf).
 // Используется в текстовых результатах, чтобы они совпадали с C-версией.
-func cG(v float64) string {
+func formatG6(v float64) string {
 	switch {
 	case math.IsNaN(v):
 		return "nan"
@@ -67,6 +65,18 @@ func cG(v float64) string {
 
 func isFinite(v float64) bool {
 	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+// compareFloats — трёхзначное сравнение с семантикой C-версии: пара с NaN
+// считается равной (в отличие от cmp.Compare, который ставит NaN первым).
+func compareFloats(a, b float64) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	}
+	return 0
 }
 
 // resolveOutPath — итоговый путь выходного файла: относительный path

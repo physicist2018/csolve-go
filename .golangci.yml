@@ -1,0 +1,17 @@
+run:
+  timeout: 5m
+
+linters:
+  # errcheck, gosimple, govet, ineffassign, staticcheck, unused — по умолчанию.
+  enable:
+    - revive
+    - gocritic
+    - misspell
+    - unparam
+    - prealloc
+    - nakedret
+    - dupl
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

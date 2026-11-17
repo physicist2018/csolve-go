@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"sort"
+	"slices"
 
 	"gonum.org/v1/gonum/mat"
 )
@@ -44,12 +44,12 @@ func nLrows(nu int) int {
 // buildAugRows — расширенная система [W A; gamma L; D] c = [W g1n; 0; 0],
 // где D — nExtra дополнительных строк ограничений (например, по δ_l),
 // записанных подряд в extra (nExtra × nu).
-func buildAugRows(A []float64, nch, nu int, gamma float64, weights, g1n []float64,
+func buildAugRows(a []float64, nch, nu int, gamma float64, weights, g1n []float64,
 	extra []float64, nExtra int, aug, rhs []float64) {
 	nL := nLrows(nu)
 	for j := 0; j < nch; j++ {
 		for i := 0; i < nu; i++ {
-			aug[j*nu+i] = weights[j] * A[j*nu+i]
+			aug[j*nu+i] = weights[j] * a[j*nu+i]
 		}
 		rhs[j] = weights[j] * g1n[j]
 	}
@@ -69,37 +69,37 @@ func buildAugRows(A []float64, nch, nu int, gamma float64, weights, g1n []float6
 	}
 }
 
-func buildAug(A []float64, nch, nu int, gamma float64, weights, g1n []float64,
+func buildAug(a []float64, nch, nu int, gamma float64, weights, g1n []float64,
 	aug, rhs []float64) {
-	buildAugRows(A, nch, nu, gamma, weights, g1n, nil, 0, aug, rhs)
+	buildAugRows(a, nch, nu, gamma, weights, g1n, nil, 0, aug, rhs)
 }
 
 // solveGammaRows — то же, что solveGamma, но с nExtra дополнительными
 // строками ограничений extra (nExtra × nu, правая часть — нули).
-func solveGammaRows(A []float64, nch, nu int, gamma float64, weights, g1n []float64,
+func solveGammaRows(a []float64, nch, nu int, gamma float64, weights, g1n []float64,
 	nonneg bool, extra []float64, nExtra int) []float64 {
 	nL := nLrows(nu)
 	rows := nch + nL + nExtra
 	aug := make([]float64, rows*nu)
 	rhs := make([]float64, rows)
-	buildAugRows(A, nch, nu, gamma, weights, g1n, extra, nExtra, aug, rhs)
+	buildAugRows(a, nch, nu, gamma, weights, g1n, extra, nExtra, aug, rhs)
 	if nonneg {
 		return nnls(aug, rows, nu, rhs)
 	}
 	return lstsq(aug, rows, nu, rhs)
 }
 
-func solveGamma(A []float64, nch, nu int, gamma float64, weights, g1n []float64,
+func solveGamma(a []float64, nch, nu int, gamma float64, weights, g1n []float64,
 	nonneg bool) []float64 {
-	return solveGammaRows(A, nch, nu, gamma, weights, g1n, nonneg, nil, 0)
+	return solveGammaRows(a, nch, nu, gamma, weights, g1n, nonneg, nil, 0)
 }
 
-func residualErr(A []float64, nch, nu int, c, g1n []float64) float64 {
+func residualErr(a []float64, nch, nu int, c, g1n []float64) float64 {
 	sum := 0.0
 	for j := 0; j < nch; j++ {
 		p := 0.0
 		for i := 0; i < nu; i++ {
-			p += A[j*nu+i] * c[i]
+			p += a[j*nu+i] * c[i]
 		}
 		sum += math.Abs(p-g1n[j]) / g1n[j]
 	}
@@ -108,7 +108,7 @@ func residualErr(A []float64, nch, nu int, c, g1n []float64) float64 {
 
 // cvBruteforce — LOO-кросс-валидация прямым пересчётом (для NNLS и
 // вырожденных leverage).
-func cvBruteforce(A []float64, nch, nu int, gamma float64, weights, g1n []float64,
+func cvBruteforce(a []float64, nch, nu int, gamma float64, weights, g1n []float64,
 	nonneg bool) float64 {
 	nL := nLrows(nu)
 	rows := (nch - 1) + nL
@@ -122,7 +122,7 @@ func cvBruteforce(A []float64, nch, nu int, gamma float64, weights, g1n []float6
 				continue
 			}
 			for i := 0; i < nu; i++ {
-				aug[r*nu+i] = weights[j] * A[j*nu+i]
+				aug[r*nu+i] = weights[j] * a[j*nu+i]
 			}
 			rhs[r] = weights[j] * g1n[j]
 			r++
@@ -145,7 +145,7 @@ func cvBruteforce(A []float64, nch, nu int, gamma float64, weights, g1n []float6
 		}
 		pred := 0.0
 		for i := 0; i < nu; i++ {
-			pred += A[skip*nu+i] * c[i]
+			pred += a[skip*nu+i] * c[i]
 		}
 		total += math.Abs(pred-g1n[skip]) / g1n[skip]
 	}
@@ -154,7 +154,7 @@ func cvBruteforce(A []float64, nch, nu int, gamma float64, weights, g1n []float6
 
 // cvClosed — LOO-оценка закрытой формулой через рычаги; ok=false — нужен
 // брутфорс.
-func cvClosed(A []float64, nch, nu int, gamma float64, weights, g1n []float64) (
+func cvClosed(a []float64, nch, nu int, gamma float64, weights, g1n []float64) (
 	score float64, ok bool) {
 	nL := nLrows(nu)
 	rows := nch + nL
@@ -163,7 +163,7 @@ func cvClosed(A []float64, nch, nu int, gamma float64, weights, g1n []float64) (
 	}
 	aug := make([]float64, rows*nu)
 	rhs := make([]float64, rows)
-	buildAug(A, nch, nu, gamma, weights, g1n, aug, rhs)
+	buildAug(a, nch, nu, gamma, weights, g1n, aug, rhs)
 
 	data := append([]float64(nil), aug...)
 	var svd mat.SVD
@@ -175,7 +175,7 @@ func cvClosed(A []float64, nch, nu int, gamma float64, weights, g1n []float64) (
 	if len(vals) > 0 {
 		smax = vals[0]
 	}
-	cutoff := csEps * float64(max(rows, nu)) * smax
+	cutoff := machineEps * float64(max(rows, nu)) * smax
 	keep := make([]bool, len(vals))
 	rank := 0
 	for k, v := range vals {
@@ -206,14 +206,14 @@ func cvClosed(A []float64, nch, nu int, gamma float64, weights, g1n []float64) (
 			}
 			q := 0.0
 			for i := 0; i < nu; i++ {
-				q += vmat.At(i, p) * A[j*nu+i]
+				q += vmat.At(i, p) * a[j*nu+i]
 			}
 			lev += (q / vals[p]) * (q / vals[p])
 		}
 		denom := 1.0 - weights[j]*weights[j]*lev
 		pred := 0.0
 		for i := 0; i < nu; i++ {
-			pred += A[j*nu+i] * c[i]
+			pred += a[j*nu+i] * c[i]
 		}
 		if !(denom > 0) {
 			ok = false
@@ -226,7 +226,7 @@ func cvClosed(A []float64, nch, nu int, gamma float64, weights, g1n []float64) (
 
 // sortSolutions — устойчивая сортировка по Err.
 func sortSolutions(sol []solution) {
-	sort.SliceStable(sol, func(i, j int) bool { return sol[i].err < sol[j].err })
+	slices.SortStableFunc(sol, func(a, b solution) int { return compareFloats(a.err, b.err) })
 }
 
 // scanVariants — перебор (m, окно) с регуляризацией по кривизне. Если dc

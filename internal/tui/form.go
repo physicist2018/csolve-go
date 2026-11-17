@@ -430,14 +430,14 @@ func vInt() func(string) error {
 	}
 }
 
-func vIntMin(min int) func(string) error {
+func vIntMin(minV int) func(string) error {
 	return func(v string) error {
 		n, err := strconv.Atoi(strings.TrimSpace(v))
 		if err != nil {
 			return errors.New("expected an integer")
 		}
-		if n < min {
-			return errors.New("must be ≥ " + strconv.Itoa(min))
+		if n < minV {
+			return errors.New("must be ≥ " + strconv.Itoa(minV))
 		}
 		return nil
 	}

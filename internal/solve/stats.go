@@ -24,12 +24,12 @@ type modes struct {
 
 func perCm3(v float64) float64 { return v / cm3PerM3 }
 
-func qDvol(r float64) float64 { return 3.0 / (4.0 * csPi * r * r * r * r) }
+func qDvol(r float64) float64 { return 3.0 / (4.0 * math.Pi * r * r * r * r) }
 
-func lognormalVolume(r, V, rg, sigma float64) float64 {
+func lognormalVolume(r, v, rg, sigma float64) float64 {
 	s := math.Log(sigma)
 	z := math.Log(r / rg)
-	return V / (math.Sqrt(2.0*csPi) * s) * math.Exp(-(z*z)/(2.0*s*s))
+	return v / (math.Sqrt(2.0*math.Pi) * s) * math.Exp(-(z*z)/(2.0*s*s))
 }
 
 func demoTrueDistribution(r float64) float64 {
@@ -119,7 +119,7 @@ func fitLognormalLn(x, y, w []float64) csMode {
 	mu := -cb / (2.0 * cc)
 	s2 := -1.0 / (2.0 * cc)
 	s := math.Sqrt(s2)
-	v := math.Exp(ca-cb*cb/(4.0*cc)) * math.Sqrt(2.0*csPi) * s
+	v := math.Exp(ca-cb*cb/(4.0*cc)) * math.Sqrt(2.0*math.Pi) * s
 	if !(v > 0) || !isFinite(v) || !isFinite(mu) {
 		return out
 	}

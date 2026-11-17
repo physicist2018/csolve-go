@@ -11,8 +11,8 @@ func glNodesWeights(order int) ([]float64, []float64) {
 		return x, w
 	}
 	for i := 0; i < n; i++ {
-		z := math.Cos(csPi * (float64(i) + 0.75) / (float64(n) + 0.5))
-		pp := 1.0
+		z := math.Cos(math.Pi * (float64(i) + 0.75) / (float64(n) + 0.5))
+		var pp float64
 		for it := 0; it < 100; it++ {
 			p1, p2 := 1.0, 0.0
 			for j := 1; j <= n; j++ {
@@ -41,18 +41,18 @@ func glNodesWeights(order int) ([]float64, []float64) {
 	return x, w
 }
 
-func findSpan(U []float64, nbf, p int, u float64) int {
+func findSpan(knots []float64, nbf, p int, u float64) int {
 	n := nbf - 1
-	if u <= U[p] {
+	if u <= knots[p] {
 		return p
 	}
-	if u >= U[n+1] {
+	if u >= knots[n+1] {
 		return n
 	}
 	low, high := p, n+1
 	mid := (low + high) / 2
-	for u < U[mid] || u >= U[mid+1] {
-		if u < U[mid] {
+	for u < knots[mid] || u >= knots[mid+1] {
+		if u < knots[mid] {
 			high = mid
 		} else {
 			low = mid
@@ -62,30 +62,30 @@ func findSpan(U []float64, nbf, p int, u float64) int {
 	return mid
 }
 
-// bsplineValues — значения всех B-сплайнов степени p на векторе узлов U.
-// Длина результата: len(U) - p - 1.
-func bsplineValues(U []float64, p int, t float64) []float64 {
-	nbf := len(U) - p - 1
+// bsplineValues — значения всех B-сплайнов степени p на векторе узлов knots.
+// Длина результата: len(knots) - p - 1.
+func bsplineValues(knots []float64, p int, t float64) []float64 {
+	nbf := len(knots) - p - 1
 	if nbf <= 0 {
 		return []float64{}
 	}
 	out := make([]float64, nbf)
 	u := t
-	if u >= U[nbf] {
-		u = math.Nextafter(U[nbf], math.Inf(-1))
+	if u >= knots[nbf] {
+		u = math.Nextafter(knots[nbf], math.Inf(-1))
 	}
-	if u < U[p] {
-		u = U[p]
+	if u < knots[p] {
+		u = knots[p]
 	}
-	span := findSpan(U, nbf, p, u)
+	span := findSpan(knots, nbf, p, u)
 	if p+1 > 16 {
 		fatal("B-spline degree too large")
 	}
 	var N, left, right [17]float64
 	N[0] = 1.0
 	for j := 1; j <= p; j++ {
-		left[j] = u - U[span+1-j]
-		right[j] = U[span+j] - u
+		left[j] = u - knots[span+1-j]
+		right[j] = knots[span+j] - u
 		saved := 0.0
 		for r := 0; r < j; r++ {
 			denom := right[r+1] + left[j-r]
@@ -108,22 +108,22 @@ func bsplineValues(U []float64, p int, t float64) []float64 {
 }
 
 // localBasis — локальные значения (только p+1 ненулевых) в окне i0..i0+m-1.
-func localBasis(U []float64, q int, u float64, i0, m int) []float64 {
+func localBasis(knots []float64, q int, u float64, i0, m int) []float64 {
 	out := make([]float64, m)
-	nbfq := len(U) - q - 1
+	nbfq := len(knots) - q - 1
 	uu := u
-	if uu >= U[nbfq] {
-		uu = math.Nextafter(U[nbfq], math.Inf(-1))
+	if uu >= knots[nbfq] {
+		uu = math.Nextafter(knots[nbfq], math.Inf(-1))
 	}
-	if uu < U[q] {
-		uu = U[q]
+	if uu < knots[q] {
+		uu = knots[q]
 	}
-	sq := findSpan(U, nbfq, q, uu)
+	sq := findSpan(knots, nbfq, q, uu)
 	var N, left, right [17]float64
 	N[0] = 1.0
 	for j := 1; j <= q; j++ {
-		left[j] = uu - U[sq+1-j]
-		right[j] = U[sq+j] - uu
+		left[j] = uu - knots[sq+1-j]
+		right[j] = knots[sq+j] - uu
 		saved := 0.0
 		for r := 0; r < j; r++ {
 			denom := right[r+1] + left[j-r]
@@ -145,19 +145,19 @@ func localBasis(U []float64, q int, u float64, i0, m int) []float64 {
 	return out
 }
 
-func localDeriv(U []float64, p, deriv int, u float64, i0, m int) []float64 {
+func localDeriv(knots []float64, p, deriv int, u float64, i0, m int) []float64 {
 	if deriv <= 0 {
-		return localBasis(U, p, u, i0, m)
+		return localBasis(knots, p, u, i0, m)
 	}
 	out := make([]float64, m)
 	if deriv > p {
 		return out
 	}
-	v := localDeriv(U, p-1, deriv-1, u, i0, m+1)
+	v := localDeriv(knots, p-1, deriv-1, u, i0, m+1)
 	for k := 0; k < m; k++ {
 		i := i0 + k
-		den1 := U[i+p] - U[i]
-		den2 := U[i+p+1] - U[i+1]
+		den1 := knots[i+p] - knots[i]
+		den2 := knots[i+p+1] - knots[i+1]
 		d1, d2 := 0.0, 0.0
 		if den1 > 0 {
 			d1 = v[k] / den1
@@ -171,17 +171,17 @@ func localDeriv(U []float64, p, deriv int, u float64, i0, m int) []float64 {
 }
 
 // bsplineDerivWindow — производная порядка deriv: p+1 локальных значений.
-func bsplineDerivWindow(U []float64, p, deriv int, t float64) ([]float64, int) {
-	nbf := len(U) - p - 1
+func bsplineDerivWindow(knots []float64, p, deriv int, t float64) ([]float64, int) {
+	nbf := len(knots) - p - 1
 	u := t
-	if u >= U[nbf] {
-		u = math.Nextafter(U[nbf], math.Inf(-1))
+	if u >= knots[nbf] {
+		u = math.Nextafter(knots[nbf], math.Inf(-1))
 	}
-	if u < U[p] {
-		u = U[p]
+	if u < knots[p] {
+		u = knots[p]
 	}
-	s := findSpan(U, nbf, p, u)
-	return localDeriv(U, p, deriv, u, s-p, p+1), s
+	s := findSpan(knots, nbf, p, u)
+	return localDeriv(knots, p, deriv, u, s-p, p+1), s
 }
 
 // quadratureGrid — составная квадратура Гаусса–Лежандра по [a, b] с
@@ -277,7 +277,7 @@ func geomBuild(r0, r1 float64, degree, nBasis int, interiorOnly bool, order int,
 	}
 	dvol := make([]float64, len(nodes))
 	for q, r := range nodes {
-		dvol[q] = 3.0 / (4.0 * csPi * r * r * r * r)
+		dvol[q] = 3.0 / (4.0 * math.Pi * r * r * r * r)
 	}
 
 	return &geom{

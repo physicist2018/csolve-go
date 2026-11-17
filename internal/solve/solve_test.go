@@ -742,8 +742,8 @@ func TestBuiltinTables(t *testing.T) {
 			t.Errorf("%s: table %s must have Cext/Cback/S11/S22", c.kind,
 				tab.path)
 		}
-		if tab.n != c.nPoints {
-			t.Errorf("%s: %d x points, want %d", c.kind, tab.n, c.nPoints)
+		if len(tab.x) != c.nPoints {
+			t.Errorf("%s: %d x points, want %d", c.kind, len(tab.x), c.nPoints)
 		}
 		if !(tab.xMin < c.xMinMax[0]) || !(tab.xMax > c.xMinMax[1]) {
 			t.Errorf("%s: x range [%g, %g] outside expected bounds", c.kind,
@@ -884,7 +884,7 @@ func checkPDF(t *testing.T, p string) {
 
 func TestInternalPlotSmoke(t *testing.T) {
 	dir := t.TempDir()
-	po := &plotOpts{fmt: plotFmtPdf, dpi: 150, backend: plottingInternal}
+	po := &plotOpts{format: plotFmtPdf, dpi: 150, backend: plottingInternal}
 	alt := []float64{0, 500, 1000}
 	vals := [][]float64{{1, 2, 3}, {3, math.NaN(), 1}}
 	p := filepath.Join(dir, "profiles.pdf")
@@ -925,7 +925,7 @@ func TestInternalPlotSmoke(t *testing.T) {
 
 func TestInternalPlotEmpty(t *testing.T) {
 	dir := t.TempDir()
-	po := &plotOpts{fmt: plotFmtPdf, backend: plottingInternal}
+	po := &plotOpts{format: plotFmtPdf, backend: plottingInternal}
 	if plotProfilesStyled(po, filepath.Join(dir, "a.pdf"), "t", "x", 0,
 		nil, nil, nil, nil, true) {
 		t.Errorf("empty series must not produce a plot")
@@ -976,7 +976,7 @@ func pdfPayloads(data []byte) [][]byte {
 
 func TestInternalPDFUnicodeText(t *testing.T) {
 	dir := t.TempDir()
-	po := &plotOpts{fmt: plotFmtPdf, backend: plottingInternal}
+	po := &plotOpts{format: plotFmtPdf, backend: plottingInternal}
 	p := filepath.Join(dir, "unicode.pdf")
 	alt := []float64{0, 500}
 	vals := [][]float64{{1, 2}}

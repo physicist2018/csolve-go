@@ -23,28 +23,24 @@ func phase(name string, t0 float64) {
 }
 
 // ---------------- демо ----------------
-func mIndexOf(mre, mim []float64, re, im float64) int {
-	for i := range mre {
-		if mre[i] == re && mim[i] == im {
-			return i
-		}
-	}
-	return -1
+
+// sameToDecimals — совпадение чисел с точностью до decimals знаков после
+// запятой (повторяет сравнение печатных форм "%.Nf" в C-версии).
+func sameToDecimals(a, b float64, decimals int) bool {
+	tol := 0.5 * math.Pow(10, -float64(decimals))
+	return math.Abs(a-b) <= tol
 }
 
-func resolveDemoM(tre, tim *float64, a *Args, mre, mim []float64) {
-	cand := []int{}
+// resolveDemoM — приведение запрошенного m к ближайшему значению сетки таблиц.
+func resolveDemoM(trueRe, trueIm float64, a *Args, mre, mim []float64) (float64, float64) {
+	var cand []int
 	for i := range mre {
 		ok := true
-		if a.HasMReal {
-			if fmt.Sprintf("%.2f", a.MReal) != fmt.Sprintf("%.2f", mre[i]) {
-				ok = false
-			}
+		if a.HasMReal && !sameToDecimals(a.MReal, mre[i], 2) {
+			ok = false
 		}
-		if ok && a.HasMImag {
-			if fmt.Sprintf("%.5f", a.MImag) != fmt.Sprintf("%.5f", mim[i]) {
-				ok = false
-			}
+		if ok && a.HasMImag && !sameToDecimals(a.MImag, mim[i], 5) {
+			ok = false
 		}
 		if ok {
 			cand = append(cand, i)
@@ -56,23 +52,22 @@ func resolveDemoM(tre, tim *float64, a *Args, mre, mim []float64) {
 			parts[i] = fmt.Sprintf("%g%+gj", mre[i], mim[i])
 		}
 		fatal("demo true m = %g%+gj is missing from the tabular m grid: %s — "+
-			"set --m-real/--m-imag from this list", *tre, *tim,
+			"set --m-real/--m-imag from this list", trueRe, trueIm,
 			strings.Join(parts, ", "))
 	}
 	best := cand[0]
 	for _, i := range cand[1:] {
-		d1 := math.Abs(mre[i]-*tre) + math.Abs(mim[i]-*tim)
-		d2 := math.Abs(mre[best]-*tre) + math.Abs(mim[best]-*tim)
+		d1 := math.Abs(mre[i]-trueRe) + math.Abs(mim[i]-trueIm)
+		d2 := math.Abs(mre[best]-trueRe) + math.Abs(mim[best]-trueIm)
 		if d1 < d2 {
 			best = i
 		}
 	}
-	if mre[best] != *tre || mim[best] != *tim {
+	if !sameToDecimals(mre[best], trueRe, 2) || !sameToDecimals(mim[best], trueIm, 5) {
 		fmt.Printf("[tabular mode] demo true m: using %g%+gj (closest to "+
-			"%g%+gj in tables)\n", mre[best], mim[best], *tre, *tim)
+			"%g%+gj in tables)\n", mre[best], mim[best], trueRe, trueIm)
 	}
-	*tre = mre[best]
-	*tim = mim[best]
+	return mre[best], mim[best]
 }
 
 // forwardMeasurements — прямой расчёт g по демонстрационному распределению.
@@ -84,7 +79,7 @@ func forwardMeasurements(kt *ktable, nf func(float64) float64, rMin, rMax float6
 		s := 0.0
 		for k := range nodes {
 			r := nodes[k]
-			q := 3.0 / (4.0 * csPi * r * r * r * r)
+			q := 3.0 / (4.0 * math.Pi * r * r * r * r)
 			s += weights[k] * ktableKernel(kt, j, r) * q * nf(r)
 		}
 		out[j] = s
@@ -112,7 +107,7 @@ func rngNormal() float64 {
 	if u1 <= 0 {
 		u1 = 1e-300
 	}
-	return math.Sqrt(-2.0*math.Log(u1)) * math.Cos(2.0*csPi*u2)
+	return math.Sqrt(-2.0*math.Log(u1)) * math.Cos(2.0*math.Pi*u2)
 }
 
 // Main — точка входа; fatalError печатается как "error: ...".
@@ -168,7 +163,14 @@ func run(a *Args) {
 	trueRe, trueIm := 1.45, -0.005
 
 	if !demo {
-		baseCh, g1, depWl, depVal = loadJSONInput(a.Data, &trueRe, &trueIm)
+		in := loadJSONInput(a.Data)
+		baseCh, g1, depWl, depVal = in.channels, in.g1, in.depWl, in.depVal
+		if in.mRe != nil {
+			trueRe = *in.mRe
+		}
+		if in.mIm != nil {
+			trueIm = *in.mIm
+		}
 		fmt.Printf("data: %s; channels: %d\n", a.Data, len(baseCh))
 	} else {
 		if a.HasMReal {
@@ -180,12 +182,20 @@ func run(a *Args) {
 		bwl := []float64{355.0, 532.0, 1064.0}
 		awl := []float64{355.0, 532.0}
 		for _, wl := range bwl {
-			baseCh = append(baseCh, channel{chBeta, wl * 1e-3, nil,
-				tableRefWlUm, 1.0})
+			baseCh = append(baseCh, channel{
+				kind:       chBeta,
+				wlUm:       wl * 1e-3,
+				refWlUm:    tableRefWlUm,
+				cbackScale: 1.0,
+			})
 		}
 		for _, wl := range awl {
-			baseCh = append(baseCh, channel{chAlpha, wl * 1e-3, nil,
-				tableRefWlUm, 1.0})
+			baseCh = append(baseCh, channel{
+				kind:       chAlpha,
+				wlUm:       wl * 1e-3,
+				refWlUm:    tableRefWlUm,
+				cbackScale: 1.0,
+			})
 		}
 		fmt.Printf("demo on synthetic data\n")
 	}
@@ -220,15 +230,15 @@ func run(a *Args) {
 		fmt.Printf("smoothing of the mean over best solutions: enabled "+
 			"(rel-lam=%g)\n", a.SmoothLam)
 	}
-	nb := a.NBasis
-	if nb <= 0 {
-		nb = nch
+	nBasis := a.NBasis
+	if nBasis <= 0 {
+		nBasis = nch
 	}
 	if !a.NoZeroBoundary {
 		fmt.Printf("basis functions per window: %d (unknowns with BC: %d)\n",
-			nb, nb-2)
+			nBasis, nBasis-2)
 	} else {
-		fmt.Printf("basis functions per window: %d\n", nb)
+		fmt.Printf("basis functions per window: %d\n", nBasis)
 	}
 
 	// ---- сетка m из таблиц ----
@@ -239,7 +249,7 @@ func run(a *Args) {
 		fatal("refractive index grid is empty")
 	}
 	if demo {
-		resolveDemoM(&trueRe, &trueIm, a, mre, mim)
+		trueRe, trueIm = resolveDemoM(trueRe, trueIm, a, mre, mim)
 	}
 
 	fmt.Printf("refractive index m (initial/true) = %g %+gj\n", trueRe, trueIm)
@@ -251,7 +261,7 @@ func run(a *Args) {
 	// ---- покрытие таблиц и построение ядер ----
 	cbackScale := 1.0
 	if a.TableCback4pi {
-		cbackScale = 1.0 / (4.0 * csPi)
+		cbackScale = 1.0 / (4.0 * math.Pi)
 	}
 	fmt.Printf("building kernel tables (%d m values)...\n", nm)
 	capmin := math.Inf(1)
@@ -284,7 +294,7 @@ func run(a *Args) {
 		for j := 0; j < nch; j++ {
 			fmt.Printf("  %-14s x_max = %g, r_max = %.3g µm\n",
 				c0.ch[j].name(), c0.ch[j].tab.xMax,
-				c0.ch[j].tab.xMax*c0.ch[j].wlUm/(2.0*csPi))
+				c0.ch[j].tab.xMax*c0.ch[j].wlUm/(2.0*math.Pi))
 		}
 	}
 	fmt.Printf("  effective r1_max = %g µm (requested: %g) — windows and "+
@@ -315,14 +325,15 @@ func run(a *Args) {
 				"valid S11/S22 columns; constraint is not applied\n")
 		} else {
 			depIw, depCol = depolColumnMatch(ds, depWl, "input data")
-			if len(depIw) == 0 {
+			switch {
+			case len(depIw) == 0:
 				fmt.Fprintf(os.Stderr, "[warning] --depol-ratio-cons: no measured "+
 					"depolarization matching S11/S22 wavelengths; constraint is "+
 					"not applied\n")
-			} else if !(a.DepolRatioW > 0) {
+			case !(a.DepolRatioW > 0):
 				fmt.Printf("depolarization ratio constraint δ_l: disabled " +
 					"(--depol-ratio-w 0)\n")
-			} else {
+			default:
 				var sb strings.Builder
 				for k, c := range depCol {
 					if k > 0 {
@@ -341,7 +352,7 @@ func run(a *Args) {
 	// ---- измерения ----
 	var nTrueFn func(float64) float64
 	if demo {
-		idx := mIndexOf(mre, mim, trueRe, trueIm)
+		idx := mIndex(mre, mim, trueRe, trueIm)
 		var tk *ktable
 		if idx >= 0 {
 			tk = kts[idx]
@@ -466,7 +477,7 @@ func run(a *Args) {
 				nTrueVals[i] = nTrueFn(prof.rGrid[i])
 			}
 		}
-		po := plotOpts{fmt: a.PlotFormat, dpi: a.PlotDpi,
+		po := plotOpts{format: a.PlotFormat, dpi: a.PlotDpi,
 			fontSize: a.PlotFontSize, backend: a.Plotting}
 		plotResults(&po, plotPath, prof.rGrid, nTrueVals, prof.nAvg,
 			prof.nAvgRaw, prof.nBest, prof.nBestCount, baseCh, g1,

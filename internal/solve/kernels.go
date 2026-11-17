@@ -17,7 +17,7 @@ type ktable struct {
 // rGridFor — сетка радиусов с шагом dr = dxMax*lamMin/(2*pi) (шаг в x не
 // больше dxMax) и последним узлом ровно в rMax.
 func rGridFor(rMin, rMax, dxMax, lamMin float64) []float64 {
-	dr := dxMax * lamMin / (2.0 * csPi)
+	dr := dxMax * lamMin / (2.0 * math.Pi)
 	if !(dr > 0) {
 		fatal("invalid grid step r (dx-max = %g)", dxMax)
 	}
@@ -39,7 +39,7 @@ func rGridFor(rMin, rMax, dxMax, lamMin float64) []float64 {
 }
 
 func ktableBuild(chs *channels, rMin, rMax, dxMax float64) *ktable {
-	nch := chs.n
+	nch := len(chs.ch)
 	if nch <= 0 {
 		fatal("no channels")
 	}
@@ -72,7 +72,7 @@ func ktableBuild(chs *channels, rMin, rMax, dxMax float64) *ktable {
 		}
 		scale := um2ToM2 * math.Pow(ch.wlUm/ch.refWlUm, 2.0)
 		for i := 0; i < nr; i++ {
-			x := 2.0 * csPi * r[i] / ch.wlUm
+			x := 2.0 * math.Pi * r[i] / ch.wlUm
 			C := tableCrossSection(ch.tab, ch.kind == chBeta, x)
 			K := scale * C
 			if ch.kind == chBeta {

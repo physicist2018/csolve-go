@@ -10,7 +10,7 @@ import (
 	"math"
 	"os"
 	"path"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,7 +24,6 @@ import (
 // которым считается линейная деполяризация обратного рассеяния; эти столбцы
 // необязательны — в старых базах их нет.
 type table struct {
-	n                 int
 	x, cext, cback    []float64
 	s11, s22          []float64
 	hasCext, hasCback bool
@@ -88,7 +87,6 @@ func (c channel) name() string {
 
 type channels struct {
 	ch  []channel
-	n   int
 	cap float64 // min x_max*wl/(2*pi) по каналам
 }
 
@@ -429,7 +427,6 @@ func parseTable(data []byte, disp string, extrapolate bool) (*table, float64) {
 	}
 
 	t := &table{
-		n:           n,
 		x:           xs,
 		xMin:        xs[0],
 		xMax:        xs[n-1],
@@ -500,11 +497,11 @@ func collectAvailable(src *tableSource) ([]mval, error) {
 		}
 		vals = append(vals, mval{re, im})
 	}
-	sort.Slice(vals, func(i, j int) bool {
-		if vals[i].re != vals[j].re {
-			return vals[i].re < vals[j].re
+	slices.SortFunc(vals, func(a, b mval) int {
+		if c := compareFloats(a.re, b.re); c != 0 {
+			return c
 		}
-		return vals[i].im < vals[j].im
+		return compareFloats(a.im, b.im)
 	})
 	return vals, nil
 }
@@ -543,7 +540,7 @@ func layoutHint(src *tableSource) string {
 	if len(names) == 0 {
 		return ""
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return fmt.Sprintf("; %s contains %s — specify --tables %s/average "+
 		"or --tables <root>/<shapeNN>", src.label, strings.Join(names, ", "), src.label)
 }
@@ -641,7 +638,6 @@ func loadTableChannels(src *tableSource, mre, mim float64, base []channel,
 	extrapolate bool, refWl, cbackScale float64) *channels {
 	tab := tableCacheGet(src, mre, mim, extrapolate)
 	out := &channels{
-		n:   len(base),
 		ch:  make([]channel, len(base)),
 		cap: math.Inf(1),
 	}
@@ -664,7 +660,7 @@ func loadTableChannels(src *tableSource, mre, mim float64, base []channel,
 				tab.path)
 		}
 		out.ch[i] = ch
-		capv := tab.xMax * ch.wlUm / (2.0 * csPi)
+		capv := tab.xMax * ch.wlUm / (2.0 * math.Pi)
 		if capv < out.cap {
 			out.cap = capv
 		}

@@ -87,7 +87,7 @@ func depolKtableBuild(tab *table, wl, refWl float64, r []float64) *ktable {
 	val := make([]float64, len(r))
 	for j := 0; j < 2; j++ {
 		for i := range r {
-			x := 2.0 * csPi * r[i] / wl
+			x := 2.0 * math.Pi * r[i] / wl
 			K := scale * tableSColumn(tab, cols[j], x, wl)
 			if !(K > 0) || !isFinite(K) {
 				fatal("%s: depolarization kernel S(r) must be positive and "+
@@ -240,7 +240,7 @@ func depolProjBuild(ds *depolSet, d *design, iwDep []int) *depolProj {
 
 // d11d22 — свёртки S11/S22 с коэффициентами C (абсолютные единицы) для
 // проекции k в окне iwGeom при показателе m с индексом im.
-func (p *depolProj) d11d22(im, iwGeom, k int, C []float64) (d11, d22 float64,
+func (p *depolProj) d11d22(im, iwGeom, k int, c []float64) (d11, d22 float64,
 	ok bool) {
 	if p == nil || k < 0 || k >= len(p.a11) {
 		return 0, 0, false
@@ -251,9 +251,9 @@ func (p *depolProj) d11d22(im, iwGeom, k int, C []float64) (d11, d22 float64,
 	base := (im*p.nW + iwGeom) * p.nu
 	a11 := p.a11[k][base : base+p.nu]
 	a22 := p.a22[k][base : base+p.nu]
-	for i := 0; i < p.nu && i < len(C); i++ {
-		d11 += C[i] * a11[i]
-		d22 += C[i] * a22[i]
+	for i := 0; i < p.nu && i < len(c); i++ {
+		d11 += c[i] * a11[i]
+		d22 += c[i] * a22[i]
 	}
 	if !isFinite(d11) || !isFinite(d22) {
 		return 0, 0, false
@@ -263,8 +263,8 @@ func (p *depolProj) d11d22(im, iwGeom, k int, C []float64) (d11, d22 float64,
 
 // depolModel — модельное δ_l, %, для решения с коэффициентами C в окне
 // iwGeom при показателе m с индексом im для проекции k.
-func (p *depolProj) depolModel(im, iwGeom, k int, C []float64) float64 {
-	s11, s22, ok := p.d11d22(im, iwGeom, k, C)
+func (p *depolProj) depolModel(im, iwGeom, k int, c []float64) float64 {
+	s11, s22, ok := p.d11d22(im, iwGeom, k, c)
 	if !ok {
 		return math.NaN()
 	}
@@ -286,7 +286,7 @@ type depolCons struct {
 // rows — строки ограничения (nExtra × nu) для опорного решения C
 // (абсолютные единицы). Для δ_l = t: r = t/100, ρ = (1+r)/(1−r), строка
 // w·(a11 − ρ·a22)/(ρ·D22) даёт относительную невязку D11/D22.
-func (dc *depolCons) rows(im, iwGeom int, C []float64) ([]float64, int) {
+func (dc *depolCons) rows(im, iwGeom int, c []float64) ([]float64, int) {
 	if dc == nil || dc.proj == nil || !(dc.w > 0) {
 		return nil, 0
 	}
@@ -308,7 +308,7 @@ func (dc *depolCons) rows(im, iwGeom int, C []float64) ([]float64, int) {
 		if !isFinite(rho) || !(rho > 0) {
 			continue
 		}
-		d11, d22, ok := p.d11d22(im, iwGeom, k, C)
+		d11, d22, ok := p.d11d22(im, iwGeom, k, c)
 		if !ok {
 			continue
 		}
@@ -333,7 +333,7 @@ func (dc *depolCons) rows(im, iwGeom int, C []float64) ([]float64, int) {
 // depolDeviation — среднее относительное отклонение модельного δ_l от
 // измеренных значений (targets выровнен с p.wl). Пары с нефинитными или
 // неположительными измерениями пропускаются; при отсутствии пар — NaN.
-func depolDeviation(p *depolProj, im, iwGeom int, C, targets []float64) float64 {
+func depolDeviation(p *depolProj, im, iwGeom int, c, targets []float64) float64 {
 	if p == nil {
 		return math.NaN()
 	}
@@ -347,7 +347,7 @@ func depolDeviation(p *depolProj, im, iwGeom int, C, targets []float64) float64 
 		if !isFinite(t) || !(t > 0) {
 			continue
 		}
-		v := p.depolModel(im, iwGeom, k, C)
+		v := p.depolModel(im, iwGeom, k, c)
 		if !isFinite(v) {
 			continue
 		}
@@ -448,7 +448,7 @@ func depolFromProfile(ds *depolSet, mIdx []int, rq, wq, nq []float64) (
 
 	dvol := make([]float64, len(rq))
 	for k, r := range rq {
-		dvol[k] = 3.0 / (4.0 * csPi * r * r * r * r)
+		dvol[k] = 3.0 / (4.0 * math.Pi * r * r * r * r)
 	}
 
 	for iw := 0; iw < nw; iw++ {

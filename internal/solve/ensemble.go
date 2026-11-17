@@ -19,10 +19,6 @@ func distAt(s *solution, g *geom, r float64) float64 {
 	return sum
 }
 
-func solutionDistribution(s *solution, g *geom, r float64) float64 {
-	return distAt(s, g, r)
-}
-
 // smoothDistribution — сглаживание среднего (scipy make_smoothing_spline):
 //
 //	min sum_i w_i (y_i - f_i)^2 + lam * int (f'')^2 dx

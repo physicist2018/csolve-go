@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -24,7 +24,7 @@ const (
 )
 
 type plotOpts struct {
-	fmt      int
+	format   int
 	dpi      float64
 	fontSize float64
 	backend  int
@@ -61,7 +61,7 @@ func plotRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []float64
 }
 
 // fmtG повторяет C-формат "%.17g".
-func fmtG(v float64) string {
+func formatG17(v float64) string {
 	return strconv.FormatFloat(v, 'g', 17, 64)
 }
 
@@ -85,7 +85,7 @@ func setTerminal(sb *strings.Builder, po *plotOpts, wIn, hIn float64) {
 		if po.dpi > 0 {
 			dpi = po.dpi
 		}
-		f = po.fmt
+		f = po.format
 	}
 	wp := int(wIn*dpi + 0.5)
 	hp := int(hIn*dpi + 0.5)
@@ -132,7 +132,7 @@ func writeBars(ch []channel, g1, gFit []float64) string {
 			kind = 'b'
 		}
 		fmt.Fprintf(&b, "%c%g %s %s\n", kind, ch[j].wlUm*1e3,
-			fmtG(g1[j]), fmtG(gFit[j]))
+			formatG17(g1[j]), formatG17(gFit[j]))
 	}
 	return b.String()
 }
@@ -168,15 +168,15 @@ func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
 	var prof strings.Builder
 	for i := range rGrid {
 		v := nAvg[i] / cm3PerM3
-		prof.WriteString(fmtG(rGrid[i]))
+		prof.WriteString(formatG17(rGrid[i]))
 		prof.WriteByte(' ')
 		switch {
 		case math.IsNaN(v):
 			prof.WriteString("NaN")
 		case v > 1e-30:
-			prof.WriteString(fmtG(v))
+			prof.WriteString(formatG17(v))
 		default:
-			prof.WriteString(fmtG(1e-30))
+			prof.WriteString(formatG17(1e-30))
 		}
 		prof.WriteByte('\n')
 	}
@@ -238,7 +238,7 @@ func gnuplotRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []floa
 	var data strings.Builder
 	for k := 0; k < n; k++ {
 		i := idx[k]
-		fmt.Fprintf(&data, "%s %s %s\n", fmtG(alt[i]), fmtG(mRe[i]), fmtG(mIm[i]))
+		fmt.Fprintf(&data, "%s %s %s\n", formatG17(alt[i]), formatG17(mRe[i]), formatG17(mIm[i]))
 	}
 	writeDataFile(pData, data.String())
 
@@ -288,13 +288,14 @@ func anyFiniteSeries(vals [][]float64) bool {
 	return false
 }
 
-// plotProfiles — сводный вертикальный профиль нескольких серий.
-// logAuto — выбирать логарифмическую шкалу x автоматически (для величин
-// вроде деполяризации в процентах это нежелательно).
+// plotProfiles — сводный вертикальный профиль нескольких серий с
+// автоматическим выбором логарифмической шкалы x. Для величин вроде
+// деполяризации в процентах логарифмическая шкала нежелательна, поэтому там
+// используется plotProfilesStyled с logAuto=false.
 func plotProfiles(po *plotOpts, outPath, title, xlabel string, nSeries int,
-	alt []float64, vals [][]float64, names []string, logAuto bool) bool {
-	return plotProfilesStyled(po, outPath, title, xlabel, nSeries, alt, vals,
-		names, nil, logAuto)
+	alt []float64, vals [][]float64, names []string) {
+	plotProfilesStyled(po, outPath, title, xlabel, nSeries, alt, vals,
+		names, nil, true)
 }
 
 // plotProfilesStyled — то же, что plotProfiles, но с пометкой штриховых
@@ -317,7 +318,7 @@ func profileAxes(alt []float64, vals [][]float64, nSeries int,
 	n := len(alt)
 	lo, hi = math.Inf(1), math.Inf(-1)
 	hLo, hHi = math.Inf(1), math.Inf(-1)
-	any := false
+	found := false
 	for s := 0; s < nSeries; s++ {
 		for i := 0; i < n; i++ {
 			v := vals[s][i]
@@ -330,7 +331,7 @@ func profileAxes(alt []float64, vals [][]float64, nSeries int,
 			if v > hi {
 				hi = v
 			}
-			any = true
+			found = true
 		}
 	}
 	for i := 0; i < n; i++ {
@@ -344,22 +345,23 @@ func profileAxes(alt []float64, vals [][]float64, nSeries int,
 			hHi = alt[i]
 		}
 	}
-	if !any {
+	if !found {
 		lo, hi = 0, 1
 	}
 	useLog = logAuto && lo > 0 && hi > 0 && hi/lo > 30.0
 	mag := math.Max(math.Abs(lo), math.Abs(hi))
-	if useLog {
+	switch {
+	case useLog:
 		lo /= 1.3
 		hi *= 1.3
-	} else if hi > lo {
+	case hi > lo:
 		pad := 0.08 * (hi - lo)
 		if 0.05*mag > pad {
 			pad = 0.05 * mag
 		}
 		lo -= pad
 		hi += pad
-	} else {
+	default:
 		pad := 0.5
 		if mag > 0 {
 			pad = 0.05 * mag
@@ -390,7 +392,7 @@ func altitudeOrder(alt []float64) []int {
 	for i := range idx {
 		idx[i] = i
 	}
-	sort.SliceStable(idx, func(a, b int) bool { return alt[idx[a]] < alt[idx[b]] })
+	slices.SortStableFunc(idx, func(a, b int) int { return compareFloats(alt[a], alt[b]) })
 	return idx
 }
 
@@ -455,12 +457,12 @@ func gnuplotProfilesStyled(po *plotOpts, outPath, title, xlabel string,
 
 	var data strings.Builder
 	for i := 0; i < n; i++ {
-		data.WriteString(fmtG(alt[i]))
+		data.WriteString(formatG17(alt[i]))
 		for s := 0; s < nSeries; s++ {
 			v := vals[s][i]
 			data.WriteByte(' ')
 			if isFinite(v) {
-				data.WriteString(fmtG(v))
+				data.WriteString(formatG17(v))
 			} else {
 				data.WriteString("NaN")
 			}
@@ -548,18 +550,18 @@ func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 
 	var avg strings.Builder
 	for i := range rGrid {
-		avg.WriteString(fmtG(rGrid[i]))
+		avg.WriteString(formatG17(rGrid[i]))
 		avg.WriteByte(' ')
 		v := nAvg[i] / cm3PerM3
 		if isFinite(v) {
-			avg.WriteString(fmtG(v))
+			avg.WriteString(formatG17(v))
 		} else {
 			avg.WriteString("NaN")
 		}
 		avg.WriteByte(' ')
 		rv := nAvgRaw[i] / cm3PerM3
 		if isFinite(rv) {
-			avg.WriteString(fmtG(rv))
+			avg.WriteString(formatG17(rv))
 		} else {
 			avg.WriteString("NaN")
 		}
@@ -571,7 +573,7 @@ func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 	if haveTrue {
 		var ta strings.Builder
 		for i := range rGrid {
-			fmt.Fprintf(&ta, "%s %s\n", fmtG(rGrid[i]), fmtG(nTrue[i]/cm3PerM3))
+			fmt.Fprintf(&ta, "%s %s\n", formatG17(rGrid[i]), formatG17(nTrue[i]/cm3PerM3))
 		}
 		writeDataFile(pTrue, ta.String())
 	}
@@ -586,8 +588,8 @@ func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 		solFiles[t] = filepath.Join(dir, fmt.Sprintf("sol_%d.dat", t))
 		var sb strings.Builder
 		for i := range rGrid {
-			fmt.Fprintf(&sb, "%s %s\n", fmtG(rGrid[i]),
-				fmtG(nBest[t][i]/cm3PerM3))
+			fmt.Fprintf(&sb, "%s %s\n", formatG17(rGrid[i]),
+				formatG17(nBest[t][i]/cm3PerM3))
 		}
 		writeDataFile(solFiles[t], sb.String())
 	}

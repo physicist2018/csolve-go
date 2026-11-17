@@ -40,7 +40,7 @@ func lstsq(a []float64, m, n int, b []float64) []float64 {
 	if len(vals) > 0 {
 		smax = vals[0]
 	}
-	rcond := csEps * float64(max(m, n))
+	rcond := machineEps * float64(max(m, n))
 	rank := 0
 	if smax > 0 {
 		for _, v := range vals {
