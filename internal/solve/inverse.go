@@ -268,12 +268,12 @@ func scanVariants(d *design, g1 []float64, nch, gammaSelect int,
 	}
 
 	nu := d.nu
-	nm, nw := d.nM, d.nW
+	nw := d.nW
 	nf := d.nf
 	if nf < 1 {
 		nf = 1
 	}
-	total := nm * nw * nf
+	total := d.variantCount()
 
 	var grel []float64
 	if gammaSelect == gammaFixed {

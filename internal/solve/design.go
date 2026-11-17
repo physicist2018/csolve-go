@@ -1,6 +1,9 @@
 package solve
 
-import "math"
+import (
+	"fmt"
+	"math"
+)
 
 // design — матрицы A для всех (m, окно) за один проход:
 // A[j,i] = int K_j(r) q(r) B_i(r) dr, q(r) = 3/(4 pi r^4).
@@ -38,21 +41,7 @@ func designBuild(ch []channel, nch int, kts []*ktable, mRe, mIm []float64,
 		d.nBasis = nch
 	}
 
-	deg := []int{}
-	r0s := []float64{}
-	r1s := []float64{}
-	for _, dg := range degrees {
-		for _, r0 := range r0Grid {
-			for _, r1 := range r1Grid {
-				if r1 < minRatio*r0 {
-					continue
-				}
-				deg = append(deg, dg)
-				r0s = append(r0s, r0)
-				r1s = append(r1s, r1)
-			}
-		}
-	}
+	deg, r0s, r1s := windowsBuild(degrees, r0Grid, r1Grid, minRatio)
 	d.nW = len(deg)
 	d.nM = len(mRe)
 	d.degree = deg
@@ -128,6 +117,61 @@ func (d *design) mixWith(d2 *design, fracs []float64) {
 	d.fracs = append([]float64(nil), fracs...)
 	d.nf = len(d.fracs)
 }
+
+// windowsBuild — окна перебора: degree × r0 × r1 с отбраковкой r1 < minRatio·r0.
+func windowsBuild(degrees []int, r0Grid, r1Grid []float64, minRatio float64) ([]int, []float64, []float64) {
+	deg := []int{}
+	r0s := []float64{}
+	r1s := []float64{}
+	for _, dg := range degrees {
+		for _, r0 := range r0Grid {
+			for _, r1 := range r1Grid {
+				if r1 < minRatio*r0 {
+					continue
+				}
+				deg = append(deg, dg)
+				r0s = append(r0s, r0)
+				r1s = append(r1s, r1)
+			}
+		}
+	}
+	return deg, r0s, r1s
+}
+
+// countWindows — число окон (degree × r0 × r1 после фильтра --min-ratio).
+func countWindows(degrees []int, r0Grid, r1Grid []float64, minRatio float64) int {
+	deg, _, _ := windowsBuild(degrees, r0Grid, r1Grid, minRatio)
+	return len(deg)
+}
+
+// variantTotal — общее число вариантов nM · nW · nf (nf < 1 трактуется как 1).
+func variantTotal(nM, nW, nf int) int {
+	if nM <= 0 || nW <= 0 {
+		return 0
+	}
+	if nf < 1 {
+		nf = 1
+	}
+	return nM * nW * nf
+}
+
+// variantReport — "N (M m × W windows[ × F f])" для консольного отчёта.
+func variantReport(nM, nW, nf int) string {
+	if nf < 1 {
+		nf = 1
+	}
+	s := fmt.Sprintf("%d m × %d windows", nM, nW)
+	if nf > 1 {
+		s += fmt.Sprintf(" × %d f", nf)
+	}
+	return fmt.Sprintf("%d (%s)", variantTotal(nM, nW, nf), s)
+}
+
+// variantCount — общее число вариантов перебора (m × окна × f).
+func (d *design) variantCount() int { return variantTotal(d.nM, d.nW, d.nf) }
+
+// variantReport — расшифровка числа вариантов для консольного отчёта.
+func (d *design) variantReport() string { return variantReport(d.nM, d.nW, d.nf) }
 
 // fracAt — доля сфер для индекса kf (0 вне смеси).
 func (d *design) fracAt(kf int) float64 {

@@ -1114,6 +1114,7 @@ func runBatch(a *Args) {
 	if retain {
 		per := make([]*solutions, b.nAlt)
 		depPen := make([][]float64, b.nAlt)
+		fmt.Printf("total variants: %s\n", design.variantReport())
 		for h := 0; h < b.nAlt; h++ {
 			g1 := b.data[h*b.nch:]
 			fmt.Printf("scan over (m, r0, r1, degree)...\n")
@@ -1167,6 +1168,7 @@ func runBatch(a *Args) {
 					"not applied\n")
 			}
 		}
+		fmt.Printf("total variants: %s\n", design.variantReport())
 		for h := 0; h < b.nAlt; h++ {
 			g1 := b.data[h*b.nch:]
 			fmt.Printf("scan over (m, r0, r1, degree)...\n")

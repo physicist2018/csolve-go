@@ -431,6 +431,14 @@ func run(a *Args) {
 	if a.mixEnabled() {
 		scanTitle = "scan (m, r0, r1, degree, f)..."
 	}
+	nf := 1
+	if kts2 != nil {
+		if fr := a.mixFractions(); len(fr) > 0 {
+			nf = len(fr)
+		}
+	}
+	nWin := countWindows(a.Degrees, r0Grid, r1Grid, a.MinRatio)
+	fmt.Printf("total variants: %s\n", variantReport(len(mre), nWin, nf))
 	fmt.Printf("%s\n", scanTitle)
 	tPhase = nowSec()
 	design := designBuild(baseCh, nch, kts, mre, mim, a.Degrees, r0Grid,
