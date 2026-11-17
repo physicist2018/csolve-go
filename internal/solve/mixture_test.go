@@ -82,13 +82,19 @@ func mixtureChannels(tb *table) *channels {
 // Окно одно, неизвестных два (nBasis = 4 с нулевыми краями): этого хватает,
 // чтобы доля сфер была идентифицируема по шести каналам.
 func mixtureDesigns(t *testing.T, fracs []float64) (*design, *design) {
+	return mixtureDesignsFill(t, fracs, 1, 1)
+}
+
+// mixtureDesignsFill — то же с заданными факторами заполнения компонент.
+func mixtureDesignsFill(t *testing.T, fracs []float64, fill1, fill2 float64) (
+	*design, *design) {
 	t.Helper()
 	const nch = 6
 	const r0, r1 = 0.2, 2.0
 	kts1 := []*ktable{ktableBuild(mixtureChannels(mixtureTable(t, 2)),
-		r0, r1, 0.1)}
+		r0, r1, 0.1, fill1)}
 	kts2 := []*ktable{ktableBuild(mixtureChannels(mixtureTable(t, 6)),
-		r0, r1, 0.1)}
+		r0, r1, 0.1, fill2)}
 	mre := []float64{1.45}
 	mim := []float64{-0.01}
 	deg := []int{1}
@@ -205,7 +211,7 @@ func depolMixSet(t *testing.T, exp float64, r []float64) *depolSet {
 	ds := &depolSet{wl: append([]float64(nil), depolWlsUm...),
 		kt: make([][2]*ktable, 1)}
 	for iw, wl := range ds.wl {
-		ds.kt[0][iw] = depolKtableBuild(tb, wl, tableRefWlUm, r)
+		ds.kt[0][iw] = depolKtableBuild(tb, wl, tableRefWlUm, r, 1)
 	}
 	ds.nOK = 1
 	return ds
@@ -260,6 +266,32 @@ func TestDepolMix(t *testing.T) {
 		checkClose(t, "proj D22(f=1)", m22, b22, 1e-12)
 		m11, _, _ = pMix.d11d22(0, 0, k, C, 0.25)
 		checkClose(t, "proj D11(f=0.25)", m11, 0.75*a11+0.25*b11, 1e-12)
+	}
+}
+
+// TestSingleFractionMixture: вырожденный диапазон f (f_min == f_max) даёт
+// одну долю, и блок всё равно смешивается по ней (nf == 1 не отключает смесь).
+func TestSingleFractionMixture(t *testing.T) {
+	a, err := ParseArgs([]string{"--mix", "sphere+spheroid", "--f-min", "0.5",
+		"--f-max", "0.5"})
+	if err != nil {
+		t.Fatalf("--mix: %v", err)
+	}
+	f := a.mixFractions()
+	if len(f) != 1 {
+		t.Fatalf("degenerate range must give one fraction, got %v", f)
+	}
+	checkClose(t, "single f", f[0], 0.5, 0)
+
+	d1, d2 := mixtureDesigns(t, f)
+	if d1.nf != 1 {
+		t.Fatalf("expected nf = 1, got %d", d1.nf)
+	}
+	size := d1.nch * d1.nu
+	A, _ := d1.block(0, 0, 0, make([]float64, size))
+	for i := 0; i < size; i++ {
+		want := 0.5*d1.A[i] + 0.5*d2.A[i]
+		checkClose(t, "A(f=0.5)", A[i], want, 1e-15*math.Abs(want)+1e-300)
 	}
 }
 

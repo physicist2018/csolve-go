@@ -56,6 +56,11 @@ func (a *Args) mixFractions() []float64 {
 	if !a.mixEnabled() {
 		return nil
 	}
+	// Вырожденный диапазон (f_min == f_max) — одна доля: дубликаты f дали бы
+	// во много раз больше вариантов и исказили бы ансамбль лучших решений.
+	if !(a.FMax > a.FMin) {
+		return []float64{a.FMin}
+	}
 	n := a.FN
 	if n < 1 {
 		n = 1
@@ -80,10 +85,12 @@ func (a *Args) tableSources() (*tableSource, *tableSource) {
 	return a.tableSource(), a.sphereTableSource()
 }
 
-// mGrid — сетка m одного компонента вместе с источником её таблиц.
+// mGrid — сетка m одного компонента вместе с источником её таблиц и
+// фактором заполнения (1 для сфер и сфероидов, φ для агломератов).
 type mGrid struct {
 	src    *tableSource
 	re, im []float64
+	fill   float64
 }
 
 // alignMGrid — выравнивание сеток m двух компонент смеси.
@@ -135,6 +142,31 @@ type kernels struct {
 	kts2     []*ktable
 	ds       *depolSet
 	ds2      *depolSet
+	fill     [2]float64 // факторы заполнения компонент
+}
+
+// effectiveFill — эффективный фактор заполнения для пересчёта объём↔число
+// по суммарному распределению: 1/φ_eff = f/φ_sphere + (1-f)/φ_non.
+func effectiveFill(fillNon, fillSphere, frac float64) float64 {
+	if frac <= 0 {
+		return fillNon
+	}
+	if frac >= 1 {
+		return fillSphere
+	}
+	inv := frac/fillSphere + (1-frac)/fillNon
+	if !(inv > 0) || !isFinite(inv) {
+		return 1
+	}
+	return 1.0 / inv
+}
+
+// effFill — эффективный фактор заполнения для средней доли сфер frac.
+func (k *kernels) effFill(frac float64) float64 {
+	if k == nil {
+		return 1
+	}
+	return effectiveFill(k.fill[0], k.fill[1], frac)
 }
 
 // coverageCap — минимум x_max*wl/(2π) по всем m всех компонент смеси:
@@ -160,7 +192,7 @@ func buildComponentKernels(a *Args, g mGrid, base []channel, r1Max,
 	for i := range g.re {
 		chs := loadTableChannels(g.src, g.re[i], g.im[i], base,
 			a.TableExtrapolate, a.TableRefWl, cbackScale)
-		kts[i] = ktableBuild(chs, a.R0Min, r1Max, a.DxMax)
+		kts[i] = ktableBuild(chs, a.R0Min, r1Max, a.DxMax, g.fill)
 	}
 	return kts
 }
@@ -168,7 +200,7 @@ func buildComponentKernels(a *Args, g mGrid, base []channel, r1Max,
 // buildComponentDepolSet — ядра S11/S22 одного компонента смеси.
 func buildComponentDepolSet(a *Args, g mGrid, r1Max float64) *depolSet {
 	return depolSetBuild(g.src, g.re, g.im, a.TableRefWl, a.R0Min, r1Max,
-		a.DxMax, a.TableExtrapolate)
+		a.DxMax, a.TableExtrapolate, g.fill)
 }
 
 // forwardMeasurementsMix — прямой расчёт g1 по демо-распределению для смеси:
@@ -192,9 +224,31 @@ func reportMixSetup(a *Args) {
 	if !a.mixEnabled() {
 		return
 	}
+	f := a.mixFractions()
+	if len(f) == 1 {
+		fmt.Printf("mixture: %s + spheres; fixed sphere fraction f = %g\n",
+			mixtureTail(a.Mix), f[0])
+		return
+	}
 	fmt.Printf("mixture: %s + spheres; sphere fraction f scanned in [%g, %g] "+
 		"with %d intervals (%d values)\n", mixtureTail(a.Mix), a.FMin, a.FMax,
-		a.FN, a.FN+1)
+		a.FN, len(f))
+}
+
+// reportFillFactor — строка о факторе заполнения и предупреждение, если для
+// встроенных таблиц агломератов он оставлен равным 1.
+func reportFillFactor(a *Args) {
+	if a.FillFactor != 1 {
+		fmt.Printf("filling factor φ = %g (r — радиус описанной окружности; "+
+			"объёмы — материальные)\n", a.FillFactor)
+		return
+	}
+	if a.Tables == "" && a.Type == "agglomerate" {
+		fmt.Fprintf(os.Stderr, "[warning] built-in agglomerate tables correspond "+
+			"to a filling factor φ ≈ 0.037; --fill-factor is 1, so r is treated "+
+			"as the volume-equivalent radius (volume concentrations and mean "+
+			"volumes are overestimated by 1/φ, N is unaffected)\n")
+	}
 }
 
 // reportMixGrid — сведения и предупреждения о выравнивании сеток m.

@@ -1,6 +1,9 @@
 package solve
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // reportSummary — сводка по ансамблю решений и согласию по каналам.
 func reportSummary(a *Args, sols *solutions, g1 []float64, ch []channel,
@@ -104,7 +107,9 @@ func reportDepolarization(p *profile) {
 	}
 }
 
-func reportMoments(m moments) {
+// reportMoments — интегральные характеристики; fillEff — эффективный фактор
+// заполнения (1 для сфер/сфероидов и при φ=1).
+func reportMoments(m moments, fillEff float64) {
 	fmt.Printf("\n=== Integral characteristics " +
 		"(estimates over the covered region) ===\n")
 	fmt.Printf("  covered radius range: %.4g–%.4g µm (grid fraction: %.0f%%)\n",
@@ -115,9 +120,15 @@ func reportMoments(m moments) {
 	fmt.Printf("  mean particle volume ⟨V⟩    = %.4g µm³ (%.4g m³)\n",
 		m.VolMeanUm3, m.VolMeanUm3*um3ToM3)
 	fmt.Printf("  effective radius r_eff      = %.4g µm\n", m.REffUm)
+	if fillEff != 1 {
+		fmt.Printf("  envelope volume C_v/φ       = %.4g µm³/cm³\n",
+			m.VolConcUm3PerCm3/fillEff)
+		fmt.Printf("  r_eff (volume-equivalent)  = %.4g µm (φ^⅓·r_eff)\n",
+			m.REffUm*math.Cbrt(fillEff))
+	}
 }
 
-func reportModes(m modes, rSplit float64, method string) {
+func reportModes(m modes, rSplit float64, method string, fillEff float64) {
 	fmt.Printf("\n=== Log-normal mode parameters (dV/dln r) ===\n")
 	fmt.Printf("  mode split boundary: %g µm (--r-split)\n", rSplit)
 	fmt.Printf("  parameter estimation method: %s (--modes)\n", method)
@@ -138,6 +149,14 @@ func reportModes(m modes, rSplit float64, method string) {
 			fmt.Printf("  %-8s %12s %9s %7s   %s\n", names[i], "—", "—", "—",
 				v.Method)
 		}
+	}
+	if fillEff != 1 {
+		fmt.Printf("  r_m — радиус описанной окружности; объёмно-эквивалентный "+
+			"r_m,vol = φ^⅓·r_m (φ = %g)\n", fillEff)
+		f := math.Cbrt(fillEff)
+		fmt.Printf("  %-8s %12s %9.4g %7s\n", "fine,vol", "", m.Fine.Rm*f, "")
+		fmt.Printf("  %-8s %12s %9.4g %7s\n", "coarse,vol", "", m.Coarse.Rm*f, "")
+		fmt.Printf("  %-8s %12s %9.4g %7s\n", "overall,vol", "", m.Overall.Rm*f, "")
 	}
 }
 

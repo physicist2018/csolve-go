@@ -216,7 +216,7 @@ func TestDepol(t *testing.T) {
 	ds := &depolSet{wl: append([]float64(nil), depolWlsUm...),
 		kt: make([][2]*ktable, 1)}
 	for iw, wl := range ds.wl {
-		ds.kt[0][iw] = depolKtableBuild(tb, wl, tableRefWlUm, rq)
+		ds.kt[0][iw] = depolKtableBuild(tb, wl, tableRefWlUm, rq, 1)
 	}
 	ds.nOK = 1
 	if !depolSetAvailable(ds) {
@@ -267,7 +267,7 @@ func TestDepolProjection(t *testing.T) {
 	ds := &depolSet{wl: append([]float64(nil), depolWlsUm...),
 		kt: make([][2]*ktable, 1)}
 	for iw, wl := range ds.wl {
-		ds.kt[0][iw] = depolKtableBuild(tb, wl, tableRefWlUm, r)
+		ds.kt[0][iw] = depolKtableBuild(tb, wl, tableRefWlUm, r, 1)
 	}
 	ds.nOK = 1
 

@@ -296,7 +296,7 @@ func scanVariants(d *design, g1 []float64, nch, gammaSelect int,
 
 	t := 0
 	var mixBuf []float64
-	if nf > 1 {
+	if d.A2 != nil {
 		mixBuf = make([]float64, nch*nu)
 	}
 	for v := 0; v < total; v++ {

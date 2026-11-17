@@ -83,6 +83,10 @@ type Args struct {
 	FN           int     // число интервалов по f
 	FTrue        float64 // истинная доля сфер в демо-режиме
 	HasFTrue     bool
+
+	// FillFactor — фактор заполнения агломератов: V_частицы / ((4/3)πr³),
+	// где r — радиус описанной окружности (так он задан в таблицах).
+	FillFactor float64
 }
 
 var errHelp = errors.New("help requested")
@@ -153,6 +157,9 @@ Options:
   --table-extrapolate            allow cross-section extrapolation in x
   --table-ref-lambda-um <X>      reference wavelength of tables, um [2pi]
   --table-cback {dsigma|4pi}     Cback column convention [dsigma]
+  --fill-factor <X>              filling factor of agglomerates:
+                                 V_particle / ((4/3)pi r^3), 0 < X <= 1;
+                                 r is the circumscribed radius [1]
 
   --mix {none|sphere+spheroid|sphere+agglomerate}
                                  mixture of spheres with a non-spherical
@@ -271,6 +278,7 @@ func ParseArgs(argv []string) (*Args, error) {
 		FMin:           0.0,
 		FMax:           1.0,
 		FN:             4,
+		FillFactor:     1.0,
 	}
 
 	fs := flag.NewFlagSet("csolve", flag.ContinueOnError)
@@ -297,6 +305,7 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.Float64Var(&a.TableRefWl, "table-ref-lambda-um", a.TableRefWl, "")
 	tableCback := &enumFlag{allowed: []string{"dsigma", "4pi"}, value: "dsigma"}
 	fs.Var(tableCback, "table-cback", "")
+	fs.Float64Var(&a.FillFactor, "fill-factor", a.FillFactor, "")
 
 	degree := &singleIntFlag{minV: 1, maxV: 4, name: "degree"}
 	fs.Var(degree, "degree", "")
@@ -440,6 +449,15 @@ func ParseArgs(argv []string) (*Args, error) {
 		fmt.Fprintf(os.Stderr, "[warning] --best=%g: a value >= 1 is a count, "+
 			"rounded to %g\n", a.Best, r)
 		a.Best = r
+	}
+	if !(a.FillFactor > 0 && a.FillFactor <= 1) {
+		return nil, fmt.Errorf("option --fill-factor must be > 0 and <= 1")
+	}
+	if a.FillFactor != 1 && a.Type != "agglomerate" {
+		return nil, fmt.Errorf("option --fill-factor is allowed only for agglomerate "+
+			"particles (--type agglomerate or a mixture with it): for %s the "+
+			"table radius is volume-equivalent and the filling factor is 1",
+			a.Type)
 	}
 
 	if degree.set {

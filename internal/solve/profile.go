@@ -10,6 +10,7 @@ type profile struct {
 	mRe, mIm   float64
 	fracAvg    float64 // средняя доля сфер по лучшим решениям (0 вне смеси)
 	mix        bool    // включена ли смесь
+	fillEff    float64 // эффективный фактор заполнения для моментов
 	gFit       []float64
 	moments    moments
 	modes      modes
@@ -65,6 +66,7 @@ func profileFinalize(a *Args, ch []channel, kn *kernels, sols *solutions,
 	if G > 0 {
 		p.fracAvg /= float64(G)
 	}
+	p.fillEff = kn.effFill(p.fracAvg)
 
 	rq, wq := quadratureGrid([]float64{rMin, rMax}, a.QuadOrder, a.LogSpan)
 	navg0 := make([]float64, nr)
@@ -113,7 +115,7 @@ func profileFinalize(a *Args, ch []channel, kn *kernels, sols *solutions,
 			rq, wq, nqVals)
 	}
 
-	p.moments = sizeMoments(p.nAvg, p.rGrid)
+	p.moments = sizeMoments(p.nAvg, p.rGrid, p.fillEff)
 	p.count = make([]float64, nr)
 	for t := 0; t < G; t++ {
 		s := &sols.sol[t]
