@@ -41,7 +41,8 @@ type table struct {
 var tableColumnNames = []string{"Cext", "Cback", "S11", "S22"}
 
 // builtinTableDirs — встроенные наборы таблиц: значение --type -> каталог
-// внутри пакета bases.
+// внутри пакета bases. В наборе agglomerate (large_aggl_100) параметр x
+// рассчитан по объёмно-эквивалентному радиусу агрегата.
 var builtinTableDirs = map[string]string{
 	"sphere":      "base_sph_25/average",
 	"spheroid":    "base_sphrd_25/average",

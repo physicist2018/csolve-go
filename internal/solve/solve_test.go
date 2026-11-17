@@ -675,7 +675,7 @@ func TestBuiltinTables(t *testing.T) {
 	}{
 		{"sphere", "base_sph_25/average", 286, 41, [2]float64{0.02, 600.0}},
 		{"spheroid", "base_sphrd_25/average", 286, 41, [2]float64{0.02, 600.0}},
-		{"agglomerate", "large_aggl_100/average", 56, 100, [2]float64{0.05, 80.0}},
+		{"agglomerate", "large_aggl_100/average", 56, 100, [2]float64{0.01, 25.0}},
 	}
 	for _, c := range cases {
 		src := builtinTableSource(c.kind)
