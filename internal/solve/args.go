@@ -407,9 +407,18 @@ func ParseArgs(argv []string) (*Args, error) {
 	a.DepolRatioMode = depolModeFlag.Value()
 	a.PlotFormat = plotFormatFlag.Value()
 	a.Plotting = plottingFlag.Value()
+	if err := checkArgs(a, seen); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
+// checkArgs — согласование зависимых опций (встроенный backend ⇒ pdf,
+// нецелый --best округляется) и проверка диапазонов числовых опций.
+func checkArgs(a *Args, seen map[string]bool) error {
 	if a.Plotting == plottingInternal {
 		if seen["plot-format"] && a.PlotFormat != plotFmtPdf && !a.NoPlot {
-			return nil, fmt.Errorf("option --plot-format=%s is not "+
+			return fmt.Errorf("option --plot-format=%s is not "+
 				"supported with --plotting=internal (only pdf)", a.PlotFormat)
 		}
 		a.PlotFormat = plotFmtPdf
@@ -420,56 +429,56 @@ func ParseArgs(argv []string) (*Args, error) {
 		if seen["out"] && !a.NoPlot {
 			if ext := strings.ToLower(filepath.Ext(a.Out)); ext != "" &&
 				ext != ".pdf" {
-				return nil, fmt.Errorf("option --out must have a .pdf "+
+				return fmt.Errorf("option --out must have a .pdf "+
 					"extension with --plotting=internal, got %q", a.Out)
 			}
 		}
 	}
 
 	if a.NR0 < 1 {
-		return nil, fmt.Errorf("option --nr0 must be >= 1")
+		return fmt.Errorf("option --nr0 must be >= 1")
 	}
 	if a.NR1 < 1 {
-		return nil, fmt.Errorf("option --nr1 must be >= 1")
+		return fmt.Errorf("option --nr1 must be >= 1")
 	}
 	if a.NrOut < 2 {
-		return nil, fmt.Errorf("option --nr-out must be >= 2")
+		return fmt.Errorf("option --nr-out must be >= 2")
 	}
 	if a.QuadOrder < 1 {
-		return nil, fmt.Errorf("option --quad-order must be >= 1")
+		return fmt.Errorf("option --quad-order must be >= 1")
 	}
 	if a.NGamma < 1 {
-		return nil, fmt.Errorf("option --ngamma must be >= 1")
+		return fmt.Errorf("option --ngamma must be >= 1")
 	}
 	if a.LidarRatioIter < 1 {
-		return nil, fmt.Errorf("option --lidar-ratio-iter must be >= 1")
+		return fmt.Errorf("option --lidar-ratio-iter must be >= 1")
 	}
 	if !(a.R0Min > 0) {
-		return nil, fmt.Errorf("option --r0-min must be > 0")
+		return fmt.Errorf("option --r0-min must be > 0")
 	}
 	if !(a.DxMax > 0) {
-		return nil, fmt.Errorf("option --dx-max must be > 0")
+		return fmt.Errorf("option --dx-max must be > 0")
 	}
 	if !(a.LogSpan > 0) {
-		return nil, fmt.Errorf("option --log-span must be > 0")
+		return fmt.Errorf("option --log-span must be > 0")
 	}
 	if !(a.PlotDpi > 0) {
-		return nil, fmt.Errorf("option --plot-dpi must be > 0")
+		return fmt.Errorf("option --plot-dpi must be > 0")
 	}
 	if !(a.GammaRel >= 0) {
-		return nil, fmt.Errorf("option --gamma-rel must be >= 0")
+		return fmt.Errorf("option --gamma-rel must be >= 0")
 	}
 	if !(a.LidarRatioW >= 0) {
-		return nil, fmt.Errorf("option --lidar-ratio-w must be >= 0")
+		return fmt.Errorf("option --lidar-ratio-w must be >= 0")
 	}
 	if !(a.DepolRatioW >= 0) {
-		return nil, fmt.Errorf("option --depol-ratio-w must be >= 0")
+		return fmt.Errorf("option --depol-ratio-w must be >= 0")
 	}
 	if math.IsNaN(a.Best) || math.IsInf(a.Best, 0) {
-		return nil, fmt.Errorf("option --best must be a finite number")
+		return fmt.Errorf("option --best must be a finite number")
 	}
 	if !(a.Best > 0) {
-		return nil, fmt.Errorf("option --best must be > 0: a value in (0,1) " +
+		return fmt.Errorf("option --best must be > 0: a value in (0,1) " +
 			"is a fraction of all solutions, otherwise it is a count")
 	}
 	if a.Best > 1 && a.Best != math.Trunc(a.Best) {
@@ -479,7 +488,7 @@ func ParseArgs(argv []string) (*Args, error) {
 		a.Best = rounded
 	}
 	if a.PlotFontSize != 0 && !(a.PlotFontSize >= 4 && a.PlotFontSize <= 72) {
-		return nil, fmt.Errorf("option --plot-font-size must be 0 or between 4 and 72")
+		return fmt.Errorf("option --plot-font-size must be 0 or between 4 and 72")
 	}
-	return a, nil
+	return nil
 }

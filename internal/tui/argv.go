@@ -10,205 +10,248 @@ import (
 	"csolve/internal/solve"
 )
 
+// argvBuilder accumulates command-line arguments for solve.ParseArgs.
+type argvBuilder struct{ argv []string }
+
+func (b *argvBuilder) add(flag, value string) { b.argv = append(b.argv, flag, value) }
+func (b *argvBuilder) flag(flag string)       { b.argv = append(b.argv, flag) }
+
 // buildArgv translates the form values into solver flags and validates them with
 // solve.ParseArgs, so the TUI accepts exactly the same combinations as the CLI.
 func buildArgv(s *state) ([]string, *solve.Args, error) {
 	d := s.def
-	var argv []string
+	b := &argvBuilder{}
 
-	add := func(flag, value string) {
-		argv = append(argv, flag, value)
+	if err := b.input(s); err != nil {
+		return nil, nil, err
 	}
-	addFlag := func(flag string) {
-		argv = append(argv, flag)
+	if err := b.tables(s, d); err != nil {
+		return nil, nil, err
 	}
+	b.grid(s, d)
+	b.regularization(s, d)
+	b.depolarization(s, d)
+	b.lidarRatio(s, d)
+	b.demo(s, d)
+	b.discretization(s, d)
+	b.output(s, d)
 
+	a, err := solve.ParseArgs(b.argv)
+	if err != nil {
+		return nil, nil, err
+	}
+	return b.argv, a, nil
+}
+
+// input — режим входа: JSON с измерениями, пакетный TXT или демо.
+func (b *argvBuilder) input(s *state) error {
 	switch s.mode {
 	case modeDemo:
 	case modeData:
 		if strings.TrimSpace(s.dataPath) == "" {
-			return nil, nil, errors.New("a JSON file with measurements is required")
+			return errors.New("a JSON file with measurements is required")
 		}
-		add("--data", s.dataPath)
+		b.add("--data", s.dataPath)
 	case modeBatch:
 		if strings.TrimSpace(s.batchPath) == "" {
-			return nil, nil, errors.New("a batch TXT file is required")
+			return errors.New("a batch TXT file is required")
 		}
-		add("--batch", s.batchPath)
+		b.add("--batch", s.batchPath)
 	default:
-		return nil, nil, fmt.Errorf("unknown input mode %q", s.mode)
+		return fmt.Errorf("unknown input mode %q", s.mode)
 	}
+	return nil
+}
 
+// tables — источник таблиц сечений и соглашения о столбцах.
+func (b *argvBuilder) tables(s *state, d *solve.Args) error {
 	if s.tablesKind == tablesExternal {
 		if strings.TrimSpace(s.tablesDir) == "" {
-			return nil, nil, errors.New("a directory with external tables is required")
+			return errors.New("a directory with external tables is required")
 		}
-		add("--tables", s.tablesDir)
+		b.add("--tables", s.tablesDir)
 	} else {
-		add("--type", s.builtinType)
+		b.add("--type", s.builtinType)
 	}
 	if s.tableExtrapolate {
-		addFlag("--table-extrapolate")
+		b.flag("--table-extrapolate")
 	}
 	if changedFloat(s.tableRefWl, d.TableRefWl) {
-		add("--table-ref-lambda-um", s.tableRefWl)
+		b.add("--table-ref-lambda-um", s.tableRefWl)
 	}
 	if s.tableCback == "4pi" {
-		add("--table-cback", "4pi")
+		b.add("--table-cback", "4pi")
 	}
+	return nil
+}
 
+// grid — базис, сетка окон и число усредняемых решений.
+func (b *argvBuilder) grid(s *state, d *solve.Args) {
 	if s.degree != 1 {
-		add("--degree", strconv.Itoa(s.degree))
+		b.add("--degree", strconv.Itoa(s.degree))
 	}
 	if changedInt(s.nBasis, d.NBasis) {
-		add("--n-basis", s.nBasis)
+		b.add("--n-basis", s.nBasis)
 	}
 	if changedFloat(s.r0Min, d.R0Min) {
-		add("--r0-min", s.r0Min)
+		b.add("--r0-min", s.r0Min)
 	}
 	if changedFloat(s.r0Max, d.R0Max) {
-		add("--r0-max", s.r0Max)
+		b.add("--r0-max", s.r0Max)
 	}
 	if changedInt(s.nr0, d.NR0) {
-		add("--nr0", s.nr0)
+		b.add("--nr0", s.nr0)
 	}
 	if changedFloat(s.r1Min, d.R1Min) {
-		add("--r1-min", s.r1Min)
+		b.add("--r1-min", s.r1Min)
 	}
 	if changedFloat(s.r1Max, d.R1Max) {
-		add("--r1-max", s.r1Max)
+		b.add("--r1-max", s.r1Max)
 	}
 	if changedInt(s.nr1, d.NR1) {
-		add("--nr1", s.nr1)
+		b.add("--nr1", s.nr1)
 	}
 	if changedFloat(s.minRatio, d.MinRatio) {
-		add("--min-ratio", s.minRatio)
+		b.add("--min-ratio", s.minRatio)
 	}
 	if changedFloat(s.best, d.Best) {
-		add("--best", s.best)
+		b.add("--best", s.best)
 	}
+}
 
+// regularization — выбор gamma, сглаживание и оценка мод.
+func (b *argvBuilder) regularization(s *state, d *solve.Args) {
 	if s.gammaSelect != "fixed" {
-		add("--gamma-select", s.gammaSelect)
+		b.add("--gamma-select", s.gammaSelect)
 	}
 	if changedFloat(s.gammaRel, d.GammaRel) {
-		add("--gamma-rel", s.gammaRel)
+		b.add("--gamma-rel", s.gammaRel)
 	}
 	if changedFloat(s.gammaMin, d.GammaMin) {
-		add("--gamma-min", s.gammaMin)
+		b.add("--gamma-min", s.gammaMin)
 	}
 	if changedFloat(s.gammaMax, d.GammaMax) {
-		add("--gamma-max", s.gammaMax)
+		b.add("--gamma-max", s.gammaMax)
 	}
 	if changedInt(s.nGamma, d.NGamma) {
-		add("--ngamma", s.nGamma)
+		b.add("--ngamma", s.nGamma)
 	}
-
 	if s.nonneg {
-		addFlag("--nonneg")
+		b.flag("--nonneg")
 	}
 	if s.noZeroBound {
-		addFlag("--no-zero-boundary")
+		b.flag("--no-zero-boundary")
 	}
 	if s.noSmooth {
-		addFlag("--no-smooth")
+		b.flag("--no-smooth")
 	}
 	if changedFloat(s.smoothLam, d.SmoothLam) {
-		add("--smooth-lam", s.smoothLam)
+		b.add("--smooth-lam", s.smoothLam)
 	}
 	if changedFloat(s.rSplit, d.RSplit) {
-		add("--r-split", s.rSplit)
+		b.add("--r-split", s.rSplit)
 	}
 	if s.modes != "auto" {
-		add("--modes", s.modes)
+		b.add("--modes", s.modes)
 	}
 	if s.absolute {
-		addFlag("--absolute")
+		b.flag("--absolute")
 	}
+}
 
-	if s.depolCons {
-		addFlag("--depol-ratio-cons")
-		if changedFloat(s.depolW, d.DepolRatioW) {
-			add("--depol-ratio-w", s.depolW)
-		}
-		if s.depolMode != "func" {
-			add("--depol-ratio-mode", s.depolMode)
-		}
+// depolarization — ограничение по измеренному δ_l.
+func (b *argvBuilder) depolarization(s *state, d *solve.Args) {
+	if !s.depolCons {
+		return
 	}
-
-	// Lidar-ratio smoothness is only meaningful in batch mode.
-	if s.mode == modeBatch && s.lidarCons {
-		addFlag("--lidar-ratio-cons")
-		if changedFloat(s.lidarW, d.LidarRatioW) {
-			add("--lidar-ratio-w", s.lidarW)
-		}
-		if changedInt(s.lidarIter, d.LidarRatioIter) {
-			add("--lidar-ratio-iter", s.lidarIter)
-		}
+	b.flag("--depol-ratio-cons")
+	if changedFloat(s.depolW, d.DepolRatioW) {
+		b.add("--depol-ratio-w", s.depolW)
 	}
-
-	if s.mode == modeDemo {
-		if changedFloat(s.mReal, 1.45) {
-			add("--m-real", s.mReal)
-		}
-		if changedFloat(s.mImag, -0.005) {
-			add("--m-imag", s.mImag)
-		}
-		if changedFloat(s.noise, 0) {
-			add("--noise", s.noise)
-		}
-		if changedInt(s.seed, d.Seed) {
-			add("--seed", s.seed)
-		}
+	if s.depolMode != "func" {
+		b.add("--depol-ratio-mode", s.depolMode)
 	}
+}
 
+// lidarRatio — ограничение гладкости S = α/β (только пакетный режим).
+func (b *argvBuilder) lidarRatio(s *state, d *solve.Args) {
+	if s.mode != modeBatch || !s.lidarCons {
+		return
+	}
+	b.flag("--lidar-ratio-cons")
+	if changedFloat(s.lidarW, d.LidarRatioW) {
+		b.add("--lidar-ratio-w", s.lidarW)
+	}
+	if changedInt(s.lidarIter, d.LidarRatioIter) {
+		b.add("--lidar-ratio-iter", s.lidarIter)
+	}
+}
+
+// demo — истинные m, шум и зерно генератора (только демо-режим).
+func (b *argvBuilder) demo(s *state, d *solve.Args) {
+	if s.mode != modeDemo {
+		return
+	}
+	if changedFloat(s.mReal, 1.45) {
+		b.add("--m-real", s.mReal)
+	}
+	if changedFloat(s.mImag, -0.005) {
+		b.add("--m-imag", s.mImag)
+	}
+	if changedFloat(s.noise, 0) {
+		b.add("--noise", s.noise)
+	}
+	if changedInt(s.seed, d.Seed) {
+		b.add("--seed", s.seed)
+	}
+}
+
+// discretization — шаг по x, выходная сетка и квадратура.
+func (b *argvBuilder) discretization(s *state, d *solve.Args) {
 	if changedFloat(s.dxMax, d.DxMax) {
-		add("--dx-max", s.dxMax)
+		b.add("--dx-max", s.dxMax)
 	}
 	if changedInt(s.nrOut, d.NrOut) {
-		add("--nr-out", s.nrOut)
+		b.add("--nr-out", s.nrOut)
 	}
 	if changedInt(s.quadOrder, d.QuadOrder) {
-		add("--quad-order", s.quadOrder)
+		b.add("--quad-order", s.quadOrder)
 	}
 	if changedFloat(s.logSpan, d.LogSpan) {
-		add("--log-span", s.logSpan)
+		b.add("--log-span", s.logSpan)
 	}
+}
 
+// output — файлы результатов и графики.
+func (b *argvBuilder) output(s *state, d *solve.Args) {
 	if strings.TrimSpace(s.outDir) != "" {
-		add("--out-dir", s.outDir)
+		b.add("--out-dir", s.outDir)
 	}
 	if strings.TrimSpace(s.out) != "" {
-		add("--out", s.out)
+		b.add("--out", s.out)
 	}
 	if strings.TrimSpace(s.jsonOut) != "" {
-		add("--json", s.jsonOut)
+		b.add("--json", s.jsonOut)
 	}
 	if s.plotting != "internal" {
-		add("--plotting", s.plotting)
+		b.add("--plotting", s.plotting)
 	}
 	// The internal renderer always writes vector PDF and rejects --plot-format
 	// (other than pdf) and ignores --plot-dpi.
 	if s.plotting == "gnuplot" {
 		if s.plotFormat != "png" {
-			add("--plot-format", s.plotFormat)
+			b.add("--plot-format", s.plotFormat)
 		}
 		if changedFloat(s.plotDpi, d.PlotDpi) {
-			add("--plot-dpi", s.plotDpi)
+			b.add("--plot-dpi", s.plotDpi)
 		}
 	}
 	if changedFloat(s.plotFontSize, 0) {
-		add("--plot-font-size", s.plotFontSize)
+		b.add("--plot-font-size", s.plotFontSize)
 	}
 	if s.noPlot {
-		addFlag("--no-plot")
+		b.flag("--no-plot")
 	}
-
-	a, err := solve.ParseArgs(argv)
-	if err != nil {
-		return nil, nil, err
-	}
-	return argv, a, nil
 }
 
 // changedFloat reports whether the text differs from the default value. Invalid

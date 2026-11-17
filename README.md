@@ -830,10 +830,13 @@ csolve-go/
     form.go                 # страницы формы и валидаторы
     run.go                  # запуск солвера дочерним процессом, экран результата
   internal/solve/           # весь конвейер одним пакетом
+    doc.go                  # package-документ
+    console.go              # потоки вывода: отчёты, предупреждения, хронометраж
     util.go                 # константы, сетки, trapz, interp
     spline.go               # not-a-knot кубический сплайн
     linalg.go               # SVD/МНК (gonum), ленточный Холецкий, NNLS
-    tables.go               # data.txt, сетка m, кэш таблиц, каналы
+    tables.go               # источники таблиц, кэш, каналы
+    tables_parse.go         # разбор data.txt и имён каталогов m
     kernels.go              # таблица ядер K(r)
     depol.go                # ядра S11/S22, δ_l и ограничение по δ_l
     basis.go                # Гаусс–Лежандр, B-сплайны, геометрия окна
@@ -845,13 +848,18 @@ csolve-go/
     profile.go              # итоговый профиль одной высоты
     jsonin.go/jsonout.go    # JSON вход/выход
     report.go               # консольный отчёт
-    plot.go                 # gnuplot-бэкенд графиков
+    plot.go                 # диспетчеры графиков и общие помощники
+    plot_gnuplot.go         # gnuplot-бэкенд графиков
     plot_internal.go        # встроенный PDF-рендерер (gonum/plot)
     plot_pdf.go             # PDF-canvas с UTF-8-шрифтами (go-pdf/fpdf)
     args.go                 # CLI (flag + проверки)
-    run.go                  # одиночный режим, Main
-    batch.go                # --batch, --lidar-ratio-cons, --depol-ratio-cons
-    errors.go, solve_test.go
+    run.go                  # одиночный режим, Main, RNG демо
+    run_prepare.go          # подготовка прогона и запись результатов
+    batch.go                # разбор пакетного TXT, общие длины волн
+    batch_reference.go      # опорный профиль S и его гладкость
+    batch_output.go         # файлы и профили пакетного режима
+    batch_run.go            # сценарий пакетного режима
+    solve_test.go
   bases/
     embed.go                # go:embed таблиц (gzip) -> csolve/bases
     base_sph_25/            # sphere:   average/, meta.json, manifest.csv
@@ -884,7 +892,7 @@ csolve-go/
 | `src/util.c` | `util.go` |
 | `src/spline.c` | `spline.go` |
 | `src/linalg.c` | `linalg.go` (SVD/МНК — gonum; Холецкий и NNLS — порт) |
-| `src/tables.c` | `tables.go` |
+| `src/tables.c` | `tables.go` + `tables_parse.go` |
 | `src/kernels.c` | `kernels.go` |
 | — (нет в C) | `depol.go` — линейная деполяризация по `S11`/`S22` |
 | `src/basis.c` | `basis.go` |
@@ -897,11 +905,11 @@ csolve-go/
 | `src/json_in.c` | `jsonin.go` |
 | `src/json_out.c` | `jsonout.go` |
 | `src/report.c` | `report.go` |
-| `src/plot.c` | `plot.go` |
+| `src/plot.c` | `plot.go` + `plot_gnuplot.go` |
 | — (нет в C) | `plot_internal.go`, `plot_pdf.go` — встроенный PDF-рендерер |
 | `src/cli.c` | `args.go` |
-| `src/main.c` | `run.go` + `cmd/csolve/main.go` |
-| `src/batch.c` | `batch.go` |
+| `src/main.c` | `run.go` + `run_prepare.go` + `cmd/csolve/main.go` |
+| `src/batch.c` | `batch.go` + `batch_reference.go` + `batch_output.go` + `batch_run.go` |
 
 Отличия от C-версии:
 
