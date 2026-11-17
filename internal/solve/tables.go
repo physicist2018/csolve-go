@@ -54,6 +54,11 @@ var builtinTableDirs = map[string]string{
 // builtinTypeNames — значения --type в порядке справки и сообщений.
 var builtinTypeNames = []string{"sphere", "spheroid", "agglomerate", "agglomerate-cs"}
 
+// TableTypes — копия списка встроенных наборов таблиц (значения --type).
+func TableTypes() []string {
+	return append([]string(nil), builtinTypeNames...)
+}
+
 // defaultTableType — встроенный набор, используемый без --tables/--type.
 const defaultTableType = "agglomerate"
 

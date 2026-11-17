@@ -146,9 +146,12 @@ coefficients using external cross-section tables
 
 Usage:
   csolve [OPTIONS]
+  csolve --tui
 
 Options:
   -h, --help                     show this help and exit
+  --tui                          interactive terminal UI (huh); accepts no
+                                 other options
 
   --data <JSON>                  measured coefficients; demo data if omitted
   --type {sphere|spheroid|agglomerate|agglomerate-cs}
@@ -226,6 +229,13 @@ Options:
                                  how delta_l is applied: functional residual
                                  or solution ranking [func]
 `)
+}
+
+// DefaultArgs — параметры по умолчанию (как при запуске без опций).
+// Используется интерактивным режимом, чтобы не дублировать значения.
+func DefaultArgs() *Args {
+	a, _ := ParseArgs(nil)
+	return a
 }
 
 // ParseArgs — разбор аргументов; --degree принимает ровно одно значение.
