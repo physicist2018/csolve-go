@@ -129,7 +129,7 @@ type metrics struct {
 	Nc             []float64
 	sgf, sgc, sgo  []float64
 	mRe, mIm       []float64
-	S              []float64   // nl x nAlt
+	S              []float64   // nl × nAlt
 	dpol           [][]float64 // ndepol x nAlt, δ_l, %
 	dpolWl         []float64   // длины волн δ_l, µm
 	dpolMeas       [][]float64 // ndep x nAlt, измеренная δ_l, %

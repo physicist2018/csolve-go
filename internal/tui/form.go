@@ -12,8 +12,8 @@ import (
 	"csolve/internal/solve"
 )
 
-// runPresetForm asks for a preset and whether the full parameter form should be
-// shown. It returns true when the caller may run the solver right away.
+// runPresetForm — запрос пресета и того, нужна ли полная форма. Возвращает
+// true, если решатель можно запускать сразу.
 func runPresetForm(s *state) (bool, error) {
 	presets := presetList()
 	options := make([]huh.Option[string], len(presets))
@@ -53,8 +53,8 @@ func runPresetForm(s *state) (bool, error) {
 	return false, nil
 }
 
-// runFullForm edits all solver parameters. It returns errCancelled when the
-// user declines the final confirmation.
+// runFullForm — редактирование всех параметров решателя. Возвращает
+// errCancelled, если пользователь отказался от финального подтверждения.
 func runFullForm(s *state) error {
 	run := true
 	form := huh.NewForm(
@@ -374,7 +374,7 @@ func submitGroup(s *state, run *bool) *huh.Group {
 	).Title("Summary")
 }
 
-// showError displays a validation error and lets the user go back or quit.
+// showError — показ ошибки проверки с выбором «назад» или «выход».
 func showError(err error) (bool, error) {
 	back := true
 	form := huh.NewForm(
@@ -399,8 +399,8 @@ func (s *state) validateOut(v string) error {
 	if strings.TrimSpace(v) == "" {
 		return nil
 	}
-	// The internal renderer rejects non-PDF names; check early so the error is
-	// shown next to the field. solve.ParseArgs performs the final check.
+	// Встроенный рендерер принимает только .pdf; проверяем заранее, чтобы
+	// ошибка была рядом с полем. Окончательно проверяет solve.ParseArgs.
 	if s.plotting == "internal" && !s.noPlot {
 		if ext := strings.ToLower(filepath.Ext(v)); ext != "" && ext != ".pdf" {
 			return errors.New("the internal renderer writes PDF only; use a .pdf name")
@@ -409,7 +409,7 @@ func (s *state) validateOut(v string) error {
 	return nil
 }
 
-// ---- validators ----
+// ---- валидаторы ----
 
 func vFloat() func(string) error {
 	return func(v string) error {

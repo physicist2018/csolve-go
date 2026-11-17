@@ -6,21 +6,21 @@ import (
 	"csolve/internal/solve"
 )
 
-// Input modes of the solver.
+// Режимы входа решателя.
 const (
 	modeDemo  = "demo"
 	modeData  = "json"
 	modeBatch = "batch"
 )
 
-// Cross-section table sources.
+// Источники таблиц сечений.
 const (
 	tablesBuiltin  = "builtin"
 	tablesExternal = "external"
 )
 
-// state holds the form values. Numeric values are kept as text so that they are
-// validated both interactively (huh) and, finally, by solve.ParseArgs.
+// state — значения формы. Числовые значения хранятся текстом, чтобы их
+// проверяли и интерактивно (huh), и в конце — solve.ParseArgs.
 type state struct {
 	def *solve.Args
 
@@ -98,7 +98,7 @@ func newState() (*state, error) {
 	return s, nil
 }
 
-// reset restores the solver defaults.
+// reset — возврат к значениям решателя по умолчанию.
 func (s *state) reset() {
 	d := s.def
 
@@ -169,8 +169,8 @@ func (s *state) reset() {
 	s.noPlot = false
 }
 
-// readyToRun reports whether the current values can be launched without
-// reviewing the full form (used by quick presets).
+// readyToRun — можно ли запускать без просмотра полной формы (быстрые
+// пресеты).
 func (s *state) readyToRun() bool {
 	switch s.mode {
 	case modeData:
@@ -188,8 +188,8 @@ func (s *state) readyToRun() bool {
 	return true
 }
 
-// bindings returns pointers to every form value so that huh can detect changes
-// and re-evaluate dynamic descriptions.
+// bindings — указатели на все значения формы, чтобы huh замечал изменения
+// и пересчитывал динамические описания.
 func (s *state) bindings() []any {
 	return []any{
 		&s.mode, &s.dataPath, &s.batchPath,
@@ -210,12 +210,12 @@ func (s *state) bindings() []any {
 	}
 }
 
-// preset is a ready-made parameter set shown on the first screen.
+// preset — готовый набор параметров на первом экране.
 type preset struct {
 	key   string
 	name  string
 	desc  string
-	quick bool // run without reviewing the full form
+	quick bool // запуск без просмотра полной формы
 	apply func(*state)
 }
 

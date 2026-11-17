@@ -99,7 +99,7 @@ type tableSource struct {
 
 	mu       sync.Mutex
 	warnedDx bool
-	cache    map[tableCacheKey]*table
+	cache    map[tableCacheKey]*table // кэш живёт в источнике: один прогон — один источник
 }
 
 // tableFileName — имя файла таблицы внутри каталога m.
@@ -319,8 +319,7 @@ func tableMGrid(src *tableSource) (re, im []float64, err error) {
 	return re, im, nil
 }
 
-// Кэш живёт в источнике таблиц: один прогон — один источник, поэтому
-// глобального состояния не нужно.
+// tableCacheKey — ключ кэша: m и режим экстраполяции.
 type tableCacheKey struct {
 	re, im      float64
 	extrapolate bool

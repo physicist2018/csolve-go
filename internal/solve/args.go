@@ -29,7 +29,7 @@ type Args struct {
 	R1Min, R1Max float64
 	NR1          int
 	MinRatio     float64
-	Best         float64 // count, or fraction of all solutions if in (0,1)
+	Best         float64 // число решений или их доля, если значение в (0,1)
 
 	GammaMin, GammaMax float64
 	NGamma             int

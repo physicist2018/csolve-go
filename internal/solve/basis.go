@@ -228,7 +228,7 @@ type geom struct {
 	nNodes                   int
 	nodes                    []float64
 	weights                  []float64
-	values                   []float64 // nNodes x nUnknown
+	values                   []float64 // nNodes × nUnknown
 	dvol                     []float64 // nNodes
 }
 

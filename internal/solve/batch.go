@@ -21,7 +21,7 @@ type batchInput struct {
 	ch   []batchChannel
 	nch  int
 	alt  []float64
-	data []float64 // nAlt x nch, row-major
+	data []float64 // nAlt × nch, по строкам
 	nAlt int
 
 	depWl []float64 // длины волн измеренных δ_l, µm (столбцы dep<nm>)

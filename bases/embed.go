@@ -14,9 +14,9 @@ import "embed"
 
 //go:generate go run ../internal/gen -dir .
 
-// Встроены только наборы average: sphere (base_sph_25), spheroid
-// (base_sphrd_25), agglomerate (large_aggl_100) и agglomerate-cs
-// (large_aggl_100_cs).
+// FS — встроенные наборы таблиц сечений (только каталоги average): sphere
+// (base_sph_25), spheroid (base_sphrd_25), agglomerate (large_aggl_100) и
+// agglomerate-cs (large_aggl_100_cs).
 //
 //go:embed base_sph_25/average/*/*.gz
 //go:embed base_sphrd_25/average/*/*.gz

@@ -10,14 +10,14 @@ import (
 	"csolve/internal/solve"
 )
 
-// argvBuilder accumulates command-line arguments for solve.ParseArgs.
+// argvBuilder — накопитель аргументов командной строки для solve.ParseArgs.
 type argvBuilder struct{ argv []string }
 
 func (b *argvBuilder) add(flag, value string) { b.argv = append(b.argv, flag, value) }
 func (b *argvBuilder) flag(flag string)       { b.argv = append(b.argv, flag) }
 
-// buildArgv translates the form values into solver flags and validates them with
-// solve.ParseArgs, so the TUI accepts exactly the same combinations as the CLI.
+// buildArgv — перевод значений формы во флаги решателя и проверка через
+// solve.ParseArgs: TUI принимает те же сочетания, что и CLI.
 func buildArgv(s *state) ([]string, *solve.Args, error) {
 	d := s.def
 	b := &argvBuilder{}
@@ -236,8 +236,8 @@ func (b *argvBuilder) output(s *state, d *solve.Args) {
 	if s.plotting != "internal" {
 		b.add("--plotting", s.plotting)
 	}
-	// The internal renderer always writes vector PDF and rejects --plot-format
-	// (other than pdf) and ignores --plot-dpi.
+	// Встроенный рендерер всегда пишет векторный PDF, отвергает --plot-format
+	// (кроме pdf) и игнорирует --plot-dpi.
 	if s.plotting == "gnuplot" {
 		if s.plotFormat != "png" {
 			b.add("--plot-format", s.plotFormat)
@@ -254,8 +254,8 @@ func (b *argvBuilder) output(s *state, d *solve.Args) {
 	}
 }
 
-// changedFloat reports whether the text differs from the default value. Invalid
-// text counts as changed so that solve.ParseArgs can report the problem.
+// changedFloat — отличается ли текст от значения по умолчанию. Неверный
+// текст считается изменённым, чтобы ошибку сообщил solve.ParseArgs.
 func changedFloat(text string, def float64) bool {
 	v, err := strconv.ParseFloat(strings.TrimSpace(text), 64)
 	if err != nil {
@@ -264,7 +264,7 @@ func changedFloat(text string, def float64) bool {
 	return v != def
 }
 
-// changedInt reports whether the text differs from the default value.
+// changedInt — отличается ли текст от значения по умолчанию.
 func changedInt(text string, def int) bool {
 	v, err := strconv.Atoi(strings.TrimSpace(text))
 	if err != nil {
@@ -273,7 +273,7 @@ func changedInt(text string, def int) bool {
 	return v != def
 }
 
-// describeOutputs renders the paths the solver writes.
+// describeOutputs — описание файлов, которые запишет решатель.
 func describeOutputs(s *state, a *solve.Args) string {
 	if a.Batch != "" {
 		dir := a.BatchOutDir
@@ -321,7 +321,8 @@ func describeOutputs(s *state, a *solve.Args) string {
 	return "Output files:\n  " + strings.Join(paths, "\n  ")
 }
 
-// shellJoin quotes arguments so the command can be pasted into a shell.
+// shellJoin — экранирование аргументов, чтобы команду можно было вставить
+// в оболочку.
 func shellJoin(args []string) string {
 	quoted := make([]string, len(args))
 	for i, arg := range args {

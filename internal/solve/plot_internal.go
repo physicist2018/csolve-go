@@ -55,7 +55,7 @@ func initInternalPlotFonts() {
 	})
 }
 
-// Палитра и маркеры повторяют gnuplot-оформление.
+// internalPalette — палитра, повторяющая gnuplot-оформление.
 var internalPalette = []color.RGBA{
 	{0x1f, 0x77, 0xb4, 0xff},
 	{0xd6, 0x27, 0x28, 0xff},

@@ -1,3 +1,6 @@
+// Package tui — интерактивный режим csolve (charmbracelet/huh и bubbletea):
+// пресеты, форма параметров, запуск решателя дочерним процессом и экран
+// результата.
 package tui
 
 import (
@@ -8,10 +11,10 @@ import (
 	"github.com/charmbracelet/huh"
 )
 
-// errCancelled is returned when the user declines the final confirmation.
+// errCancelled — пользователь отказался от финального подтверждения.
 var errCancelled = errors.New("cancelled by user")
 
-// Run starts the interactive UI and returns the process exit code.
+// Run — запуск интерактивного режима; возвращает код возврата процесса.
 func Run() int {
 	s, err := newState()
 	if err != nil {
@@ -65,8 +68,8 @@ presetLoop:
 	}
 }
 
-// abortCode maps a form error to an exit code: normal cancellation is not an
-// error, anything else is reported on stderr.
+// abortCode — код возврата по ошибке формы: обычная отмена не считается
+// ошибкой, остальное печатается в stderr.
 func abortCode(err error) int {
 	if errors.Is(err, huh.ErrUserAborted) || errors.Is(err, errCancelled) {
 		return 0

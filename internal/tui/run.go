@@ -12,7 +12,7 @@ import (
 	"csolve/internal/solve"
 )
 
-// action is what the user chose after a solver run.
+// action — выбор пользователя после прогона решателя.
 type action int
 
 const (
@@ -24,10 +24,10 @@ const (
 
 type execFinishedMsg struct{ err error }
 
-// runModel runs the solver as a child process attached to the terminal and then
-// shows the summary. Running a child (instead of calling solve.Main in-process)
-// keeps stdout/stderr intact, allows Ctrl+C to cancel long batch runs and avoids
-// touching the package-level state of the solver.
+// runModel — запуск решателя дочерним процессом в терминале и показ сводки.
+// Дочерний процесс (вместо solve.Main в том же процессе) сохраняет потоки
+// stdout/stderr, позволяет прервать долгий пакетный прогон по Ctrl+C и не
+// трогает состояние пакета решателя.
 type runModel struct {
 	cmd     *exec.Cmd
 	argv    []string
@@ -94,7 +94,7 @@ func (m *runModel) View() string {
 	return b.String()
 }
 
-// runSolve launches the solver and waits for the user's choice.
+// runSolve — запуск решателя и ожидание выбора пользователя.
 func runSolve(s *state, argv []string, a *solve.Args) action {
 	exe, err := os.Executable()
 	if err != nil {
