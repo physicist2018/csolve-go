@@ -64,7 +64,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
+          CGO_ENABLED=0 go build -trimpath \
             -o "dist/csolve-${SUFFIX}${{ matrix.ext }}" ./cmd/csolve
           file "dist/csolve-${SUFFIX}${{ matrix.ext }}"
 
@@ -107,7 +107,7 @@ jobs:
           merge-multiple: true
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag }}
           files: dist/*

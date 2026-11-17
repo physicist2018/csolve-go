@@ -82,6 +82,8 @@ jobs:
           cache-dependency-path: go.sum
 
       # Кросс-сборка не требует cgo, поэтому обе цели собираются на ubuntu.
+      # Флаги совпадают с Makefile: без -s -w, чтобы бинарник не терял символы
+      # (размер как у прошлых релизов, видно, что встроенные таблицы внутри).
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
@@ -89,7 +91,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
+          CGO_ENABLED=0 go build -trimpath \
             -o "dist/csolve-${SUFFIX}${{ matrix.ext }}" ./cmd/csolve
           file "dist/csolve-${SUFFIX}${{ matrix.ext }}"
 
@@ -139,7 +141,7 @@ jobs:
           merge-multiple: true
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           fail_on_unmatched_files: true
