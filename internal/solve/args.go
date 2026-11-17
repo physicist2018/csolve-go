@@ -29,7 +29,9 @@ type Args struct {
 	R1Min, R1Max float64
 	NR1          int
 	MinRatio     float64
-	Best         int
+	// Best — число лучших решений (>= 1) или их доля (< 1) от всех
+	// найденных вариантов; см. bestCount.
+	Best float64
 
 	GammaMin, GammaMax float64
 	NGamma             int
@@ -183,7 +185,8 @@ Options:
   --r1-max <X>                   upper bound of r1 grid [10]
   --nr1 <N>                      number of r1 values, >= 1 [4]
   --min-ratio <X>                drop windows with r1 < X*r0 [4]
-  --best <G>                     number of best solutions G [5]
+  --best <G|f>                   number of best solutions (G >= 1) or
+                                 their fraction of all variants (f < 1) [5]
 
   --gamma-select {fixed|cv|err}  gamma selection rule [fixed]
   --gamma-rel <X>                gamma/||A||_2, >= 0 [0.1]
@@ -314,7 +317,7 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.Float64Var(&a.R1Max, "r1-max", a.R1Max, "")
 	fs.IntVar(&a.NR1, "nr1", a.NR1, "")
 	fs.Float64Var(&a.MinRatio, "min-ratio", a.MinRatio, "")
-	fs.IntVar(&a.Best, "best", a.Best, "")
+	fs.Float64Var(&a.Best, "best", a.Best, "")
 
 	gammaSelect := &enumFlag{allowed: []string{"fixed", "cv", "err"}, value: "fixed"}
 	fs.Var(gammaSelect, "gamma-select", "")
@@ -438,6 +441,15 @@ func ParseArgs(argv []string) (*Args, error) {
 		a.HasFTrue = true
 		a.FTrue = fTrue
 	}
+	if !(a.Best > 0) || math.IsInf(a.Best, 0) || math.IsNaN(a.Best) {
+		return nil, fmt.Errorf("option --best must be > 0")
+	}
+	if a.Best >= 1 && a.Best != math.Trunc(a.Best) {
+		r := math.Round(a.Best)
+		fmt.Fprintf(os.Stderr, "[warning] --best=%g: a value >= 1 is a count, "+
+			"rounded to %g\n", a.Best, r)
+		a.Best = r
+	}
 	if !(a.FillFactor > 0 && a.FillFactor <= 1) {
 		return nil, fmt.Errorf("option --fill-factor must be > 0 and <= 1")
 	}
@@ -532,3 +544,26 @@ func ParseArgs(argv []string) (*Args, error) {
 	}
 	return a, nil
 }
+
+// bestCount переводит --best в число решений: значение < 1 — доля всех
+// найденных вариантов (N = round(f·nTotal)), иначе — абсолютное количество.
+// Результат зажат в [1, nTotal].
+func bestCount(best float64, nTotal int) int {
+	if best >= 1 {
+		if best >= float64(nTotal) {
+			return nTotal
+		}
+		return int(math.Round(best))
+	}
+	g := int(math.Round(best * float64(nTotal)))
+	if g > nTotal {
+		g = nTotal
+	}
+	if g < 1 {
+		g = 1
+	}
+	return g
+}
+
+// bestCount — число лучших решений для nTotal найденных вариантов.
+func (a *Args) bestCount(nTotal int) int { return bestCount(a.Best, nTotal) }

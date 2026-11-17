@@ -378,18 +378,12 @@ func storeTopIds(sols *solutions, g int, prev []int, off int) {
 }
 
 func applyLidarConstraint(per []*solutions, nAlt int, alt []float64, nl int,
-	w float64, maxIter, best int, S [][]float64, pen [][]float64) {
+	w float64, maxIter int, best float64, S [][]float64, pen [][]float64) {
 	dbg := os.Getenv("CSOLVE_LIDAR_DEBUG") != ""
 	gEff := make([]int, nAlt)
 	kEff := make([]int, nAlt)
 	for h := 0; h < nAlt; h++ {
-		g := best
-		if g > per[h].n {
-			g = per[h].n
-		}
-		if g < 1 {
-			g = 1
-		}
+		g := bestCount(best, per[h].n)
 		gEff[h] = g
 		k := 3 * gEff[h]
 		if k < 9 {

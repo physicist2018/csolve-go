@@ -9,10 +9,7 @@ import (
 func reportSummary(a *Args, sols *solutions, g1 []float64, ch []channel,
 	nAvg, gFit, rGrid []float64, mAvgRe, mAvgIm, fracAvg float64) {
 	nch := len(ch)
-	G := a.Best
-	if G > sols.n {
-		G = sols.n
-	}
+	G := a.bestCount(sols.n)
 	mix := a.mixEnabled()
 	title := "=== Solution ensemble (scan over m, r0, r1) ==="
 	if mix {
