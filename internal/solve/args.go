@@ -58,6 +58,7 @@ type Args struct {
 	Seed  int
 
 	Out          string
+	OutDir       string
 	JSON         string
 	NoPlot       bool
 	Plotting     int
@@ -213,6 +214,8 @@ Options:
   --seed <N>                     RNG seed [1]
 
   --out <FILE>                   plot output file [result.<fmt>]
+  --out-dir <DIR>                directory for result files (plots, TXT);
+                                 default: current dir / next to batch TXT
   --json <JSON>                  save results to JSON
   --plotting {internal|gnuplot}
                                  plotting backend [internal]; internal
@@ -349,6 +352,7 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.IntVar(&a.Seed, "seed", a.Seed, "")
 
 	fs.StringVar(&a.Out, "out", "", "")
+	fs.StringVar(&a.OutDir, "out-dir", "", "")
 	fs.StringVar(&a.JSON, "json", "", "")
 	plotFormat := &enumFlag{allowed: []string{"png", "pdf", "svg"}, value: "png"}
 	fs.Var(plotFormat, "plot-format", "")
@@ -541,6 +545,12 @@ func ParseArgs(argv []string) (*Args, error) {
 	}
 	if a.PlotFontSize != 0 && !(a.PlotFontSize >= 4 && a.PlotFontSize <= 72) {
 		return nil, fmt.Errorf("option --plot-font-size must be 0 or between 4 and 72")
+	}
+
+	// --json с одним именем файла пишется в каталог результатов --out-dir;
+	// путь с каталогом (в т.ч. абсолютный) используется как есть.
+	if a.OutDir != "" && a.JSON != "" && filepath.Dir(a.JSON) == "." {
+		a.JSON = filepath.Join(a.OutDir, a.JSON)
 	}
 	return a, nil
 }

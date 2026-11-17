@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -140,6 +141,16 @@ func Main(argv []string) (code int) {
 	}
 	run(a)
 	return 0
+}
+
+// defaultPlotPath — путь графика по умолчанию: result.<ext> в --out-dir,
+// иначе в текущем каталоге.
+func defaultPlotPath(a *Args) string {
+	name := "result." + plotFormatExt(a.PlotFormat)
+	if a.OutDir != "" {
+		return filepath.Join(a.OutDir, name)
+	}
+	return name
 }
 
 func run(a *Args) {
@@ -509,6 +520,7 @@ func run(a *Args) {
 	reportModes(prof.modes, a.RSplit, modeName, prof.fillEff)
 
 	if a.JSON != "" {
+		mkdirP(filepath.Dir(a.JSON))
 		writeJSON(a, a.JSON, sols, prof.rGrid, prof.nAvg, prof.nAvgRaw, baseCh,
 			g1, prof.gFit, prof.mRe, prof.mIm, prof.moments, prof.modes,
 			prof.deltaLwl, prof.deltaL, prof.fracAvg, prof.fillEff)
@@ -527,7 +539,10 @@ func run(a *Args) {
 			fontSize: a.PlotFontSize, backend: a.Plotting}
 		outPath := a.Out
 		if outPath == "" {
-			outPath = "result." + plotFormatExt(a.PlotFormat)
+			outPath = defaultPlotPath(a)
+			if a.OutDir != "" {
+				mkdirP(a.OutDir)
+			}
 		}
 		plotResults(&po, outPath, prof.rGrid, nTrueVals, prof.nAvg,
 			prof.nAvgRaw, prof.nBest, prof.nBestCount, baseCh, g1,

@@ -562,6 +562,18 @@ func defaultOutDir(batchPath string) string {
 	return filepath.Dir(abs)
 }
 
+// resolveOutDir — каталог результатов пакетного режима: --batch-out-dir,
+// затем --out-dir, иначе каталог входного TXT.
+func resolveOutDir(a *Args) string {
+	if a.BatchOutDir != "" {
+		return a.BatchOutDir
+	}
+	if a.OutDir != "" {
+		return a.OutDir
+	}
+	return defaultOutDir(a.Batch)
+}
+
 func openAppend(path string) *os.File {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -995,10 +1007,7 @@ func runBatch(a *Args) {
 			a.DepolRatioW)
 	}
 
-	outDir := a.BatchOutDir
-	if outDir == "" {
-		outDir = defaultOutDir(a.Batch)
-	}
+	outDir := resolveOutDir(a)
 	mkdirP(outDir)
 
 	// шапки общих файлов

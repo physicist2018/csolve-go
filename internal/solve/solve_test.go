@@ -801,6 +801,68 @@ func TestArgsPlotting(t *testing.T) {
 	}
 }
 
+func TestArgsOutDir(t *testing.T) {
+	{
+		a, err := ParseArgs([]string{"--tables", "dir"})
+		if err != nil {
+			t.Fatalf("defaults: %v", err)
+		}
+		if a.OutDir != "" {
+			t.Errorf("default --out-dir must be empty, got %q", a.OutDir)
+		}
+	}
+	{
+		a, err := ParseArgs([]string{"--tables", "dir", "--out-dir", "res"})
+		if err != nil {
+			t.Fatalf("--out-dir: %v", err)
+		}
+		if a.OutDir != "res" {
+			t.Errorf("--out-dir = %q, want res", a.OutDir)
+		}
+		if got, want := defaultPlotPath(a), filepath.Join("res", "result.pdf"); got != want {
+			t.Errorf("defaultPlotPath = %q, want %q", got, want)
+		}
+	}
+	{
+		// --json с одним именем файла пишется в --out-dir
+		a, err := ParseArgs([]string{"--tables", "dir", "--out-dir", "res",
+			"--json", "out.json"})
+		if err != nil {
+			t.Fatalf("--json with --out-dir: %v", err)
+		}
+		if want := filepath.Join("res", "out.json"); a.JSON != want {
+			t.Errorf("--json = %q, want %q", a.JSON, want)
+		}
+	}
+	{
+		// путь JSON с каталогом не переписывается
+		sub := filepath.Join("sub", "out.json")
+		a, err := ParseArgs([]string{"--tables", "dir", "--out-dir", "res",
+			"--json", sub})
+		if err != nil {
+			t.Fatalf("--json with dir: %v", err)
+		}
+		if a.JSON != sub {
+			t.Errorf("--json = %q, want %q", a.JSON, sub)
+		}
+	}
+	{
+		// приоритет каталога результатов: --batch-out-dir > --out-dir > каталог TXT
+		a := &Args{Batch: filepath.Join("a", "b", "batch.txt")}
+		if got, want := resolveOutDir(a), defaultOutDir(a.Batch); got != want {
+			t.Errorf("default resolveOutDir = %q, want %q", got, want)
+		}
+		a.OutDir = "od"
+		if got := resolveOutDir(a); got != "od" {
+			t.Errorf("resolveOutDir with --out-dir = %q, want od", got)
+		}
+		a.BatchOutDir = "bod"
+		if got := resolveOutDir(a); got != "bod" {
+			t.Errorf("resolveOutDir with --batch-out-dir = %q, want bod", got)
+		}
+	}
+}
+
 func TestInternalLabel(t *testing.T) {
 	cases := map[string]string{
 		"r, µm":               "r, µm",
