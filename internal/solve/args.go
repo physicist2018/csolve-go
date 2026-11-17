@@ -133,7 +133,7 @@ Options:
   -h, --help                     show this help and exit
 
   --data <JSON>                  measured coefficients; demo data if omitted
-  --type {sphere|spheroid|agglomerate}
+  --type {sphere|spheroid|agglomerate|agglomerate-cs}
                                  built-in cross-section tables [agglomerate]
   --tables <DIR>                 external tables: directory with
                                  mre_<real>_mim_<imag>/data.txt (mutually

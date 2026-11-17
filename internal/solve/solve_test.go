@@ -566,6 +566,15 @@ func TestArgs(t *testing.T) {
 		}
 	}
 	{
+		a, err := ParseArgs([]string{"--type", "agglomerate-cs"})
+		if err != nil {
+			t.Fatalf("--type agglomerate-cs: %v", err)
+		}
+		if a.Type != "agglomerate-cs" {
+			t.Errorf("--type agglomerate-cs not parsed: %q", a.Type)
+		}
+	}
+	{
 		if _, err := ParseArgs([]string{"--type", "bad"}); err == nil {
 			t.Errorf("unknown --type must be rejected")
 		}
@@ -676,6 +685,7 @@ func TestBuiltinTables(t *testing.T) {
 		{"sphere", "base_sph_25/average", 286, 41, [2]float64{0.02, 600.0}},
 		{"spheroid", "base_sphrd_25/average", 286, 41, [2]float64{0.02, 600.0}},
 		{"agglomerate", "large_aggl_100/average", 56, 100, [2]float64{0.01, 25.0}},
+		{"agglomerate-cs", "large_aggl_100_cs/average", 56, 100, [2]float64{0.05, 80.0}},
 	}
 	for _, c := range cases {
 		src := builtinTableSource(c.kind)

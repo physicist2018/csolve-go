@@ -21,6 +21,7 @@ var builtinSets = []string{
 	"base_sph_25/average",
 	"base_sphrd_25/average",
 	"large_aggl_100/average",
+	"large_aggl_100_cs/average",
 }
 
 func main() {

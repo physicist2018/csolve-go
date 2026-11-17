@@ -15,9 +15,11 @@ import "embed"
 //go:generate go run ../internal/gen -dir .
 
 // Встроены только наборы average: sphere (base_sph_25), spheroid
-// (base_sphrd_25) и agglomerate (large_aggl_100).
+// (base_sphrd_25), agglomerate (large_aggl_100) и agglomerate-cs
+// (large_aggl_100_cs).
 //
 //go:embed base_sph_25/average/*/*.gz
 //go:embed base_sphrd_25/average/*/*.gz
 //go:embed large_aggl_100/average/*/*.gz
+//go:embed large_aggl_100_cs/average/*/*.gz
 var FS embed.FS

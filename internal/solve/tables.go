@@ -42,15 +42,17 @@ var tableColumnNames = []string{"Cext", "Cback", "S11", "S22"}
 
 // builtinTableDirs — встроенные наборы таблиц: значение --type -> каталог
 // внутри пакета bases. В наборе agglomerate (large_aggl_100) параметр x
-// рассчитан по объёмно-эквивалентному радиусу агрегата.
+// рассчитан по объёмно-эквивалентному радиусу агрегата, в agglomerate-cs
+// (large_aggl_100_cs) — по радиусу описанной окружности.
 var builtinTableDirs = map[string]string{
-	"sphere":      "base_sph_25/average",
-	"spheroid":    "base_sphrd_25/average",
-	"agglomerate": "large_aggl_100/average",
+	"sphere":         "base_sph_25/average",
+	"spheroid":       "base_sphrd_25/average",
+	"agglomerate":    "large_aggl_100/average",
+	"agglomerate-cs": "large_aggl_100_cs/average",
 }
 
 // builtinTypeNames — значения --type в порядке справки и сообщений.
-var builtinTypeNames = []string{"sphere", "spheroid", "agglomerate"}
+var builtinTypeNames = []string{"sphere", "spheroid", "agglomerate", "agglomerate-cs"}
 
 // defaultTableType — встроенный набор, используемый без --tables/--type.
 const defaultTableType = "agglomerate"
