@@ -57,6 +57,7 @@ jobs:
       - name: go test
         run: go test -count=1 ./...
 
+      # Стриппинг символов и DWARF (см. ci.yml): на встроенные таблицы не влияет.
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
@@ -64,7 +65,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          CGO_ENABLED=0 go build -trimpath \
+          CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
             -o "dist/csolve-${SUFFIX}${{ matrix.ext }}" ./cmd/csolve
           file "dist/csolve-${SUFFIX}${{ matrix.ext }}"
 

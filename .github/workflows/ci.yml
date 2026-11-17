@@ -82,8 +82,8 @@ jobs:
           cache-dependency-path: go.sum
 
       # Кросс-сборка не требует cgo, поэтому обе цели собираются на ubuntu.
-      # Флаги совпадают с Makefile: без -s -w, чтобы бинарник не терял символы
-      # (размер как у прошлых релизов, видно, что встроенные таблицы внутри).
+      # Стриппинг символов и DWARF: бинарник ~2.9 МБ меньше. На встроенные
+      # таблицы (go:embed) он не влияет.
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
@@ -91,7 +91,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          CGO_ENABLED=0 go build -trimpath \
+          CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
             -o "dist/csolve-${SUFFIX}${{ matrix.ext }}" ./cmd/csolve
           file "dist/csolve-${SUFFIX}${{ matrix.ext }}"
 
