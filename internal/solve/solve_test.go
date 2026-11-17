@@ -583,12 +583,43 @@ func TestArgs(t *testing.T) {
 			t.Errorf("default --type must be agglomerate, got %q", a.Type)
 		}
 		checkClose(t, "plot-dpi default", a.PlotDpi, 150.0, 0)
-		checkClose(t, "plot-font-size default", a.PlotFontSize, 0.0, 0)
+		checkClose(t, "plot-font-size default", a.PlotFontSize, 12.0, 0)
 		if a.Plotting != plottingInternal {
 			t.Errorf("default --plotting must be internal, got %s", a.Plotting)
 		}
 		if a.PlotFormat != plotFmtPdf {
-			t.Errorf("internal backend must force pdf, got %s", a.PlotFormat)
+			t.Errorf("default --plot-format must be pdf, got %s", a.PlotFormat)
+		}
+		checkClose(t, "best default", a.Best, 0.05, 0)
+		if a.NBasis != 7 {
+			t.Errorf("default --n-basis must be 7, got %d", a.NBasis)
+		}
+		checkClose(t, "r0-min default", a.R0Min, 0.05, 0)
+		checkClose(t, "r0-max default", a.R0Max, 0.3, 0)
+		if a.NR0 != 7 {
+			t.Errorf("default --nr0 must be 7, got %d", a.NR0)
+		}
+		checkClose(t, "r1-min default", a.R1Min, 0.45, 0)
+		checkClose(t, "r1-max default", a.R1Max, 3.0, 0)
+		if a.NR1 != 7 {
+			t.Errorf("default --nr1 must be 7, got %d", a.NR1)
+		}
+		if a.NrOut != 25 {
+			t.Errorf("default --nr-out must be 25, got %d", a.NrOut)
+		}
+		checkClose(t, "lidar-ratio-w default", a.LidarRatioW, 1.0, 0)
+		if a.LidarRatioIter != 5 {
+			t.Errorf("default --lidar-ratio-iter must be 5, got %d", a.LidarRatioIter)
+		}
+		if a.Modes != modesStat {
+			t.Errorf("default --modes must be stat, got %s", a.Modes)
+		}
+		if !a.Nonneg {
+			t.Errorf("default --nonneg must be on")
+		}
+		if !a.DepolRatioCons || a.DepolRatioExplicit {
+			t.Errorf("default depolarization constraint: cons=%v explicit=%v",
+				a.DepolRatioCons, a.DepolRatioExplicit)
 		}
 	}
 	{
@@ -653,6 +684,9 @@ func TestArgs(t *testing.T) {
 		if !a.DepolRatioCons {
 			t.Errorf("--depol-ratio-cons not parsed")
 		}
+		if !a.DepolRatioExplicit {
+			t.Errorf("explicit --depol-ratio-cons must be marked explicit")
+		}
 		checkClose(t, "--depol-ratio-w default", a.DepolRatioW, 1.0, 0)
 		a, err = ParseArgs([]string{"--tables", "dir", "--depol-ratio-w", "2.5"})
 		if err != nil {
@@ -674,6 +708,30 @@ func TestArgs(t *testing.T) {
 		}
 		if _, err := ParseArgs([]string{"--tables", "dir", "--depol-ratio-mode", "bad"}); err == nil {
 			t.Errorf("invalid --depol-ratio-mode must be rejected")
+		}
+	}
+	{
+		a, err := ParseArgs([]string{"--tables", "dir", "--no-nonneg"})
+		if err != nil {
+			t.Fatalf("--no-nonneg: %v", err)
+		}
+		if a.Nonneg {
+			t.Errorf("--no-nonneg must disable the constraint")
+		}
+		a, err = ParseArgs([]string{"--tables", "dir", "--no-depol-ratio-cons"})
+		if err != nil {
+			t.Fatalf("--no-depol-ratio-cons: %v", err)
+		}
+		if a.DepolRatioCons {
+			t.Errorf("--no-depol-ratio-cons must disable the constraint")
+		}
+		if _, err := ParseArgs([]string{"--tables", "dir", "--nonneg",
+			"--no-nonneg"}); err == nil {
+			t.Errorf("--nonneg with --no-nonneg must be rejected")
+		}
+		if _, err := ParseArgs([]string{"--tables", "dir", "--depol-ratio-cons",
+			"--no-depol-ratio-cons"}); err == nil {
+			t.Errorf("--depol-ratio-cons with --no-depol-ratio-cons must be rejected")
 		}
 	}
 	{
@@ -858,8 +916,8 @@ func TestArgsPlotting(t *testing.T) {
 		if a.Plotting != plottingGnuplot {
 			t.Errorf("--plotting gnuplot not parsed")
 		}
-		if a.PlotFormat != plotFmtPng {
-			t.Errorf("gnuplot backend must keep png default, got %s",
+		if a.PlotFormat != plotFmtPdf {
+			t.Errorf("gnuplot backend must keep pdf default, got %s",
 				a.PlotFormat)
 		}
 	}

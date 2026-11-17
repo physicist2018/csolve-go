@@ -30,6 +30,74 @@ func TestBuildArgvDefaults(t *testing.T) {
 	if a.Data != "" || a.Batch != "" {
 		t.Errorf("expected demo input, got data=%q batch=%q", a.Data, a.Batch)
 	}
+	if !a.Nonneg || !a.DepolRatioCons {
+		t.Errorf("default constraints: nonneg=%v depol=%v",
+			a.Nonneg, a.DepolRatioCons)
+	}
+	if a.Modes != "stat" {
+		t.Errorf("default modes = %q, want stat", a.Modes)
+	}
+	if a.NBasis != 7 || a.NrOut != 25 {
+		t.Errorf("default n-basis/nr-out = %d/%d, want 7/25",
+			a.NBasis, a.NrOut)
+	}
+	if a.Best != 0.05 {
+		t.Errorf("default best = %g, want 0.05", a.Best)
+	}
+	if a.R0Min != 0.05 || a.R0Max != 0.3 || a.NR0 != 7 {
+		t.Errorf("default r0 grid = %g..%g x%d", a.R0Min, a.R0Max, a.NR0)
+	}
+	if a.R1Min != 0.45 || a.R1Max != 3.0 || a.NR1 != 7 {
+		t.Errorf("default r1 grid = %g..%g x%d", a.R1Min, a.R1Max, a.NR1)
+	}
+	if a.PlotFormat != "pdf" || a.PlotFontSize != 12 {
+		t.Errorf("default plot format/font = %s/%g", a.PlotFormat, a.PlotFontSize)
+	}
+	if a.LidarRatioW != 1.0 || a.LidarRatioIter != 5 {
+		t.Errorf("default lidar ratio w/iter = %g/%d",
+			a.LidarRatioW, a.LidarRatioIter)
+	}
+	if s.modes != "stat" || !s.nonneg || !s.depolCons || s.plotFormat != "pdf" {
+		t.Errorf("TUI defaults: modes=%q nonneg=%v depol=%v format=%q",
+			s.modes, s.nonneg, s.depolCons, s.plotFormat)
+	}
+}
+
+func TestDefaultConstraintsCanBeDisabled(t *testing.T) {
+	s := newTestState(t)
+	s.nonneg = false
+	s.depolCons = false
+
+	argv, a, err := buildArgv(s)
+	if err != nil {
+		t.Fatalf("disabled constraints: %v", err)
+	}
+	if a.Nonneg || a.DepolRatioCons {
+		t.Errorf("constraints must be off: nonneg=%v depol=%v",
+			a.Nonneg, a.DepolRatioCons)
+	}
+	if !contains(argv, "--no-nonneg") || !contains(argv, "--no-depol-ratio-cons") {
+		t.Errorf("argv misses disable flags: %v", argv)
+	}
+}
+
+func TestChangedDefaultsEmitFlags(t *testing.T) {
+	s := newTestState(t)
+	s.modes = "auto"
+	s.plotFontSize = "10"
+	s.nrOut = "50"
+
+	argv, a, err := buildArgv(s)
+	if err != nil {
+		t.Fatalf("changed defaults: %v", err)
+	}
+	if a.Modes != "auto" || a.PlotFontSize != 10 || a.NrOut != 50 {
+		t.Errorf("modes/font/nr-out = %s/%g/%d", a.Modes, a.PlotFontSize, a.NrOut)
+	}
+	if !contains(argv, "--modes") || !contains(argv, "--plot-font-size") ||
+		!contains(argv, "--nr-out") {
+		t.Errorf("argv misses changed values: %v", argv)
+	}
 }
 
 func TestPresetDemoSphere(t *testing.T) {

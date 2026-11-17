@@ -87,7 +87,11 @@ func (b *argvBuilder) tables(s *state, d *solve.Args) error {
 
 // grid — базис, сетка окон и число усредняемых решений.
 func (b *argvBuilder) grid(s *state, d *solve.Args) {
-	if s.degree != 1 {
+	defDegree := 1
+	if len(d.Degrees) > 0 {
+		defDegree = d.Degrees[0]
+	}
+	if s.degree != defDegree {
 		b.add("--degree", strconv.Itoa(s.degree))
 	}
 	if changedInt(s.nBasis, d.NBasis) {
@@ -121,7 +125,7 @@ func (b *argvBuilder) grid(s *state, d *solve.Args) {
 
 // regularization — выбор gamma, сглаживание и оценка мод.
 func (b *argvBuilder) regularization(s *state, d *solve.Args) {
-	if s.gammaSelect != "fixed" {
+	if s.gammaSelect != string(d.GammaSelect) {
 		b.add("--gamma-select", s.gammaSelect)
 	}
 	if changedFloat(s.gammaRel, d.GammaRel) {
@@ -136,8 +140,12 @@ func (b *argvBuilder) regularization(s *state, d *solve.Args) {
 	if changedInt(s.nGamma, d.NGamma) {
 		b.add("--ngamma", s.nGamma)
 	}
-	if s.nonneg {
-		b.flag("--nonneg")
+	if s.nonneg != d.Nonneg {
+		if s.nonneg {
+			b.flag("--nonneg")
+		} else {
+			b.flag("--no-nonneg")
+		}
 	}
 	if s.noZeroBound {
 		b.flag("--no-zero-boundary")
@@ -151,7 +159,7 @@ func (b *argvBuilder) regularization(s *state, d *solve.Args) {
 	if changedFloat(s.rSplit, d.RSplit) {
 		b.add("--r-split", s.rSplit)
 	}
-	if s.modes != "auto" {
+	if s.modes != string(d.Modes) {
 		b.add("--modes", s.modes)
 	}
 	if s.absolute {
@@ -161,14 +169,20 @@ func (b *argvBuilder) regularization(s *state, d *solve.Args) {
 
 // depolarization — ограничение по измеренному δ_l.
 func (b *argvBuilder) depolarization(s *state, d *solve.Args) {
+	if s.depolCons != d.DepolRatioCons {
+		if s.depolCons {
+			b.flag("--depol-ratio-cons")
+		} else {
+			b.flag("--no-depol-ratio-cons")
+		}
+	}
 	if !s.depolCons {
 		return
 	}
-	b.flag("--depol-ratio-cons")
 	if changedFloat(s.depolW, d.DepolRatioW) {
 		b.add("--depol-ratio-w", s.depolW)
 	}
-	if s.depolMode != "func" {
+	if s.depolMode != string(d.DepolRatioMode) {
 		b.add("--depol-ratio-mode", s.depolMode)
 	}
 }
@@ -233,20 +247,20 @@ func (b *argvBuilder) output(s *state, d *solve.Args) {
 	if strings.TrimSpace(s.jsonOut) != "" {
 		b.add("--json", s.jsonOut)
 	}
-	if s.plotting != "internal" {
+	if s.plotting != string(d.Plotting) {
 		b.add("--plotting", s.plotting)
 	}
 	// Встроенный рендерер всегда пишет векторный PDF, отвергает --plot-format
 	// (кроме pdf) и игнорирует --plot-dpi.
 	if s.plotting == "gnuplot" {
-		if s.plotFormat != "png" {
+		if s.plotFormat != string(d.PlotFormat) {
 			b.add("--plot-format", s.plotFormat)
 		}
 		if changedFloat(s.plotDpi, d.PlotDpi) {
 			b.add("--plot-dpi", s.plotDpi)
 		}
 	}
-	if changedFloat(s.plotFontSize, 0) {
+	if changedFloat(s.plotFontSize, d.PlotFontSize) {
 		b.add("--plot-font-size", s.plotFontSize)
 	}
 	if s.noPlot {

@@ -62,7 +62,7 @@ func loadRunInput(a *Args, c *console) (*runInput, error) {
 		c.printf("demo on synthetic data\n")
 	}
 
-	if a.DepolRatioCons && len(in.depVal) == 0 {
+	if a.DepolRatioCons && len(in.depVal) == 0 && a.DepolRatioExplicit {
 		if in.demo {
 			return nil, errors.New("option --depol-ratio-cons requires measured " +
 				"depolarization, but demo data has none — provide --data JSON " +

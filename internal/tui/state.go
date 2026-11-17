@@ -109,9 +109,12 @@ func (s *state) reset() {
 	s.tablesKind = tablesBuiltin
 	s.builtinType = d.Type
 	s.tablesDir = ""
-	s.tableExtrapolate = false
+	s.tableExtrapolate = d.TableExtrapolate
 	s.tableRefWl = formatFloat(d.TableRefWl)
 	s.tableCback = "dsigma"
+	if d.TableCback4pi {
+		s.tableCback = "4pi"
+	}
 
 	s.degree = 1
 	if len(d.Degrees) > 0 {
@@ -127,25 +130,25 @@ func (s *state) reset() {
 	s.minRatio = formatFloat(d.MinRatio)
 	s.best = formatFloat(d.Best)
 
-	s.gammaSelect = "fixed"
+	s.gammaSelect = string(d.GammaSelect)
 	s.gammaRel = formatFloat(d.GammaRel)
 	s.gammaMin = formatFloat(d.GammaMin)
 	s.gammaMax = formatFloat(d.GammaMax)
 	s.nGamma = strconv.Itoa(d.NGamma)
 
-	s.nonneg = false
-	s.noZeroBound = false
-	s.noSmooth = false
+	s.nonneg = d.Nonneg
+	s.noZeroBound = d.NoZeroBoundary
+	s.noSmooth = d.NoSmooth
 	s.smoothLam = formatFloat(d.SmoothLam)
 	s.rSplit = formatFloat(d.RSplit)
-	s.modes = "auto"
-	s.absolute = false
+	s.modes = string(d.Modes)
+	s.absolute = d.Absolute
 
-	s.depolCons = false
+	s.depolCons = d.DepolRatioCons
 	s.depolW = formatFloat(d.DepolRatioW)
-	s.depolMode = "func"
+	s.depolMode = string(d.DepolRatioMode)
 
-	s.lidarCons = false
+	s.lidarCons = d.LidarRatioCons
 	s.lidarW = formatFloat(d.LidarRatioW)
 	s.lidarIter = strconv.Itoa(d.LidarRatioIter)
 
@@ -162,11 +165,11 @@ func (s *state) reset() {
 	s.outDir = ""
 	s.out = ""
 	s.jsonOut = ""
-	s.plotting = "internal"
-	s.plotFormat = "png"
+	s.plotting = string(d.Plotting)
+	s.plotFormat = string(d.PlotFormat)
 	s.plotDpi = formatFloat(d.PlotDpi)
 	s.plotFontSize = formatFloat(d.PlotFontSize)
-	s.noPlot = false
+	s.noPlot = d.NoPlot
 }
 
 // readyToRun — можно ли запускать без просмотра полной формы (быстрые

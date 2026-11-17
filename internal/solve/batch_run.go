@@ -30,7 +30,7 @@ func prepareBatch(a *Args, c *console) (*batchSetup, error) {
 	if err != nil {
 		return nil, err
 	}
-	if a.DepolRatioCons && b.ndep == 0 {
+	if a.DepolRatioCons && b.ndep == 0 && a.DepolRatioExplicit {
 		return nil, errors.New("option --depol-ratio-cons requires a dep<nm> column in the " +
 			"batch file (e.g. dep532), got none")
 	}

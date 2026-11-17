@@ -71,8 +71,11 @@ type Args struct {
 	LidarRatioIter int
 
 	DepolRatioCons bool
-	DepolRatioW    float64
-	DepolRatioMode depolMode
+	// DepolRatioExplicit — флаг --depol-ratio-cons задан явно (а не
+	// включён значением по умолчанию).
+	DepolRatioExplicit bool
+	DepolRatioW        float64
+	DepolRatioMode     depolMode
 }
 
 var errHelp = errors.New("help requested")
@@ -178,16 +181,17 @@ Options:
   --table-cback {dsigma|4pi}     Cback column convention [dsigma]
 
   --degree <1|2|3|4>             B-spline degree (single value) [1]
-  --n-basis <N>                  basis functions per window [number of channels]
-  --r0-min <X>                   lower bound of r0 grid, > 0 [0.02]
-  --r0-max <X>                   upper bound of r0 grid [0.5]
-  --nr0 <N>                      number of r0 values, >= 1 [6]
-  --r1-min <X>                   lower bound of r1 grid [2]
-  --r1-max <X>                   upper bound of r1 grid [10]
-  --nr1 <N>                      number of r1 values, >= 1 [4]
+  --n-basis <N>                  basis functions per window; 0 = number of
+                                 channels [7]
+  --r0-min <X>                   lower bound of r0 grid, > 0 [0.05]
+  --r0-max <X>                   upper bound of r0 grid [0.3]
+  --nr0 <N>                      number of r0 values, >= 1 [7]
+  --r1-min <X>                   lower bound of r1 grid [0.45]
+  --r1-max <X>                   upper bound of r1 grid [3]
+  --nr1 <N>                      number of r1 values, >= 1 [7]
   --min-ratio <X>                drop windows with r1 < X*r0 [4]
   --best <G>                     solutions to average: an integer count,
-                                 or a fraction in (0,1) of all solutions [5]
+                                 or a fraction in (0,1) of all solutions [0.05]
 
   --gamma-select {fixed|cv|err}  gamma selection rule [fixed]
   --gamma-rel <X>                gamma/||A||_2, >= 0 [0.1]
@@ -195,16 +199,17 @@ Options:
   --gamma-max <X>                max lg gamma [5]
   --ngamma <N>                   number of gamma values, >= 1 [41]
 
-  --nonneg                       constrain C >= 0
+  --nonneg                       constrain C >= 0 (default: on)
+  --no-nonneg                    disable the C >= 0 constraint
   --no-zero-boundary             no boundary conditions n(r0)=n(r1)=0
   --no-smooth                    disable smoothing of the mean
   --smooth-lam <X>               smoothing parameter [1e-4]
   --r-split <X>                  fine/coarse boundary [0.5]
-  --modes {auto|fit|stat}        mode parameters estimation [auto]
+  --modes {auto|fit|stat}        mode parameters estimation [stat]
   --absolute                     least squares on absolute residuals
 
   --dx-max <X>                   max step in x for kernel tables, > 0 [0.1]
-  --nr-out <N>                   points in output grid, >= 2 [256]
+  --nr-out <N>                   points in output grid, >= 2 [25]
   --quad-order <N>               Gauss-Legendre order, >= 1 [24]
   --log-span <X>                 max subsegment width in ln r, > 0 [0.1]
 
@@ -222,10 +227,10 @@ Options:
   --plotting {internal|gnuplot}
                                  plotting backend [internal]; internal
                                  renders PDF only, without gnuplot
-  --plot-format {png|pdf|svg}    plot format (gnuplot backend) [png];
+  --plot-format {png|pdf|svg}    plot format (gnuplot backend) [pdf];
                                  internal backend requires pdf
   --plot-dpi <N>                 resolution for png/svg, dpi, > 0 [150]
-  --plot-font-size <pt>          axis/series label size, pt (0 or 4..72) [0]
+  --plot-font-size <pt>          axis/series label size, pt (0 or 4..72) [12]
   --no-plot                      do not build plots
 
   --batch <TXT>                  batch processing from txt
@@ -233,11 +238,14 @@ Options:
   --batch-out-dir <DIR>          batch output directory [next to TXT];
                                  mutually exclusive with --out-dir
   --lidar-ratio-cons             constrain smoothness of S = alpha/beta
-  --lidar-ratio-w <X>            weight of S deviation penalty, >= 0 [0.5]
-  --lidar-ratio-iter <N>         iterations to refine reference S, >= 1 [3]
+  --lidar-ratio-w <X>            weight of S deviation penalty, >= 0 [1]
+  --lidar-ratio-iter <N>         iterations to refine reference S, >= 1 [5]
 
   --depol-ratio-cons             add a delta_l residual to the retrieval
                                  functional or to solution ranking
+                                 (default: on; skipped if no measured
+                                 depolarization is available)
+  --no-depol-ratio-cons          disable the delta_l residual
   --depol-ratio-w <X>            weight of the delta_l residual, >= 0 [1]
   --depol-ratio-mode {func|rank}
                                  how delta_l is applied: functional residual
@@ -257,14 +265,15 @@ func ParseArgs(argv []string) (*Args, error) {
 		TableRefWl:     tableRefWlUm,
 		Type:           defaultTableType,
 		Degrees:        []int{1},
-		R0Min:          0.02,
-		R0Max:          0.5,
-		NR0:            6,
-		R1Min:          2.0,
-		R1Max:          10.0,
-		NR1:            4,
+		NBasis:         7,
+		R0Min:          0.05,
+		R0Max:          0.3,
+		NR0:            7,
+		R1Min:          0.45,
+		R1Max:          3.0,
+		NR1:            7,
 		MinRatio:       4.0,
-		Best:           5,
+		Best:           0.05,
 		GammaMin:       -7.0,
 		GammaMax:       5.0,
 		NGamma:         41,
@@ -272,20 +281,22 @@ func ParseArgs(argv []string) (*Args, error) {
 		GammaRel:       0.1,
 		SmoothLam:      1e-4,
 		RSplit:         0.5,
-		Modes:          modesAuto,
+		Modes:          modesStat,
 		DxMax:          0.1,
-		NrOut:          256,
+		NrOut:          25,
 		QuadOrder:      24,
 		LogSpan:        0.1,
 		Seed:           1,
 		Plotting:       plottingInternal,
-		PlotFormat:     plotFmtPng,
+		PlotFormat:     plotFmtPdf,
 		PlotDpi:        150.0,
-		PlotFontSize:   0.0,
-		LidarRatioW:    0.5,
-		LidarRatioIter: 3,
+		PlotFontSize:   12.0,
+		LidarRatioW:    1.0,
+		LidarRatioIter: 5,
 		DepolRatioW:    1.0,
 		DepolRatioMode: depolModeFunc,
+		Nonneg:         true,
+		DepolRatioCons: true,
 	}
 
 	fs := flag.NewFlagSet("csolve", flag.ContinueOnError)
@@ -306,7 +317,7 @@ func ParseArgs(argv []string) (*Args, error) {
 
 	degree := &singleIntFlag{minV: 1, maxV: 4, name: "degree"}
 	fs.Var(degree, "degree", "")
-	fs.IntVar(&a.NBasis, "n-basis", 0, "")
+	fs.IntVar(&a.NBasis, "n-basis", a.NBasis, "")
 	fs.Float64Var(&a.R0Min, "r0-min", a.R0Min, "")
 	fs.Float64Var(&a.R0Max, "r0-max", a.R0Max, "")
 	fs.IntVar(&a.NR0, "nr0", a.NR0, "")
@@ -316,19 +327,21 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.Float64Var(&a.MinRatio, "min-ratio", a.MinRatio, "")
 	fs.Float64Var(&a.Best, "best", a.Best, "")
 
-	gammaSel := &enumFlag[gammaSelect]{allowed: gammaSelects, value: gammaFixed}
+	gammaSel := &enumFlag[gammaSelect]{allowed: gammaSelects, value: a.GammaSelect}
 	fs.Var(gammaSel, "gamma-select", "")
 	fs.Float64Var(&a.GammaRel, "gamma-rel", a.GammaRel, "")
 	fs.Float64Var(&a.GammaMin, "gamma-min", a.GammaMin, "")
 	fs.Float64Var(&a.GammaMax, "gamma-max", a.GammaMax, "")
 	fs.IntVar(&a.NGamma, "ngamma", a.NGamma, "")
 
-	fs.BoolVar(&a.Nonneg, "nonneg", false, "")
+	fs.BoolVar(&a.Nonneg, "nonneg", a.Nonneg, "")
+	var noNonneg bool
+	fs.BoolVar(&noNonneg, "no-nonneg", false, "")
 	fs.BoolVar(&a.NoZeroBoundary, "no-zero-boundary", false, "")
 	fs.BoolVar(&a.NoSmooth, "no-smooth", false, "")
 	fs.Float64Var(&a.SmoothLam, "smooth-lam", a.SmoothLam, "")
 	fs.Float64Var(&a.RSplit, "r-split", a.RSplit, "")
-	modesFlag := &enumFlag[modesKind]{allowed: modesKinds, value: modesAuto}
+	modesFlag := &enumFlag[modesKind]{allowed: modesKinds, value: a.Modes}
 	fs.Var(modesFlag, "modes", "")
 	fs.BoolVar(&a.Absolute, "absolute", false, "")
 
@@ -348,10 +361,11 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.StringVar(&a.OutDir, "out-dir", "", "")
 	fs.StringVar(&a.Out, "out", "", "")
 	fs.StringVar(&a.JSON, "json", "", "")
-	plotFormatFlag := &enumFlag[plotFormat]{allowed: plotFormats, value: plotFmtPng}
+	plotFormatFlag := &enumFlag[plotFormat]{allowed: plotFormats,
+		value: a.PlotFormat}
 	fs.Var(plotFormatFlag, "plot-format", "")
 	plottingFlag := &enumFlag[plotBackend]{allowed: plotBackends,
-		value: plottingInternal}
+		value: a.Plotting}
 	fs.Var(plottingFlag, "plotting", "")
 	fs.Float64Var(&a.PlotDpi, "plot-dpi", a.PlotDpi, "")
 	fs.Float64Var(&a.PlotFontSize, "plot-font-size", a.PlotFontSize, "")
@@ -362,9 +376,12 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.BoolVar(&a.LidarRatioCons, "lidar-ratio-cons", false, "")
 	fs.Float64Var(&a.LidarRatioW, "lidar-ratio-w", a.LidarRatioW, "")
 	fs.IntVar(&a.LidarRatioIter, "lidar-ratio-iter", a.LidarRatioIter, "")
-	fs.BoolVar(&a.DepolRatioCons, "depol-ratio-cons", false, "")
+	fs.BoolVar(&a.DepolRatioCons, "depol-ratio-cons", a.DepolRatioCons, "")
+	var noDepolCons bool
+	fs.BoolVar(&noDepolCons, "no-depol-ratio-cons", false, "")
 	fs.Float64Var(&a.DepolRatioW, "depol-ratio-w", a.DepolRatioW, "")
-	depolModeFlag := &enumFlag[depolMode]{allowed: depolModes, value: depolModeFunc}
+	depolModeFlag := &enumFlag[depolMode]{allowed: depolModes,
+		value: a.DepolRatioMode}
 	fs.Var(depolModeFlag, "depol-ratio-mode", "")
 
 	if err := fs.Parse(argv); err != nil {
@@ -388,6 +405,21 @@ func ParseArgs(argv []string) (*Args, error) {
 		return nil, fmt.Errorf("options --out-dir and --batch-out-dir are " +
 			"mutually exclusive")
 	}
+	if seen["nonneg"] && seen["no-nonneg"] {
+		return nil, fmt.Errorf("options --nonneg and --no-nonneg are " +
+			"mutually exclusive")
+	}
+	if seen["depol-ratio-cons"] && seen["no-depol-ratio-cons"] {
+		return nil, fmt.Errorf("options --depol-ratio-cons and " +
+			"--no-depol-ratio-cons are mutually exclusive")
+	}
+	if noNonneg {
+		a.Nonneg = false
+	}
+	if noDepolCons {
+		a.DepolRatioCons = false
+	}
+	a.DepolRatioExplicit = seen["depol-ratio-cons"]
 
 	if degree.set {
 		a.Degrees = []int{degree.value}
