@@ -29,7 +29,7 @@ type Args struct {
 	R1Min, R1Max float64
 	NR1          int
 	MinRatio     float64
-	Best         int
+	Best         float64 // count, or fraction of all solutions if in (0,1)
 
 	GammaMin, GammaMax float64
 	NGamma             int
@@ -104,6 +104,23 @@ func (f *singleIntFlag) Set(s string) error {
 	return nil
 }
 
+// bestCount — число решений для усреднения при nTot найденных вариантах.
+// --best из (0,1) трактуется как доля решений, иначе — как их количество.
+// Доля, дающая меньше одного решения, приводится к 1.
+func (a *Args) bestCount(nTot int) int {
+	g := int(math.Round(a.Best))
+	if a.Best < 1 {
+		g = int(math.Round(float64(nTot) * a.Best))
+	}
+	if g < 1 {
+		g = 1
+	}
+	if g > nTot {
+		g = nTot
+	}
+	return g
+}
+
 type enumFlag struct {
 	allowed []string
 	value   string
@@ -151,7 +168,8 @@ Options:
   --r1-max <X>                   upper bound of r1 grid [10]
   --nr1 <N>                      number of r1 values, >= 1 [4]
   --min-ratio <X>                drop windows with r1 < X*r0 [4]
-  --best <G>                     number of best solutions G [5]
+  --best <G>                     solutions to average: an integer count,
+                                 or a fraction in (0,1) of all solutions [5]
 
   --gamma-select {fixed|cv|err}  gamma selection rule [fixed]
   --gamma-rel <X>                gamma/||A||_2, >= 0 [0.1]
@@ -267,7 +285,7 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.Float64Var(&a.R1Max, "r1-max", a.R1Max, "")
 	fs.IntVar(&a.NR1, "nr1", a.NR1, "")
 	fs.Float64Var(&a.MinRatio, "min-ratio", a.MinRatio, "")
-	fs.IntVar(&a.Best, "best", a.Best, "")
+	fs.Float64Var(&a.Best, "best", a.Best, "")
 
 	gammaSelect := &enumFlag{allowed: []string{"fixed", "cv", "err"}, value: "fixed"}
 	fs.Var(gammaSelect, "gamma-select", "")
@@ -416,6 +434,19 @@ func ParseArgs(argv []string) (*Args, error) {
 	}
 	if !(a.DepolRatioW >= 0) {
 		return nil, fmt.Errorf("option --depol-ratio-w must be >= 0")
+	}
+	if math.IsNaN(a.Best) || math.IsInf(a.Best, 0) {
+		return nil, fmt.Errorf("option --best must be a finite number")
+	}
+	if !(a.Best > 0) {
+		return nil, fmt.Errorf("option --best must be > 0: a value in (0,1) " +
+			"is a fraction of all solutions, otherwise it is a count")
+	}
+	if a.Best > 1 && a.Best != math.Trunc(a.Best) {
+		rounded := math.Round(a.Best)
+		fmt.Fprintf(os.Stderr, "[warning] --best=%g is not an integer; "+
+			"rounding to %g\n", a.Best, rounded)
+		a.Best = rounded
 	}
 	if a.PlotFontSize != 0 && !(a.PlotFontSize >= 4 && a.PlotFontSize <= 72) {
 		return nil, fmt.Errorf("option --plot-font-size must be 0 or between 4 and 72")

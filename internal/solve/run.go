@@ -146,9 +146,6 @@ func run(a *Args) {
 	timeEnabled = os.Getenv("CSOLVE_TIME") != ""
 	tAll := nowSec()
 
-	if a.Best < 1 {
-		a.Best = 1
-	}
 	slices.Sort(a.Degrees)
 	a.Degrees = slices.Compact(a.Degrees)
 
@@ -416,6 +413,7 @@ func run(a *Args) {
 	if sols.n == 0 {
 		fatal("no valid window [r0, r1] — check the bounds and min-ratio")
 	}
+	reportEnsembleSize(a, sols.n)
 	if depProj != nil && a.DepolRatioMode == depolModeRank {
 		rankByDepol(sols, depProj, mre, mim, depTargets, a.DepolRatioW)
 	}

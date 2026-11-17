@@ -2,16 +2,23 @@ package solve
 
 import "fmt"
 
+// reportEnsembleSize — общее число найденных решений и число усредняемых.
+// Печатается один раз на прогон (высоту / пакет).
+func reportEnsembleSize(a *Args, nTot int) {
+	g := a.bestCount(nTot)
+	fmt.Printf("solutions found: %d; averaging over G = %d", nTot, g)
+	if a.Best < 1 {
+		fmt.Printf(" (fraction --best=%g)", a.Best)
+	}
+	fmt.Printf("\n")
+}
+
 // reportSummary — сводка по ансамблю решений и согласию по каналам.
 func reportSummary(a *Args, sols *solutions, g1 []float64, ch []channel,
 	nAvg, gFit, rGrid []float64, mAvgRe, mAvgIm float64) {
 	nch := len(ch)
-	G := a.Best
-	if G > sols.n {
-		G = sols.n
-	}
+	G := a.bestCount(sols.n)
 	fmt.Printf("\n=== Solution ensemble (scan over m, r0, r1) ===\n")
-	fmt.Printf("variants scanned: %d; averaging: G = %d\n", sols.n, G)
 	fmt.Printf("%4s %13s %7s %9s %9s %10s %9s\n",
 		"rank", "m", "degree", "r0, µm", "r1, µm", "gamma", "Err")
 	for t := 0; t < sols.n; t++ {

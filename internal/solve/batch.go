@@ -378,18 +378,12 @@ func storeTopIds(sols *solutions, g int, prev []int, off int) {
 }
 
 func applyLidarConstraint(per []*solutions, nAlt int, alt []float64, nl int,
-	w float64, maxIter, best int, S [][]float64, pen [][]float64) {
+	w float64, maxIter int, a *Args, S [][]float64, pen [][]float64) {
 	dbg := os.Getenv("CSOLVE_LIDAR_DEBUG") != ""
 	gEff := make([]int, nAlt)
 	kEff := make([]int, nAlt)
 	for h := 0; h < nAlt; h++ {
-		g := best
-		if g > per[h].n {
-			g = per[h].n
-		}
-		if g < 1 {
-			g = 1
-		}
+		g := a.bestCount(per[h].n)
 		gEff[h] = g
 		k := 3 * gEff[h]
 		if k < 9 {
@@ -878,6 +872,7 @@ func runBatch(a *Args) {
 		r1Grid, a.MinRatio, a.NBasis, !a.NoZeroBoundary, a.QuadOrder,
 		a.LogSpan)
 	fmt.Printf("  matrices A precomputed: %d windows × %d m\n", design.nW, nm)
+	reportEnsembleSize(a, design.nW*design.nM)
 
 	// ограничение по измеренному δ_l добавляется в функционал
 	var depIw, depCol []int
@@ -1046,7 +1041,7 @@ func runBatch(a *Args) {
 		depPen := make([][]float64, b.nAlt)
 		for h := 0; h < b.nAlt; h++ {
 			g1 := b.data[h*b.nch:]
-			fmt.Printf("scan over (m, r0, r1, degree)...\n")
+			fmt.Printf("  scanning altitude %g m...\n", b.alt[h])
 			per[h] = scanVariants(design, g1, b.nch, a.GammaSelect,
 				a.GammaRel, a.GammaMin, a.GammaMax, a.NGamma, a.Nonneg,
 				!a.Absolute, depolAt(h))
@@ -1054,7 +1049,6 @@ func runBatch(a *Args) {
 				fatal("no valid [r0, r1] window")
 			}
 			depPen[h] = rankDepolAt(per[h], h)
-			fmt.Printf("  altitude %g m: %d variants\n", b.alt[h], per[h].n)
 		}
 
 		fmt.Printf("  applying constraint: common wavelengths ")
@@ -1079,7 +1073,7 @@ func runBatch(a *Args) {
 			}
 		}
 		applyLidarConstraint(per, b.nAlt, b.alt, nl, a.LidarRatioW,
-			a.LidarRatioIter, a.Best, S, depPen)
+			a.LidarRatioIter, a, S, depPen)
 
 		for h := 0; h < b.nAlt; h++ {
 			g1 := b.data[h*b.nch:]
@@ -1100,7 +1094,7 @@ func runBatch(a *Args) {
 		}
 		for h := 0; h < b.nAlt; h++ {
 			g1 := b.data[h*b.nch:]
-			fmt.Printf("scan over (m, r0, r1, degree)...\n")
+			fmt.Printf("  scanning altitude %g m...\n", b.alt[h])
 			sols := scanVariants(design, g1, b.nch, a.GammaSelect,
 				a.GammaRel, a.GammaMin, a.GammaMax, a.NGamma, a.Nonneg,
 				!a.Absolute, depolAt(h))
@@ -1108,7 +1102,6 @@ func runBatch(a *Args) {
 				fatal("no valid [r0, r1] window")
 			}
 			rankDepolAt(sols, h)
-			fmt.Printf("  altitude %g m: %d variants\n", b.alt[h], sols.n)
 			emitProfile(a, outDir, b.alt[h], b, solveCh, g1, sols, kts,
 				mre, mim, design.geom, r1MaxEff, common, nl, writeLidar,
 				&met, h, ds)

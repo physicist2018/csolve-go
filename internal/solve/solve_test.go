@@ -960,3 +960,54 @@ func TestInternalPDFUnicodeText(t *testing.T) {
 		t.Errorf("PDF contains raw UTF-8 bytes instead of UTF-16BE text")
 	}
 }
+
+func TestArgsBest(t *testing.T) {
+	a, err := ParseArgs([]string{"--tables", "dir", "--best", "0.5"})
+	if err != nil {
+		t.Fatalf("--best 0.5: %v", err)
+	}
+	checkClose(t, "--best 0.5", a.Best, 0.5, 0)
+
+	a, err = ParseArgs([]string{"--tables", "dir", "--best", "3"})
+	if err != nil {
+		t.Fatalf("--best 3: %v", err)
+	}
+	checkClose(t, "--best 3", a.Best, 3.0, 0)
+
+	// нецелое больше 1 округляется до ближайшего целого
+	a, err = ParseArgs([]string{"--tables", "dir", "--best", "3.5"})
+	if err != nil {
+		t.Fatalf("--best 3.5: %v", err)
+	}
+	checkClose(t, "--best 3.5 rounded", a.Best, 4.0, 0)
+
+	for _, bad := range []string{"0", "-1", "NaN", "+Inf"} {
+		if _, err := ParseArgs([]string{"--tables", "dir", "--best", bad}); err == nil {
+			t.Errorf("--best %s must be rejected", bad)
+		}
+	}
+}
+
+func TestBestCount(t *testing.T) {
+	cases := []struct {
+		best float64
+		nTot int
+		want int
+	}{
+		{5, 100, 5},    // целое — число решений
+		{3.5, 100, 4},  // нецелое > 1 — уже округлено до 4
+		{0.2, 100, 20}, // (0,1) — доля решений
+		{0.01, 100, 1}, // доля даёт < 1 — минимум 1
+		{0, 100, 1},    // ноль недопустим в CLI; bestCount защитно даёт 1
+		{0.5, 1, 1},    // доля от одного решения
+		{10, 3, 3},     // больше, чем есть — ограничение nTot
+	}
+	a := &Args{}
+	for _, c := range cases {
+		a.Best = c.best
+		if got := a.bestCount(c.nTot); got != c.want {
+			t.Errorf("bestCount(best=%g, nTot=%d) = %d, want %d",
+				c.best, c.nTot, got, c.want)
+		}
+	}
+}
