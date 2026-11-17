@@ -237,19 +237,20 @@ func run(a *Args) {
 	// ---- сетка m из таблиц ----
 	src, srcSph := a.tableSources()
 	re1, im1 := tableMGrid(src)
-	g1full := mGrid{src: src, re: re1, im: im1}
+	g1full := mGrid{src: src, re: re1, im: im1, fill: a.FillFactor}
 	grids := []mGrid{g1full}
 	mre, mim := re1, im1
 	var mre2, mim2 []float64
 	reportMixSetup(a)
+	reportFillFactor(a)
 	if srcSph != nil {
 		re2, im2 := tableMGrid(srcSph)
 		var snapped int
 		mre, mim, mre2, mim2, snapped = alignMGrid(re1, im1, re2, im2,
 			a.MixMSnap)
 		grids[0].re, grids[0].im = mre, mim
-		grids = append(grids, mGrid{src: srcSph, re: mre2, im: mim2})
-		reportMixGrid(a, g1full, mGrid{src: srcSph, re: re2, im: im2},
+		grids = append(grids, mGrid{src: srcSph, re: mre2, im: mim2, fill: 1})
+		reportMixGrid(a, g1full, mGrid{src: srcSph, re: re2, im: im2, fill: 1},
 			len(mre), snapped)
 	}
 	nm := len(mre)
@@ -388,11 +389,11 @@ func run(a *Args) {
 				trueRe, trueIm)
 			chs := loadTableChannels(src, trueRe, trueIm, baseCh,
 				a.TableExtrapolate, a.TableRefWl, cbackScale)
-			tk = ktableBuild(chs, a.R0Min, r1MaxEff, a.DxMax)
+			tk = ktableBuild(chs, a.R0Min, r1MaxEff, a.DxMax, a.FillFactor)
 			if srcSph != nil {
 				chs2 := loadTableChannels(srcSph, trueRe, trueIm, baseCh,
 					a.TableExtrapolate, a.TableRefWl, cbackScale)
-				tk2 = ktableBuild(chs2, a.R0Min, r1MaxEff, a.DxMax)
+				tk2 = ktableBuild(chs2, a.R0Min, r1MaxEff, a.DxMax, 1)
 			}
 		}
 		g1 = forwardMeasurementsMix(tk, tk2, fTrue, demoTrueDistribution,
@@ -483,6 +484,7 @@ func run(a *Args) {
 		kts2: kts2,
 		ds:   ds,
 		ds2:  ds2,
+		fill: [2]float64{a.FillFactor, 1},
 	}
 	prof := profileFinalize(a, baseCh, kn, sols, design.geom, a.R0Min,
 		r1MaxEff)
@@ -490,7 +492,7 @@ func run(a *Args) {
 
 	reportSummary(a, sols, g1, baseCh, prof.nAvg, prof.gFit, prof.rGrid,
 		prof.mRe, prof.mIm, prof.fracAvg)
-	reportMoments(prof.moments)
+	reportMoments(prof.moments, prof.fillEff)
 	reportDepolarization(prof)
 
 	modeName := "auto"
@@ -499,12 +501,12 @@ func run(a *Args) {
 	} else if a.Modes == 2 {
 		modeName = "stat"
 	}
-	reportModes(prof.modes, a.RSplit, modeName)
+	reportModes(prof.modes, a.RSplit, modeName, prof.fillEff)
 
 	if a.JSON != "" {
 		writeJSON(a, a.JSON, sols, prof.rGrid, prof.nAvg, prof.nAvgRaw, baseCh,
 			g1, prof.gFit, prof.mRe, prof.mIm, prof.moments, prof.modes,
-			prof.deltaLwl, prof.deltaL, prof.fracAvg)
+			prof.deltaLwl, prof.deltaL, prof.fracAvg, prof.fillEff)
 		fmt.Printf("results saved: %s\n", a.JSON)
 	}
 

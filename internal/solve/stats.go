@@ -37,7 +37,12 @@ func demoTrueDistribution(r float64) float64 {
 		lognormalVolume(r, 6.0e7, 1.2, 1.7)
 }
 
-func sizeMoments(nAvg, rGrid []float64) moments {
+// sizeMoments — интегральные характеристики по n(r). fill — фактор
+// заполнения: n — материальный объём, поэтому для агломератов
+// (r — радиус описанной окружности) число частиц N = ∫n·q dr / φ.
+// Объёмная концентрация и r_eff от φ не зависят (C_v — материальный
+// объём, r_eff — средний радиус на той же оси).
+func sizeMoments(nAvg, rGrid []float64, fill float64) moments {
 	n := len(nAvg)
 	f := make([]float64, n)
 	lnr := make([]float64, n)
@@ -67,6 +72,9 @@ func sizeMoments(nAvg, rGrid []float64) moments {
 	vConc := trapz(f, lnr)
 	mLn1 := trapz(fr, lnr)
 	nNum := trapz(nq, rGrid)
+	if fill > 0 {
+		nNum /= fill
+	}
 
 	var m moments
 	m.VolConcUm3PerCm3 = perCm3(vConc)

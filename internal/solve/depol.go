@@ -39,8 +39,10 @@ func depolSetAvailable(ds *depolSet) bool { return ds != nil && ds.nOK > 0 }
 
 // depolSetBuild — построение ядер деполяризации по всем m из таблиц. Сетка r
 // совпадает с сеткой основных ядер (dxMax, минимальная длина волны).
+// fill — фактор заполнения агломератов (см. ktableBuild); для δ_l одиночного
+// компонента он сокращается, но в смеси задаёт относительные веса.
 func depolSetBuild(src *tableSource, mre, mim []float64, refWl, rMin, rMax,
-	dxMax float64, extrapolate bool) *depolSet {
+	dxMax float64, extrapolate bool, fill float64) *depolSet {
 	ds := &depolSet{
 		wl: append([]float64(nil), depolWlsUm...),
 		kt: make([][2]*ktable, len(mre)),
@@ -61,7 +63,7 @@ func depolSetBuild(src *tableSource, mre, mim []float64, refWl, rMin, rMax,
 			continue
 		}
 		for iw, wl := range ds.wl {
-			ds.kt[i][iw] = depolKtableBuild(tab, wl, refWl, r)
+			ds.kt[i][iw] = depolKtableBuild(tab, wl, refWl, r, fill)
 		}
 		ds.nOK++
 	}
@@ -69,7 +71,11 @@ func depolSetBuild(src *tableSource, mre, mim []float64, refWl, rMin, rMax,
 }
 
 // depolKtableBuild — ядра S11/S22 на сетке r для длины волны wl.
-func depolKtableBuild(tab *table, wl, refWl float64, r []float64) *ktable {
+// fill — фактор заполнения агломератов: оба столбца делятся на fill, поэтому
+// δ_l одиночного компонента не меняется, а в смеси веса компонент
+// согласованы с матрицей A.
+func depolKtableBuild(tab *table, wl, refWl float64, r []float64,
+	fill float64) *ktable {
 	kt := &ktable{
 		n:    len(r),
 		r:    r,
@@ -82,7 +88,7 @@ func depolKtableBuild(tab *table, wl, refWl float64, r []float64) *ktable {
 	for i := range r {
 		lr[i] = math.Log(r[i])
 	}
-	scale := um2ToM2 * math.Pow(wl/refWl, 2.0)
+	scale := um2ToM2 * math.Pow(wl/refWl, 2.0) / fill
 	cols := [2]*spline{tab.spS11, tab.spS22}
 	val := make([]float64, len(r))
 	for j := 0; j < 2; j++ {

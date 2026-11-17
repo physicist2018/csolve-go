@@ -31,6 +31,9 @@ type outMoments struct {
 	RCovMinUm        jfloat `json:"r_cov_min_um"`
 	RCovMaxUm        jfloat `json:"r_cov_max_um"`
 	CovFrac          jfloat `json:"cov_frac"`
+	FillFactor       jfloat `json:"fill_factor"`
+	VolConcEnv       jfloat `json:"vol_conc_env_um3_per_cm3"`
+	REffVolUm        jfloat `json:"r_eff_vol_um"`
 }
 
 type outUnits struct {
@@ -61,6 +64,7 @@ type outSolution struct {
 type outMode struct {
 	V      jfloat `json:"V_um3_per_cm3"`
 	Rm     jfloat `json:"rm_um"`
+	RmVol  jfloat `json:"rm_vol_um"`
 	Sigma  jfloat `json:"sigma"`
 	OK     bool   `json:"ok"`
 	Method string `json:"method"`
@@ -91,18 +95,28 @@ type outMixture struct {
 	FAvg      jfloat `json:"f_avg"`
 }
 
+// outVolumeModel — конвенция радиуса и объёма: для агломератов r — радиус
+// описанной окружности, объёмы — материальные, φ — фактор заполнения.
+type outVolumeModel struct {
+	FillFactor       jfloat `json:"fill_factor"`
+	EffFillFactor    jfloat `json:"fill_factor_effective"`
+	RadiusConvention string `json:"radius_convention"`
+	NInterpretation  string `json:"n_interpretation"`
+}
+
 type outFile struct {
-	MAvg           outMAvg       `json:"m_avg"`
-	Moments        outMoments    `json:"moments"`
-	UnitsInput     outUnits      `json:"units_input"`
-	Channels       []outChannel  `json:"channels"`
-	RUm            []jfloat      `json:"r_um"`
-	NAvg           []jfloat      `json:"n_avg"`
-	BestSolutions  []outSolution `json:"best_solutions"`
-	NAvgRaw        []jfloat      `json:"n_avg_raw"`
-	Modes          outModes      `json:"modes"`
-	Depolarization outDepol      `json:"depolarization"`
-	Mixture        outMixture    `json:"mixture"`
+	MAvg           outMAvg        `json:"m_avg"`
+	Moments        outMoments     `json:"moments"`
+	UnitsInput     outUnits       `json:"units_input"`
+	Channels       []outChannel   `json:"channels"`
+	RUm            []jfloat       `json:"r_um"`
+	NAvg           []jfloat       `json:"n_avg"`
+	BestSolutions  []outSolution  `json:"best_solutions"`
+	NAvgRaw        []jfloat       `json:"n_avg_raw"`
+	Modes          outModes       `json:"modes"`
+	Depolarization outDepol       `json:"depolarization"`
+	Mixture        outMixture     `json:"mixture"`
+	VolumeModel    outVolumeModel `json:"volume_model"`
 }
 
 func toJ(vals []float64) []jfloat {
@@ -121,7 +135,7 @@ func toJPerCm3(vals []float64) []jfloat {
 	return out
 }
 
-func outModeFrom(m csMode) outMode {
+func outModeFrom(m csMode, volFactor float64) outMode {
 	v := math.NaN()
 	if isFinite(m.V) {
 		v = m.V / cm3PerM3
@@ -129,6 +143,7 @@ func outModeFrom(m csMode) outMode {
 	return outMode{
 		V:      jfloat(v),
 		Rm:     jfloat(m.Rm),
+		RmVol:  jfloat(m.Rm * volFactor),
 		Sigma:  jfloat(m.Sigma),
 		OK:     m.OK,
 		Method: m.Method,
@@ -138,7 +153,9 @@ func outModeFrom(m csMode) outMode {
 // writeJSON — запись результатов (структура как в Python-версии).
 func writeJSON(a *Args, path string, sols *solutions, rGrid, nAvg, nAvgRaw []float64,
 	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64,
-	mom moments, md modes, deltaWlUm, deltaL []float64, fracAvg float64) {
+	mom moments, md modes, deltaWlUm, deltaL []float64, fracAvg,
+	fillEff float64) {
+	volFactor := math.Cbrt(fillEff)
 
 	out := outFile{
 		MAvg: outMAvg{Real: jfloat(mAvgRe), Imag: jfloat(mAvgIm)},
@@ -150,16 +167,34 @@ func writeJSON(a *Args, path string, sols *solutions, rGrid, nAvg, nAvgRaw []flo
 			RCovMinUm:        jfloat(mom.RCovMinUm),
 			RCovMaxUm:        jfloat(mom.RCovMaxUm),
 			CovFrac:          jfloat(mom.CovFrac),
+			FillFactor:       jfloat(fillEff),
+			VolConcEnv:       jfloat(mom.VolConcUm3PerCm3 / fillEff),
+			REffVolUm:        jfloat(mom.REffUm * volFactor),
 		},
 		UnitsInput: outUnits{Beta: "1/(m·sr)", Alpha: "1/m"},
 		RUm:        toJ(rGrid),
 		NAvg:       toJPerCm3(nAvg),
 		NAvgRaw:    toJPerCm3(nAvgRaw),
 		Modes: outModes{
-			Fine:    outModeFrom(md.Fine),
-			Coarse:  outModeFrom(md.Coarse),
-			Overall: outModeFrom(md.Overall),
+			Fine:    outModeFrom(md.Fine, volFactor),
+			Coarse:  outModeFrom(md.Coarse, volFactor),
+			Overall: outModeFrom(md.Overall, volFactor),
 		},
+	}
+	out.VolumeModel = outVolumeModel{
+		FillFactor:      jfloat(a.FillFactor),
+		EffFillFactor:   jfloat(fillEff),
+		NInterpretation: "material_volume",
+	}
+	switch {
+	case a.FillFactor == 1:
+		out.VolumeModel.RadiusConvention = "volume_equivalent"
+	case !a.mixEnabled() || fracAvg <= 0:
+		out.VolumeModel.RadiusConvention = "circumscribed"
+	case fracAvg >= 1:
+		out.VolumeModel.RadiusConvention = "volume_equivalent"
+	default:
+		out.VolumeModel.RadiusConvention = "mixed"
 	}
 	out.Mixture = outMixture{Sphere: "sphere"}
 	if a.mixEnabled() {

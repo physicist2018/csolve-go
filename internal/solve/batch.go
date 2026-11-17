@@ -591,6 +591,12 @@ func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
 	if p.mix {
 		fmt.Fprintf(&sb, "# mixture: sphere fraction f = %g\n", p.fracAvg)
 	}
+	if p.fillEff != 1 {
+		fmt.Fprintf(&sb, "# filling factor φ = %g: r — радиус описанной окружности, "+
+			"объёмы — материальные\n", p.fillEff)
+		fmt.Fprintf(&sb, "# r_eff (объёмно-эквивалентный) = %g µm\n",
+			p.moments.REffUm*math.Cbrt(p.fillEff))
+	}
 	sb.WriteString("# input data (β [1/(m·sr)], α [1/m]): ")
 	for j := 0; j < b.nch; j++ {
 		if j > 0 {
@@ -822,10 +828,11 @@ func runBatch(a *Args) {
 			"disabled\n")
 	}
 	reportMixSetup(a)
+	reportFillFactor(a)
 
 	// сетка m (общая для компонент смеси)
 	re1, im1 := tableMGrid(src)
-	g1full := mGrid{src: src, re: re1, im: im1}
+	g1full := mGrid{src: src, re: re1, im: im1, fill: a.FillFactor}
 	grids := []mGrid{g1full}
 	mre, mim := re1, im1
 	var mre2, mim2 []float64
@@ -835,8 +842,8 @@ func runBatch(a *Args) {
 		mre, mim, mre2, mim2, snapped = alignMGrid(re1, im1, re2, im2,
 			a.MixMSnap)
 		grids[0].re, grids[0].im = mre, mim
-		grids = append(grids, mGrid{src: srcSph, re: mre2, im: mim2})
-		reportMixGrid(a, g1full, mGrid{src: srcSph, re: re2, im: im2},
+		grids = append(grids, mGrid{src: srcSph, re: mre2, im: mim2, fill: 1})
+		reportMixGrid(a, g1full, mGrid{src: srcSph, re: re2, im: im2, fill: 1},
 			len(mre), snapped)
 	}
 	nm := len(mre)
@@ -929,6 +936,7 @@ func runBatch(a *Args) {
 		kts2: kts2,
 		ds:   ds,
 		ds2:  ds2,
+		fill: [2]float64{a.FillFactor, 1},
 	}
 
 	// ограничение по измеренному δ_l добавляется в функционал
@@ -1006,9 +1014,14 @@ func runBatch(a *Args) {
 			fatal("failed to open file for writing: %s", path)
 		}
 	}
-	writeHeader("moments.txt",
-		"# H  Vf  Vc  V  rmf  rmc  rm  reff  N  sigma_f  sigma_c  sigma\n"+
-			"# V — µm³/cm³; rm/reff — µm; N — cm⁻³; sigma — dimensionless.\n")
+	momentsHdr := "# H  Vf  Vc  V  rmf  rmc  rm  reff  N  sigma_f  sigma_c  sigma\n" +
+		"# V — µm³/cm³; rm/reff — µm; N — cm⁻³; sigma — dimensionless.\n"
+	if a.FillFactor != 1 {
+		momentsHdr += "# filling factor phi = " + cG(a.FillFactor) + ": r — радиус " +
+			"описанной окружности, объёмы — материальные; phi_eff и r_eff_vol " +
+			"по высотам — в dist_<H>.txt\n"
+	}
+	writeHeader("moments.txt", momentsHdr)
 	writeHeader("refractive.txt", "# H  Re(m)  Im(m)\n")
 	if a.mixEnabled() {
 		writeHeader("fraction.txt",

@@ -38,10 +38,17 @@ func rGridFor(rMin, rMax, dxMax, lamMin float64) []float64 {
 	return r[:nr]
 }
 
-func ktableBuild(chs *channels, rMin, rMax, dxMax float64) *ktable {
+// ktableBuild — таблица ядер K(r). fill — фактор заполнения агломератов:
+// для них радиус r — радиус описанной окружности, а объём материала равен
+// fill·(4/3)πr³, поэтому ядра (сечения на частицу) делятся на fill.
+// Для сфер и сфероидов r — объёмно-эквивалентный радиус, fill = 1.
+func ktableBuild(chs *channels, rMin, rMax, dxMax, fill float64) *ktable {
 	nch := chs.n
 	if nch <= 0 {
 		fatal("no channels")
+	}
+	if !(fill > 0) || !isFinite(fill) {
+		fatal("invalid filling factor %g (must be > 0)", fill)
 	}
 	lamMin := chs.ch[0].wlUm
 	for j := 1; j < nch; j++ {
@@ -70,7 +77,7 @@ func ktableBuild(chs *channels, rMin, rMax, dxMax float64) *ktable {
 		if ch.tab == nil {
 			fatal("Mie mode is not supported by the C version — specify --tables")
 		}
-		scale := um2ToM2 * math.Pow(ch.wlUm/ch.refWlUm, 2.0)
+		scale := um2ToM2 * math.Pow(ch.wlUm/ch.refWlUm, 2.0) / fill
 		for i := 0; i < nr; i++ {
 			x := 2.0 * csPi * r[i] / ch.wlUm
 			C := tableCrossSection(ch.tab, ch.kind == chBeta, x)

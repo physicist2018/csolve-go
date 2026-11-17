@@ -131,18 +131,18 @@ func (d *design) mixWith(d2 *design, fracs []float64) {
 
 // fracAt — доля сфер для индекса kf (0 вне смеси).
 func (d *design) fracAt(kf int) float64 {
-	if d == nil || d.nf <= 1 || kf < 0 || kf >= len(d.fracs) {
+	if d == nil || d.A2 == nil || kf < 0 || kf >= len(d.fracs) {
 		return 0
 	}
 	return d.fracs[kf]
 }
 
 // block — матрица отклика A(f) для (m, окно, доля сфер) и её спектральная
-// норма. Вне смеси возвращается готовый блок без копирования.
+// норма. Вне смеси (A2 == nil) возвращается готовый блок без копирования.
 func (d *design) block(im, iw, kf int, scratch []float64) ([]float64, float64) {
 	off := (im*d.nW + iw) * d.nch * d.nu
 	size := d.nch * d.nu
-	if d.nf <= 1 || d.A2 == nil {
+	if d.A2 == nil {
 		return d.A[off : off+size], d.s0[im*d.nW+iw]
 	}
 	f := d.fracAt(kf)
