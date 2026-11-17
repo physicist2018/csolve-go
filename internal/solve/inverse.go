@@ -2,9 +2,7 @@ package solve
 
 import (
 	"errors"
-	"fmt"
 	"math"
-	"os"
 	"slices"
 
 	"gonum.org/v1/gonum/mat"
@@ -240,7 +238,7 @@ func sortSolutions(sol []solution) {
 // задано, в систему добавляется строка ограничения по измеренному δ_l.
 func scanVariants(d *design, g1 []float64, nch int, gammaSel gammaSelect,
 	gammaRelFixed, gammaExpMin, gammaExpMax float64, nGamma int,
-	nonneg, relative bool, dc *depolCons) (*solutions, error) {
+	nonneg, relative bool, dc *depolCons, c *console) (*solutions, error) {
 	out := &solutions{}
 	if d.nW == 0 || d.nM == 0 {
 		out.scale = 1.0
@@ -268,7 +266,7 @@ func scanVariants(d *design, g1 []float64, nch int, gammaSel gammaSelect,
 		}
 	}
 	if d.nu > nch {
-		fmt.Fprintf(os.Stderr, "[warning] unknowns per window (%d) exceed "+
+		c.warnf("[warning] unknowns per window (%d) exceed "+
 			"measurements (%d): the solution relies mainly on regularization "+
 			"(the system is underdetermined)\n", d.nu, nch)
 	}

@@ -39,6 +39,16 @@ type plotOpts struct {
 	dpi      float64
 	fontSize float64
 	backend  plotBackend
+	con      *console
+}
+
+// warnf — предупреждение о графике; без консоли пишет в os.Stderr.
+func (po *plotOpts) warnf(format string, a ...any) {
+	if po != nil && po.con != nil {
+		po.con.warnf(format, a...)
+		return
+	}
+	_, _ = fmt.Fprintf(os.Stderr, format, a...)
 }
 
 func plotFormatExt(f plotFormat) string {
@@ -119,21 +129,22 @@ func setTerminal(sb *strings.Builder, po *plotOpts, wIn, hIn float64) {
 	}
 }
 
-func plotTempDir() (string, bool) {
+// tempDir создаёт временный каталог для вспомогательных файлов gnuplot.
+func (po *plotOpts) tempDir() (string, bool) {
 	dir, err := os.MkdirTemp("", "csolve_")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[warning] failed to create temporary "+
+		po.warnf("[warning] failed to create temporary " +
 			"directory for the plot\n")
 		return "", false
 	}
 	return dir, true
 }
 
-// writeDataFile — служебный файл для gnuplot. Ошибка записи не прерывает
+// writeDataFile пишет служебный файл для gnuplot. Ошибка записи не прерывает
 // расчёт: отрисовка всё равно завершится предупреждением.
-func writeDataFile(path, content string) {
+func (po *plotOpts) writeDataFile(path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "[warning] failed to write %s: %v\n", path, err)
+		po.warnf("[warning] failed to write %s: %v\n", path, err)
 	}
 }
 
@@ -170,7 +181,7 @@ func gnuplotOK(outPath, script string) bool {
 // gnuplotProfile — компактный график одной высоты пакетного режима (2 панели).
 func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
 	ch []channel, g1, gFit []float64, h float64) bool {
-	dir, ok := plotTempDir()
+	dir, ok := po.tempDir()
 	if !ok {
 		return false
 	}
@@ -193,8 +204,8 @@ func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
 		}
 		prof.WriteByte('\n')
 	}
-	writeDataFile(pProf, prof.String())
-	writeDataFile(pBars, writeBars(ch, g1, gFit))
+	po.writeDataFile(pProf, prof.String())
+	po.writeDataFile(pBars, writeBars(ch, g1, gFit))
 
 	fa := plotFontAttr(po)
 	var sb strings.Builder
@@ -222,9 +233,9 @@ func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
 		"'' using 3 title 'computed g'\n", gpPath(pBars))
 	sb.WriteString("unset multiplot\n")
 
-	writeDataFile(pScript, sb.String())
+	po.writeDataFile(pScript, sb.String())
 	if !gnuplotOK(outPath, pScript) {
-		fmt.Fprintf(os.Stderr, "[warning] failed to build plot %s "+
+		po.warnf("[warning] failed to build plot %s "+
 			"(script: %s)\n", outPath, pScript)
 		return false
 	}
@@ -238,7 +249,7 @@ func gnuplotRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []floa
 	if n <= 0 {
 		return false
 	}
-	dir, ok := plotTempDir()
+	dir, ok := po.tempDir()
 	if !ok {
 		return false
 	}
@@ -253,7 +264,7 @@ func gnuplotRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []floa
 		i := idx[k]
 		fmt.Fprintf(&data, "%s %s %s\n", formatG17(alt[i]), formatG17(mRe[i]), formatG17(mIm[i]))
 	}
-	writeDataFile(pData, data.String())
+	po.writeDataFile(pData, data.String())
 
 	fa := plotFontAttr(po)
 	var sb strings.Builder
@@ -279,9 +290,9 @@ func gnuplotRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []floa
 		"lw 1.8 pt 5 ps 1.1 lc rgb '#d62728' title 'Im(m)'\n",
 		gpPath(pData), gpPath(pData))
 
-	writeDataFile(pScript, sb.String())
+	po.writeDataFile(pScript, sb.String())
 	if !gnuplotOK(outPath, pScript) {
-		fmt.Fprintf(os.Stderr, "[warning] failed to build plot %s "+
+		po.warnf("[warning] failed to build plot %s "+
 			"(script: %s)\n", outPath, pScript)
 		return false
 	}
@@ -461,7 +472,7 @@ func gnuplotProfilesStyled(po *plotOpts, outPath, title, xlabel string,
 	if n <= 0 || nSeries <= 0 {
 		return false
 	}
-	dir, ok := plotTempDir()
+	dir, ok := po.tempDir()
 	if !ok {
 		return false
 	}
@@ -482,7 +493,7 @@ func gnuplotProfilesStyled(po *plotOpts, outPath, title, xlabel string,
 		}
 		data.WriteByte('\n')
 	}
-	writeDataFile(pData, data.String())
+	po.writeDataFile(pData, data.String())
 
 	lo, hi, hLo, hHi, useLog := profileAxes(alt, vals, nSeries, logAuto)
 
@@ -522,9 +533,9 @@ func gnuplotProfilesStyled(po *plotOpts, outPath, title, xlabel string,
 	}
 	sb.WriteByte('\n')
 
-	writeDataFile(pScript, sb.String())
+	po.writeDataFile(pScript, sb.String())
 	if !gnuplotOK(outPath, pScript) {
-		fmt.Fprintf(os.Stderr, "[warning] failed to build plot %s "+
+		po.warnf("[warning] failed to build plot %s "+
 			"(script: %s)\n", outPath, pScript)
 		return false
 	}
@@ -552,7 +563,7 @@ func plotResults(po *plotOpts, outPath string, rGrid []float64,
 func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 	nTrue, nAvg, nAvgRaw []float64, nBest [][]float64, nBestCount int,
 	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64) bool {
-	dir, ok := plotTempDir()
+	dir, ok := po.tempDir()
 	if !ok {
 		return false
 	}
@@ -580,7 +591,7 @@ func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 		}
 		avg.WriteByte('\n')
 	}
-	writeDataFile(pAvg, avg.String())
+	po.writeDataFile(pAvg, avg.String())
 
 	haveTrue := nTrue != nil
 	if haveTrue {
@@ -588,9 +599,9 @@ func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 		for i := range rGrid {
 			fmt.Fprintf(&ta, "%s %s\n", formatG17(rGrid[i]), formatG17(nTrue[i]/cm3PerM3))
 		}
-		writeDataFile(pTrue, ta.String())
+		po.writeDataFile(pTrue, ta.String())
 	}
-	writeDataFile(pBars, writeBars(ch, g1, gFit))
+	po.writeDataFile(pBars, writeBars(ch, g1, gFit))
 
 	ns := nBestCount
 	if ns > 64 {
@@ -604,7 +615,7 @@ func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 			fmt.Fprintf(&sb, "%s %s\n", formatG17(rGrid[i]),
 				formatG17(nBest[t][i]/cm3PerM3))
 		}
-		writeDataFile(solFiles[t], sb.String())
+		po.writeDataFile(solFiles[t], sb.String())
 	}
 
 	fa := plotFontAttr(po)
@@ -658,9 +669,9 @@ func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 		"'' using 3 title 'computed g (mean)'\n", gpPath(pBars))
 	sb.WriteString("unset multiplot\n")
 
-	writeDataFile(pScript, sb.String())
+	po.writeDataFile(pScript, sb.String())
 	if !gnuplotOK(outPath, pScript) {
-		fmt.Fprintf(os.Stderr, "[warning] failed to build plot "+
+		po.warnf("[warning] failed to build plot "+
 			"(script kept for diagnostics: %s)\n", pScript)
 		return false
 	}

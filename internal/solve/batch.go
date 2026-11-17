@@ -382,7 +382,8 @@ func storeTopIDs(sols *solutions, g int, prev []int, off int) {
 }
 
 func applyLidarConstraint(per []*solutions, nAlt int, alt []float64, nl int,
-	w float64, maxIter int, a *Args, ratios [][]float64, pen [][]float64) {
+	w float64, maxIter int, a *Args, ratios [][]float64, pen [][]float64,
+	c *console) {
 	dbg := os.Getenv("CSOLVE_LIDAR_DEBUG") != ""
 	gEff := make([]int, nAlt)
 	kEff := make([]int, nAlt)
@@ -449,21 +450,21 @@ func applyLidarConstraint(per []*solutions, nAlt int, alt []float64, nl int,
 			}
 		}
 		if dbg {
-			fmt.Printf("iter %d: ref = [", it)
+			c.printf("iter %d: ref = [", it)
 			for h := 0; h < nAlt; h++ {
 				if h > 0 {
-					fmt.Printf(", ")
+					c.printf(", ")
 				}
-				fmt.Printf("[")
+				c.printf("[")
 				for li := 0; li < nl; li++ {
 					if li > 0 {
-						fmt.Printf(", ")
+						c.printf(", ")
 					}
-					fmt.Printf("%.15g", ref[h*nl+li])
+					c.printf("%.15g", ref[h*nl+li])
 				}
-				fmt.Printf("]")
+				c.printf("]")
 			}
-			fmt.Printf("]\n")
+			c.printf("]\n")
 		}
 
 		for h := 0; h < nAlt; h++ {
@@ -523,7 +524,7 @@ func applyLidarConstraint(per []*solutions, nAlt int, alt []float64, nl int,
 					if nl > 1 {
 						s1 = sv[1]
 					}
-					fmt.Printf("  h=%g top%d: (score=%g, err=%g, dev=%g, id=%d, "+
+					c.printf("  h=%g top%d: (score=%g, err=%g, dev=%g, id=%d, "+
 						"m=%g%+gj, deg=%d, r0=%.5g, r1=%.5g) S=[%g, %g]\n",
 						alt[h], t, s.err+w*dev, s.err, dev, s.id, s.mRe, s.mIm,
 						s.degree, s.r0, s.r1, sv[0], s1)
@@ -683,7 +684,8 @@ type metrics struct {
 func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 	solveCh []channel, g1 []float64, sols *solutions, kts []*ktable,
 	mre, mim []float64, geom []*geom, r1Max float64, common []commonWl,
-	nl int, writeLidar bool, met *metrics, hi int, ds *depolSet) error {
+	nl int, writeLidar bool, met *metrics, hi int, ds *depolSet,
+	c *console) error {
 	prof, err := profileFinalize(a, solveCh, kts, mre, mim, sols, geom, a.R0Min,
 		r1Max, ds)
 	if err != nil {
@@ -770,7 +772,7 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 
 	if !a.NoPlot {
 		po := plotOpts{format: a.PlotFormat, dpi: a.PlotDpi,
-			fontSize: a.PlotFontSize, backend: a.Plotting}
+			fontSize: a.PlotFontSize, backend: a.Plotting, con: c}
 		pp := filepath.Join(outDir,
 			fmt.Sprintf("plot_%s.%s", formatG6(h), plotFormatExt(a.PlotFormat)))
 		plotProfile(&po, pp, prof.rGrid, prof.nAvg, solveCh, g1, prof.gFit, h)
@@ -808,13 +810,13 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 		sStr = acc.String()
 	}
 
-	fmt.Printf("  altitude %s m: ⟨m⟩ = %.3f%+.3fj, N = %.3g cm⁻³%s%s\n",
+	c.printf("  altitude %s m: ⟨m⟩ = %.3f%+.3fj, N = %.3g cm⁻³%s%s\n",
 		formatG6(h), prof.mRe, prof.mIm, prof.moments.NCm3, sStr, dStr)
 	return nil
 }
 
 // ---------------- основной сценарий ----------------
-func runBatch(a *Args) error {
+func runBatch(a *Args, c *console) error {
 	b, err := parseBatchTxt(a.Batch)
 	if err != nil {
 		return err
@@ -823,7 +825,7 @@ func runBatch(a *Args) error {
 		return errors.New("option --depol-ratio-cons requires a dep<nm> column in the " +
 			"batch file (e.g. dep532), got none")
 	}
-	src, err := a.tableSource()
+	src, err := a.tableSource(c)
 	if err != nil {
 		return err
 	}
@@ -833,26 +835,26 @@ func runBatch(a *Args) error {
 	}
 	nm := len(mre)
 
-	fmt.Printf("batch processing: %s\n", a.Batch)
-	fmt.Printf("  altitudes: %d; channels: %d\n", b.nAlt, b.nch)
+	c.printf("batch processing: %s\n", a.Batch)
+	c.printf("  altitudes: %d; channels: %d\n", b.nAlt, b.nch)
 	for j := 0; j < b.nch; j++ {
 		kind := "alpha"
 		if b.ch[j].kind == chBeta {
 			kind = "beta"
 		}
-		fmt.Printf("  channel: %s (%s, %g nm)\n", b.ch[j].name, kind,
+		c.printf("  channel: %s (%s, %g nm)\n", b.ch[j].name, kind,
 			b.ch[j].wlUm*1e3)
 	}
-	fmt.Printf("  units: β [1/(m·sr)], α [1/m]\n")
+	c.printf("  units: β [1/(m·sr)], α [1/m]\n")
 	for k, wl := range b.depWl {
-		fmt.Printf("  measured δ_l column %d: %.6g nm, %%\n", k+1, wl*1e3)
+		c.printf("  measured δ_l column %d: %.6g nm, %%\n", k+1, wl*1e3)
 	}
 	if a.LidarRatioCons {
-		fmt.Printf("lidar ratio S=α/β smoothness constraint along altitude: "+
+		c.printf("lidar ratio S=α/β smoothness constraint along altitude: "+
 			"enabled (weight %g, iterations <= %d)\n", a.LidarRatioW,
 			a.LidarRatioIter)
 	} else {
-		fmt.Printf("lidar ratio S=α/β smoothness constraint along altitude: " +
+		c.printf("lidar ratio S=α/β smoothness constraint along altitude: " +
 			"disabled\n")
 	}
 
@@ -891,14 +893,14 @@ func runBatch(a *Args) error {
 			"or extend the tables (%s)", r1MaxEff, a.R1Min, src.describe())
 	}
 
-	fmt.Printf("table-based kernel mode (external cross sections), %s\n",
+	c.printf("table-based kernel mode (external cross sections), %s\n",
 		src.describe())
-	fmt.Printf("  table λ_ref = %g µm (cross sections are rescaled as "+
+	c.printf("  table λ_ref = %g µm (cross sections are rescaled as "+
 		"(λ/λ_ref)²)\n", a.TableRefWl)
 	if a.TableCback4pi {
-		fmt.Printf("  Cback convention = 4pi\n")
+		c.printf("  Cback convention = 4pi\n")
 	} else {
-		fmt.Printf("  Cback convention = dsigma\n")
+		c.printf("  Cback convention = dsigma\n")
 	}
 	{
 		c0, err := loadTableChannels(src, mre[0], mim[0], solveCh,
@@ -907,16 +909,16 @@ func runBatch(a *Args) error {
 			return err
 		}
 		for j := 0; j < b.nch; j++ {
-			fmt.Printf("  %-14s x_max = %g, r_max = %.3g µm\n",
+			c.printf("  %-14s x_max = %g, r_max = %.3g µm\n",
 				c0.ch[j].name(), c0.ch[j].tab.xMax,
 				c0.ch[j].tab.xMax*c0.ch[j].wlUm/(2.0*math.Pi))
 		}
 	}
-	fmt.Printf("  effective r1_max = %g µm (requested: %g) — windows and "+
+	c.printf("  effective r1_max = %g µm (requested: %g) — windows and "+
 		"r grid are limited\n", r1MaxEff, a.R1Max)
 
 	// таблицы ядер — один раз на пакет
-	fmt.Printf("building kernel tables (%d m values, once per batch)...\n", nm)
+	c.printf("building kernel tables (%d m values, once per batch)...\n", nm)
 	kts := make([]*ktable, nm)
 	for i := 0; i < nm; i++ {
 		chs, err := loadTableChannels(src, mre[i], mim[i], solveCh,
@@ -930,7 +932,7 @@ func runBatch(a *Args) error {
 		}
 		kts[i] = kt
 	}
-	fmt.Printf("  table: %d r points per m\n", kts[0].n)
+	c.printf("  table: %d r points per m\n", kts[0].n)
 
 	// ядра S11/S22 для линейной деполяризации — тоже один раз на пакет
 	ds, err := depolSetBuild(src, mre, mim, a.TableRefWl, a.R0Min, r1MaxEff,
@@ -938,7 +940,7 @@ func runBatch(a *Args) error {
 	if err != nil {
 		return err
 	}
-	depolSetReport(ds, src, nm)
+	depolSetReport(ds, src, nm, c)
 
 	// матрицы A — тоже один раз
 	r0Grid := geomspace(a.R0Min, a.R0Max, a.NR0)
@@ -949,23 +951,23 @@ func runBatch(a *Args) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("  matrices A precomputed: %d windows × %d m\n", design.nW, nm)
-	reportEnsembleSize(a, design.nW*design.nM)
+	c.printf("  matrices A precomputed: %d windows × %d m\n", design.nW, nm)
+	reportEnsembleSize(a, design.nW*design.nM, c)
 
 	// ограничение по измеренному δ_l добавляется в функционал
 	var depIw, depCol []int
 	if a.DepolRatioCons {
 		if !depolSetAvailable(ds) {
-			fmt.Fprintf(os.Stderr, "[warning] --depol-ratio-cons: tables have no "+
+			c.warnf("[warning] --depol-ratio-cons: tables have no " +
 				"valid S11/S22 columns; constraint is not applied\n")
 		} else {
-			depIw, depCol = depolColumnMatch(ds, b.depWl, a.Batch)
+			depIw, depCol = depolColumnMatch(ds, b.depWl, a.Batch, c)
 			if len(depIw) == 0 {
-				fmt.Fprintf(os.Stderr, "[warning] --depol-ratio-cons: no measured "+
-					"depolarization matching S11/S22 wavelengths; constraint is "+
+				c.warnf("[warning] --depol-ratio-cons: no measured " +
+					"depolarization matching S11/S22 wavelengths; constraint is " +
 					"not applied\n")
 			} else if !(a.DepolRatioW > 0) {
-				fmt.Printf("depolarization ratio constraint δ_l: disabled " +
+				c.printf("depolarization ratio constraint δ_l: disabled " +
 					"(--depol-ratio-w 0)\n")
 			}
 		}
@@ -981,7 +983,7 @@ func runBatch(a *Args) error {
 				}
 				fmt.Fprintf(&sb, "%.6g nm", ds.wl[depIw[k]]*1e3)
 			}
-			fmt.Printf("depolarization ratio constraint δ_l: enabled "+
+			c.printf("depolarization ratio constraint δ_l: enabled "+
 				"(weight %g, mode %s; measured at %s)\n", a.DepolRatioW,
 				a.DepolRatioMode, sb.String())
 		}
@@ -1138,10 +1140,10 @@ func runBatch(a *Args) error {
 		depPen := make([][]float64, b.nAlt)
 		for h := 0; h < b.nAlt; h++ {
 			g1 := b.data[h*b.nch:]
-			fmt.Printf("  scanning altitude %g m...\n", b.alt[h])
+			c.printf("  scanning altitude %g m...\n", b.alt[h])
 			per[h], err = scanVariants(design, g1, b.nch, a.GammaSelect,
 				a.GammaRel, a.GammaMin, a.GammaMax, a.NGamma, a.Nonneg,
-				!a.Absolute, depolAt(h))
+				!a.Absolute, depolAt(h), c)
 			if err != nil {
 				return err
 			}
@@ -1151,14 +1153,14 @@ func runBatch(a *Args) error {
 			depPen[h] = rankDepolAt(per[h], h)
 		}
 
-		fmt.Printf("  applying constraint: common wavelengths ")
+		c.printf("  applying constraint: common wavelengths ")
 		for k := 0; k < nl; k++ {
 			if k > 0 {
-				fmt.Printf(", ")
+				c.printf(", ")
 			}
-			fmt.Printf("%g nm", common[k].wl*1e3)
+			c.printf("%g nm", common[k].wl*1e3)
 		}
-		fmt.Printf("\n")
+		c.printf("\n")
 
 		S := make([][]float64, b.nAlt)
 		for h := 0; h < b.nAlt; h++ {
@@ -1173,33 +1175,33 @@ func runBatch(a *Args) error {
 			}
 		}
 		applyLidarConstraint(per, b.nAlt, b.alt, nl, a.LidarRatioW,
-			a.LidarRatioIter, a, S, depPen)
+			a.LidarRatioIter, a, S, depPen, c)
 
 		for h := 0; h < b.nAlt; h++ {
 			g1 := b.data[h*b.nch:]
 			if err := emitProfile(a, outDir, b.alt[h], b, solveCh, g1, per[h], kts,
 				mre, mim, design.geom, r1MaxEff, common, nl, writeLidar,
-				&met, h, ds); err != nil {
+				&met, h, ds, c); err != nil {
 				return err
 			}
 		}
 	} else {
 		if a.LidarRatioCons {
 			if b.nAlt < 2 {
-				fmt.Printf("  [warning] --lidar-ratio-cons: at least 2 " +
+				c.printf("  [warning] --lidar-ratio-cons: at least 2 " +
 					"altitudes required; constraint is not applied\n")
 			} else {
-				fmt.Printf("  [warning] --lidar-ratio-cons: no common " +
+				c.printf("  [warning] --lidar-ratio-cons: no common " +
 					"β∩α wavelengths for the lidar ratio; constraint is " +
 					"not applied\n")
 			}
 		}
 		for h := 0; h < b.nAlt; h++ {
 			g1 := b.data[h*b.nch:]
-			fmt.Printf("  scanning altitude %g m...\n", b.alt[h])
+			c.printf("  scanning altitude %g m...\n", b.alt[h])
 			sols, err := scanVariants(design, g1, b.nch, a.GammaSelect,
 				a.GammaRel, a.GammaMin, a.GammaMax, a.NGamma, a.Nonneg,
-				!a.Absolute, depolAt(h))
+				!a.Absolute, depolAt(h), c)
 			if err != nil {
 				return err
 			}
@@ -1209,7 +1211,7 @@ func runBatch(a *Args) error {
 			rankDepolAt(sols, h)
 			if err := emitProfile(a, outDir, b.alt[h], b, solveCh, g1, sols, kts,
 				mre, mim, design.geom, r1MaxEff, common, nl, writeLidar,
-				&met, h, ds); err != nil {
+				&met, h, ds, c); err != nil {
 				return err
 			}
 		}
@@ -1217,7 +1219,7 @@ func runBatch(a *Args) error {
 
 	if !a.NoPlot {
 		po := plotOpts{format: a.PlotFormat, dpi: a.PlotDpi,
-			fontSize: a.PlotFontSize, backend: a.Plotting}
+			fontSize: a.PlotFontSize, backend: a.Plotting, con: c}
 		ext := plotFormatExt(a.PlotFormat)
 
 		pp := filepath.Join(outDir, "refractive."+ext)
@@ -1293,6 +1295,6 @@ func runBatch(a *Args) error {
 		}
 	}
 
-	fmt.Printf("batch processing finished; results: %s\n", outDir)
+	c.printf("batch processing finished; results: %s\n", outDir)
 	return nil
 }

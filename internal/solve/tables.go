@@ -99,23 +99,25 @@ type channels struct {
 type tableSource struct {
 	fsys   fs.FS
 	label  string // для сообщений: "builtin:sphere" или путь из --tables
-	key    string // идентичность источника для кэша таблиц
 	origin string // каталог встроенного набора; "" для внешнего
+	con    *console
 
 	mu       sync.Mutex
 	warnedDx bool
+	cache    map[tableCacheKey]*table
 }
 
 // tableFileName — имя файла таблицы внутри каталога m.
 const tableFileName = "data.txt"
 
 // externalTableSource — таблицы из каталога на диске (--tables).
-func externalTableSource(dir string) *tableSource {
-	return &tableSource{fsys: os.DirFS(dir), label: dir, key: "dir:" + dir}
+func externalTableSource(dir string, c *console) *tableSource {
+	return &tableSource{fsys: os.DirFS(dir), label: dir,
+		con: c, cache: make(map[tableCacheKey]*table)}
 }
 
 // builtinTableSource — встроенный набор таблиц по значению --type.
-func builtinTableSource(kind string) (*tableSource, error) {
+func builtinTableSource(kind string, c *console) (*tableSource, error) {
 	dir, ok := builtinTableDirs[kind]
 	if !ok {
 		return nil, fmt.Errorf("unknown built-in table set %q (expected one of: %s)",
@@ -128,17 +130,18 @@ func builtinTableSource(kind string) (*tableSource, error) {
 	return &tableSource{
 		fsys:   sub,
 		label:  "builtin:" + kind,
-		key:    "builtin:" + kind,
 		origin: dir,
+		con:    c,
+		cache:  make(map[tableCacheKey]*table),
 	}, nil
 }
 
 // tableSource — выбор источника: --tables (внешние) или встроенный по --type.
-func (a *Args) tableSource() (*tableSource, error) {
+func (a *Args) tableSource(c *console) (*tableSource, error) {
 	if a.Tables != "" {
-		return externalTableSource(a.Tables), nil
+		return externalTableSource(a.Tables, c), nil
 	}
-	return builtinTableSource(a.Type)
+	return builtinTableSource(a.Type, c)
 }
 
 func (s *tableSource) builtin() bool { return s.origin != "" }
@@ -208,7 +211,7 @@ func (s *tableSource) warnLargeStep(disp string, dxMax float64) {
 		return
 	}
 	s.warnedDx = true
-	fmt.Fprintf(os.Stderr, "[warning] tables %s: large step in x (max Δx = %g, "+
+	s.con.warnf("[warning] tables %s: large step in x (max Δx = %g, "+
 		"e.g. %s); Mie ripple may not be resolved\n", s.label, dxMax, disp)
 }
 
@@ -588,16 +591,12 @@ func tableMGrid(src *tableSource) (re, im []float64, err error) {
 }
 
 // ---------------- кэш загруженных таблиц ----------------
+// Кэш живёт в источнике таблиц: один прогон — один источник, поэтому
+// глобального состояния не нужно.
 type tableCacheKey struct {
-	src         string
 	re, im      float64
 	extrapolate bool
 }
-
-var tableCache = struct {
-	sync.Mutex
-	m map[tableCacheKey]*table
-}{m: make(map[tableCacheKey]*table)}
 
 func missingTableError(src *tableSource, mdir string, mre, mim float64) error {
 	dir := mTableDirname(mre, mim)
@@ -621,13 +620,13 @@ func missingTableError(src *tableSource, mdir string, mre, mim float64) error {
 }
 
 func tableCacheGet(src *tableSource, re, im float64, extrapolate bool) (*table, error) {
-	key := tableCacheKey{src.key, re, im, extrapolate}
-	tableCache.Lock()
-	if t, ok := tableCache.m[key]; ok {
-		tableCache.Unlock()
+	key := tableCacheKey{re, im, extrapolate}
+	src.mu.Lock()
+	if t, ok := src.cache[key]; ok {
+		src.mu.Unlock()
 		return t, nil
 	}
-	tableCache.Unlock()
+	src.mu.Unlock()
 
 	mdir := mTableDirname(re, im)
 	if _, err := src.resolveName(mdir); err != nil {
@@ -638,9 +637,9 @@ func tableCacheGet(src *tableSource, re, im float64, extrapolate bool) (*table, 
 		return nil, err
 	}
 
-	tableCache.Lock()
-	tableCache.m[key] = t
-	tableCache.Unlock()
+	src.mu.Lock()
+	src.cache[key] = t
+	src.mu.Unlock()
 	return t, nil
 }
 

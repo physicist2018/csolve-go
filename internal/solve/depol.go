@@ -3,7 +3,6 @@ package solve
 import (
 	"fmt"
 	"math"
-	"os"
 	"strings"
 )
 
@@ -64,7 +63,7 @@ func depolSetBuild(src *tableSource, mre, mim []float64, refWl, rMin, rMax,
 			continue
 		}
 		for iw, wl := range ds.wl {
-			kt, err := depolKtableBuild(tab, wl, refWl, r)
+			kt, err := depolKtableBuild(tab, wl, refWl, r, src.con)
 			if err != nil {
 				return nil, err
 			}
@@ -76,7 +75,8 @@ func depolSetBuild(src *tableSource, mre, mim []float64, refWl, rMin, rMax,
 }
 
 // depolKtableBuild — ядра S11/S22 на сетке r для длины волны wl.
-func depolKtableBuild(tab *table, wl, refWl float64, r []float64) (*ktable, error) {
+func depolKtableBuild(tab *table, wl, refWl float64, r []float64,
+	c *console) (*ktable, error) {
 	kt := &ktable{
 		n:    len(r),
 		r:    r,
@@ -95,7 +95,7 @@ func depolKtableBuild(tab *table, wl, refWl float64, r []float64) (*ktable, erro
 	for j := 0; j < 2; j++ {
 		for i := range r {
 			x := 2.0 * math.Pi * r[i] / wl
-			K := scale * tableSColumn(tab, cols[j], x, wl)
+			K := scale * tableSColumn(tab, cols[j], x, wl, c)
 			if !(K > 0) || !isFinite(K) {
 				return nil, fmt.Errorf("%s: depolarization kernel S(r) must be positive and "+
 					"finite (x = %g, λ = %g nm)", tab.path, x, wl*1e3)
@@ -112,7 +112,7 @@ func depolKtableBuild(tab *table, wl, refWl float64, r []float64) (*ktable, erro
 // δ_l — диагностическая величина, и пересчёт на 355 нм требует больших x,
 // чем покрывает таблица, поэтому расчёт не прерывается. Предупреждение
 // печатается один раз на таблицу.
-func tableSColumn(t *table, sp *spline, x, wl float64) float64 {
+func tableSColumn(t *table, sp *spline, x, wl float64, c *console) float64 {
 	xc := x
 	if xc < t.xMin {
 		xc = t.xMin
@@ -122,7 +122,7 @@ func tableSColumn(t *table, sp *spline, x, wl float64) float64 {
 	}
 	if xc != x && !t.sClampWarned {
 		t.sClampWarned = true
-		fmt.Fprintf(os.Stderr, "[warning] %s: S11/S22 requested at x = %g "+
+		c.warnf("[warning] %s: S11/S22 requested at x = %g "+
 			"outside [%g, %g] for λ = %g nm — x is clamped; δ_l may be "+
 			"biased (a wider table is needed)\n", t.path, x, t.xMin, t.xMax,
 			wl*1e3)
@@ -144,7 +144,7 @@ func depolWlIndex(wl []float64, target float64) int {
 // волн набора ядер ds. Возвращает индексы длин волн ds (iw) и индексы
 // соответствующих столбцов измерения (col). Несовпадающие длины волн
 // пропускаются с предупреждением.
-func depolColumnMatch(ds *depolSet, wl []float64, label string) (iw, col []int) {
+func depolColumnMatch(ds *depolSet, wl []float64, label string, c *console) (iw, col []int) {
 	if ds == nil || len(ds.wl) == 0 {
 		return nil, nil
 	}
@@ -164,7 +164,7 @@ func depolColumnMatch(ds *depolSet, wl []float64, label string) (iw, col []int) 
 				}
 				fmt.Fprintf(&sb, "%.6g nm", wds*1e3)
 			}
-			fmt.Fprintf(os.Stderr, "[warning] %s: measured depolarization at "+
+			c.warnf("[warning] %s: measured depolarization at "+
 				"%.6g nm does not match S11/S22 wavelengths (%s) — ignored\n",
 				label, w*1e3, sb.String())
 			continue
@@ -407,13 +407,13 @@ func rankByDepol(sols *solutions, p *depolProj, mre, mim, targets []float64,
 }
 
 // depolSetReport — диагностика доступности столбцов S11/S22.
-func depolSetReport(ds *depolSet, src *tableSource, nm int) {
+func depolSetReport(ds *depolSet, src *tableSource, nm int, c *console) {
 	if ds == nil || len(ds.wl) == 0 {
 		return
 	}
 	label := src.label
 	if ds.nOK == 0 {
-		fmt.Fprintf(os.Stderr, "[warning] tables in %s have no valid S11/S22 "+
+		c.warnf("[warning] tables in %s have no valid S11/S22 "+
 			"columns (or they contain nan) — linear depolarization is not "+
 			"computed\n", label)
 		return
@@ -429,7 +429,7 @@ func depolSetReport(ds *depolSet, src *tableSource, nm int) {
 	fmt.Printf("  %s: from tables S11/S22 (%d of %d m values)\n", sb.String(),
 		ds.nOK, nm)
 	if ds.nOK < nm {
-		fmt.Fprintf(os.Stderr, "[warning] tables in %s: S11/S22 available "+
+		c.warnf("[warning] tables in %s: S11/S22 available "+
 			"only for %d of %d m values — δ_l is averaged over the available "+
 			"ones\n", label, ds.nOK, nm)
 	}

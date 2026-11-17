@@ -16,6 +16,9 @@ import (
 	"unicode/utf16"
 )
 
+// testConsole — консоль, которая никуда не пишет.
+func testConsole() *console { return newConsole(io.Discard, io.Discard, false) }
+
 func checkClose(t *testing.T, what string, got, want, tol float64) {
 	t.Helper()
 	d := math.Abs(got - want)
@@ -231,7 +234,7 @@ func TestDepol(t *testing.T) {
 	ds := &depolSet{wl: append([]float64(nil), depolWlsUm...),
 		kt: make([][2]*ktable, 1)}
 	for iw, wl := range ds.wl {
-		kt, err := depolKtableBuild(tb, wl, tableRefWlUm, rq)
+		kt, err := depolKtableBuild(tb, wl, tableRefWlUm, rq, testConsole())
 		if err != nil {
 			t.Fatalf("depolKtableBuild: %v", err)
 		}
@@ -295,7 +298,7 @@ func TestDepolProjection(t *testing.T) {
 	ds := &depolSet{wl: append([]float64(nil), depolWlsUm...),
 		kt: make([][2]*ktable, 1)}
 	for iw, wl := range ds.wl {
-		kt, err := depolKtableBuild(tb, wl, tableRefWlUm, r)
+		kt, err := depolKtableBuild(tb, wl, tableRefWlUm, r, testConsole())
 		if err != nil {
 			t.Fatalf("depolKtableBuild: %v", err)
 		}
@@ -770,7 +773,7 @@ func TestBuiltinTables(t *testing.T) {
 		{"agglomerate-cs", "large_aggl_100_cs/average", 56, 100, [2]float64{0.05, 80.0}},
 	}
 	for _, c := range cases {
-		src, err := builtinTableSource(c.kind)
+		src, err := builtinTableSource(c.kind, testConsole())
 		if err != nil {
 			t.Fatalf("%s: %v", c.kind, err)
 		}
@@ -813,7 +816,7 @@ func TestEmbeddedGzipMatchesSource(t *testing.T) {
 		t.Skip("bases/ is not available (run 'go generate ./bases' first)")
 	}
 	for kind, dir := range builtinTableDirs {
-		src, err := builtinTableSource(kind)
+		src, err := builtinTableSource(kind, testConsole())
 		if err != nil {
 			t.Fatalf("%s: %v", kind, err)
 		}

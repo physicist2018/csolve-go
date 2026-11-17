@@ -130,10 +130,10 @@ func internalNewPlot(po *plotOpts) *plot.Plot {
 
 // internalRender рисует PDF; паника внутри рендерера не прерывает расчёт —
 // печатается предупреждение, как у gnuplot-ветки.
-func internalRender(outPath string, w, h vg.Length, drawFn func(draw.Canvas)) (ok bool) {
+func internalRender(po *plotOpts, outPath string, w, h vg.Length, drawFn func(draw.Canvas)) (ok bool) {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "[warning] failed to build plot %s: %v\n",
+			po.warnf("[warning] failed to build plot %s: %v\n",
 				outPath, r)
 			ok = false
 		}
@@ -144,19 +144,19 @@ func internalRender(outPath string, w, h vg.Length, drawFn func(draw.Canvas)) (o
 
 	f, err := os.Create(outPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[warning] failed to build plot %s: %v\n",
+		po.warnf("[warning] failed to build plot %s: %v\n",
 			outPath, err)
 		return false
 	}
 	if _, err := canvas.WriteTo(f); err != nil {
 		f.Close()
 		_ = os.Remove(outPath)
-		fmt.Fprintf(os.Stderr, "[warning] failed to build plot %s: %v\n",
+		po.warnf("[warning] failed to build plot %s: %v\n",
 			outPath, err)
 		return false
 	}
 	if err := f.Close(); err != nil {
-		fmt.Fprintf(os.Stderr, "[warning] failed to build plot %s: %v\n",
+		po.warnf("[warning] failed to build plot %s: %v\n",
 			outPath, err)
 		return false
 	}
@@ -412,7 +412,7 @@ func internalProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
 		}
 	}
 
-	return internalRender(outPath, 8.0*vg.Inch, 3.0667*vg.Inch, func(c draw.Canvas) {
+	return internalRender(po, outPath, 8.0*vg.Inch, 3.0667*vg.Inch, func(c draw.Canvas) {
 		tiles := internalTiles(2)
 
 		p1 := internalNewPlot(po)
@@ -448,7 +448,7 @@ func internalProfiles(po *plotOpts, outPath, title, xlabel string, nSeries int,
 	}
 	lo, hi, hLo, hHi, useLog := profileAxes(alt, vals, nSeries, logAuto)
 
-	return internalRender(outPath, 6.0*vg.Inch, 4.8*vg.Inch, func(c draw.Canvas) {
+	return internalRender(po, outPath, 6.0*vg.Inch, 4.8*vg.Inch, func(c draw.Canvas) {
 		p := internalNewPlot(po)
 		p.Title.Text = internalLabel(title)
 		p.X.Label.Text = internalLabel(xlabel)
@@ -491,7 +491,7 @@ func internalRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []flo
 	reLo, reHi, imLo, imHi, hLo, hHi := refractiveAxes(alt, mRe, mIm)
 
 	const titleBand = 8 * vg.Millimeter
-	return internalRender(outPath, 6.0*vg.Inch, 4.8*vg.Inch, func(c draw.Canvas) {
+	return internalRender(po, outPath, 6.0*vg.Inch, 4.8*vg.Inch, func(c draw.Canvas) {
 		body := c
 		body.Max.Y -= titleBand
 		tiles := draw.Tiles{
@@ -565,7 +565,7 @@ func internalResults(po *plotOpts, outPath string, rGrid []float64,
 	}
 	all = append(all, sols...)
 
-	return internalRender(outPath, 8.6667*vg.Inch, 3.4667*vg.Inch, func(c draw.Canvas) {
+	return internalRender(po, outPath, 8.6667*vg.Inch, 3.4667*vg.Inch, func(c draw.Canvas) {
 		tiles := internalTiles(2)
 
 		p1 := internalNewPlot(po)
