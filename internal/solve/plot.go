@@ -11,26 +11,37 @@ import (
 	"strings"
 )
 
+// plotFormat — формат выходного файла графика (--plot-format).
+type plotFormat string
+
 const (
-	plotFmtPng = 0
-	plotFmtPdf = 1
-	plotFmtSvg = 2
+	plotFmtPng plotFormat = "png"
+	plotFmtPdf plotFormat = "pdf"
+	plotFmtSvg plotFormat = "svg"
 )
 
-// Способы отрисовки: внешний gnuplot или встроенный рендерер (PDF, чистый Go).
+// plotFormats — значения --plot-format в порядке справки.
+var plotFormats = []plotFormat{plotFmtPng, plotFmtPdf, plotFmtSvg}
+
+// plotBackend — способ отрисовки: внешний gnuplot или встроенный рендерер.
+type plotBackend string
+
 const (
-	plottingGnuplot  = 0
-	plottingInternal = 1
+	plottingGnuplot  plotBackend = "gnuplot"
+	plottingInternal plotBackend = "internal"
 )
+
+// plotBackends — значения --plotting в порядке справки.
+var plotBackends = []plotBackend{plottingInternal, plottingGnuplot}
 
 type plotOpts struct {
-	format   int
+	format   plotFormat
 	dpi      float64
 	fontSize float64
-	backend  int
+	backend  plotBackend
 }
 
-func plotFormatExt(f int) string {
+func plotFormatExt(f plotFormat) string {
 	switch f {
 	case plotFmtPdf:
 		return "pdf"

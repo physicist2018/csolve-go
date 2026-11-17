@@ -107,7 +107,7 @@ func reportMoments(m moments) {
 	fmt.Printf("  effective radius r_eff      = %.4g µm\n", m.REffUm)
 }
 
-func reportModes(m modes, rSplit float64, method string) {
+func reportModes(m modes, rSplit float64, method modesKind) {
 	fmt.Printf("\n=== Log-normal mode parameters (dV/dln r) ===\n")
 	fmt.Printf("  mode split boundary: %g µm (--r-split)\n", rSplit)
 	fmt.Printf("  parameter estimation method: %s (--modes)\n", method)

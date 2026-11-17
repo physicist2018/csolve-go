@@ -917,7 +917,7 @@ func runBatch(a *Args) {
 			}
 			fmt.Printf("depolarization ratio constraint δ_l: enabled "+
 				"(weight %g, mode %s; measured at %s)\n", a.DepolRatioW,
-				depolModeName(a.DepolRatioMode), sb.String())
+				a.DepolRatioMode, sb.String())
 		}
 	}
 	depTargets := func(h int) []float64 {

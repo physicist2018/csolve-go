@@ -540,10 +540,10 @@ func TestArgs(t *testing.T) {
 		checkClose(t, "plot-dpi default", a.PlotDpi, 150.0, 0)
 		checkClose(t, "plot-font-size default", a.PlotFontSize, 0.0, 0)
 		if a.Plotting != plottingInternal {
-			t.Errorf("default --plotting must be internal, got %d", a.Plotting)
+			t.Errorf("default --plotting must be internal, got %s", a.Plotting)
 		}
 		if a.PlotFormat != plotFmtPdf {
-			t.Errorf("internal backend must force pdf, got %d", a.PlotFormat)
+			t.Errorf("internal backend must force pdf, got %s", a.PlotFormat)
 		}
 	}
 	{
@@ -658,7 +658,7 @@ func TestArgs(t *testing.T) {
 		if a.PlotFormat != plotFmtPdf {
 			t.Errorf("--plot-format pdf not parsed")
 		}
-		if a.Modes != 2 {
+		if a.Modes != modesStat {
 			t.Errorf("--modes stat not parsed")
 		}
 	}
@@ -802,7 +802,7 @@ func TestArgsPlotting(t *testing.T) {
 			t.Errorf("--plotting gnuplot not parsed")
 		}
 		if a.PlotFormat != plotFmtPng {
-			t.Errorf("gnuplot backend must keep png default, got %d",
+			t.Errorf("gnuplot backend must keep png default, got %s",
 				a.PlotFormat)
 		}
 	}

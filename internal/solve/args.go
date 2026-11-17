@@ -33,7 +33,7 @@ type Args struct {
 
 	GammaMin, GammaMax float64
 	NGamma             int
-	GammaSelect        int
+	GammaSelect        gammaSelect
 	GammaRel           float64
 
 	Nonneg         bool
@@ -41,7 +41,7 @@ type Args struct {
 	NoSmooth       bool
 	SmoothLam      float64
 	RSplit         float64
-	Modes          int
+	Modes          modesKind
 	Absolute       bool
 
 	DxMax     float64
@@ -59,8 +59,8 @@ type Args struct {
 	Out          string
 	JSON         string
 	NoPlot       bool
-	Plotting     int
-	PlotFormat   int
+	Plotting     plotBackend
+	PlotFormat   plotFormat
 	PlotDpi      float64
 	PlotFontSize float64
 
@@ -72,7 +72,7 @@ type Args struct {
 
 	DepolRatioCons bool
 	DepolRatioW    float64
-	DepolRatioMode int
+	DepolRatioMode depolMode
 }
 
 var errHelp = errors.New("help requested")
@@ -122,21 +122,35 @@ func (a *Args) bestCount(nTot int) int {
 	return g
 }
 
-type enumFlag struct {
-	allowed []string
-	value   string
+// enumFlag — флаг с фиксированным набором значений: хранит типизированное
+// значение, повтор флага допустим (последнее значение побеждает).
+type enumFlag[T ~string] struct {
+	allowed []T
+	value   T
 }
 
-func (e *enumFlag) String() string { return e.value }
+func (e *enumFlag[T]) String() string { return string(e.value) }
 
-func (e *enumFlag) Set(s string) error {
-	for _, a := range e.allowed {
-		if s == a {
-			e.value = s
+func (e *enumFlag[T]) Set(s string) error {
+	for _, v := range e.allowed {
+		if string(v) == s {
+			e.value = v
 			return nil
 		}
 	}
-	return fmt.Errorf("must be one of {%s}", strings.Join(e.allowed, "|"))
+	return fmt.Errorf("must be one of %s", enumSetString(e.allowed))
+}
+
+// Value — текущее значение флага.
+func (e *enumFlag[T]) Value() T { return e.value }
+
+// enumSetString — представление набора значений "{a|b|c}" для сообщений.
+func enumSetString[T ~string](vals []T) string {
+	names := make([]string, len(vals))
+	for i, v := range vals {
+		names[i] = string(v)
+	}
+	return "{" + strings.Join(names, "|") + "}"
 }
 
 func printHelp() {
@@ -259,7 +273,7 @@ func ParseArgs(argv []string) (*Args, error) {
 		GammaRel:       0.1,
 		SmoothLam:      1e-4,
 		RSplit:         0.5,
-		Modes:          0,
+		Modes:          modesAuto,
 		DxMax:          0.1,
 		NrOut:          256,
 		QuadOrder:      24,
@@ -284,11 +298,11 @@ func ParseArgs(argv []string) (*Args, error) {
 
 	fs.StringVar(&a.Data, "data", "", "")
 	fs.StringVar(&a.Tables, "tables", "", "")
-	tableType := &enumFlag{allowed: builtinTypeNames, value: defaultTableType}
+	tableType := &enumFlag[string]{allowed: builtinTypeNames, value: defaultTableType}
 	fs.Var(tableType, "type", "")
 	fs.BoolVar(&a.TableExtrapolate, "table-extrapolate", false, "")
 	fs.Float64Var(&a.TableRefWl, "table-ref-lambda-um", a.TableRefWl, "")
-	tableCback := &enumFlag{allowed: []string{"dsigma", "4pi"}, value: "dsigma"}
+	tableCback := &enumFlag[string]{allowed: []string{"dsigma", "4pi"}, value: "dsigma"}
 	fs.Var(tableCback, "table-cback", "")
 
 	degree := &singleIntFlag{minV: 1, maxV: 4, name: "degree"}
@@ -303,8 +317,8 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.Float64Var(&a.MinRatio, "min-ratio", a.MinRatio, "")
 	fs.Float64Var(&a.Best, "best", a.Best, "")
 
-	gammaSelect := &enumFlag{allowed: []string{"fixed", "cv", "err"}, value: "fixed"}
-	fs.Var(gammaSelect, "gamma-select", "")
+	gammaSel := &enumFlag[gammaSelect]{allowed: gammaSelects, value: gammaFixed}
+	fs.Var(gammaSel, "gamma-select", "")
 	fs.Float64Var(&a.GammaRel, "gamma-rel", a.GammaRel, "")
 	fs.Float64Var(&a.GammaMin, "gamma-min", a.GammaMin, "")
 	fs.Float64Var(&a.GammaMax, "gamma-max", a.GammaMax, "")
@@ -315,7 +329,7 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.BoolVar(&a.NoSmooth, "no-smooth", false, "")
 	fs.Float64Var(&a.SmoothLam, "smooth-lam", a.SmoothLam, "")
 	fs.Float64Var(&a.RSplit, "r-split", a.RSplit, "")
-	modesFlag := &enumFlag{allowed: []string{"auto", "fit", "stat"}, value: "auto"}
+	modesFlag := &enumFlag[modesKind]{allowed: modesKinds, value: modesAuto}
 	fs.Var(modesFlag, "modes", "")
 	fs.BoolVar(&a.Absolute, "absolute", false, "")
 
@@ -335,11 +349,11 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.StringVar(&a.OutDir, "out-dir", "", "")
 	fs.StringVar(&a.Out, "out", "", "")
 	fs.StringVar(&a.JSON, "json", "", "")
-	plotFormat := &enumFlag{allowed: []string{"png", "pdf", "svg"}, value: "png"}
-	fs.Var(plotFormat, "plot-format", "")
-	plotting := &enumFlag{allowed: []string{"internal", "gnuplot"},
-		value: "internal"}
-	fs.Var(plotting, "plotting", "")
+	plotFormatFlag := &enumFlag[plotFormat]{allowed: plotFormats, value: plotFmtPng}
+	fs.Var(plotFormatFlag, "plot-format", "")
+	plottingFlag := &enumFlag[plotBackend]{allowed: plotBackends,
+		value: plottingInternal}
+	fs.Var(plottingFlag, "plotting", "")
 	fs.Float64Var(&a.PlotDpi, "plot-dpi", a.PlotDpi, "")
 	fs.Float64Var(&a.PlotFontSize, "plot-font-size", a.PlotFontSize, "")
 	fs.BoolVar(&a.NoPlot, "no-plot", false, "")
@@ -351,8 +365,8 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.IntVar(&a.LidarRatioIter, "lidar-ratio-iter", a.LidarRatioIter, "")
 	fs.BoolVar(&a.DepolRatioCons, "depol-ratio-cons", false, "")
 	fs.Float64Var(&a.DepolRatioW, "depol-ratio-w", a.DepolRatioW, "")
-	depolMode := &enumFlag{allowed: []string{"func", "rank"}, value: "func"}
-	fs.Var(depolMode, "depol-ratio-mode", "")
+	depolModeFlag := &enumFlag[depolMode]{allowed: depolModes, value: depolModeFunc}
+	fs.Var(depolModeFlag, "depol-ratio-mode", "")
 
 	if err := fs.Parse(argv); err != nil {
 		return nil, err
@@ -387,21 +401,17 @@ func ParseArgs(argv []string) (*Args, error) {
 		a.HasMImag = true
 		a.MImag = mImag
 	}
-	a.TableCback4pi = tableCback.value == "4pi"
-	a.Type = tableType.value
-	a.GammaSelect = map[string]int{"fixed": gammaFixed, "cv": gammaCV,
-		"err": gammaErr}[gammaSelect.value]
-	a.Modes = map[string]int{"auto": 0, "fit": 1, "stat": 2}[modesFlag.value]
-	a.DepolRatioMode = map[string]int{"func": depolModeFunc,
-		"rank": depolModeRank}[depolMode.value]
-	a.PlotFormat = map[string]int{"png": plotFmtPng, "pdf": plotFmtPdf,
-		"svg": plotFmtSvg}[plotFormat.value]
-	a.Plotting = map[string]int{"gnuplot": plottingGnuplot,
-		"internal": plottingInternal}[plotting.value]
+	a.TableCback4pi = tableCback.Value() == "4pi"
+	a.Type = tableType.Value()
+	a.GammaSelect = gammaSel.Value()
+	a.Modes = modesFlag.Value()
+	a.DepolRatioMode = depolModeFlag.Value()
+	a.PlotFormat = plotFormatFlag.Value()
+	a.Plotting = plottingFlag.Value()
 	if a.Plotting == plottingInternal {
 		if seen["plot-format"] && a.PlotFormat != plotFmtPdf && !a.NoPlot {
 			return nil, fmt.Errorf("option --plot-format=%s is not "+
-				"supported with --plotting=internal (only pdf)", plotFormat.value)
+				"supported with --plotting=internal (only pdf)", a.PlotFormat)
 		}
 		a.PlotFormat = plotFmtPdf
 		if seen["plot-dpi"] && !a.NoPlot {

@@ -12,6 +12,18 @@ type moments struct {
 	CovFrac          float64
 }
 
+// modesKind — способ оценки параметров лог-нормальных мод (--modes).
+type modesKind string
+
+const (
+	modesAuto modesKind = "auto"
+	modesFit  modesKind = "fit"
+	modesStat modesKind = "stat"
+)
+
+// modesKinds — значения --modes в порядке справки.
+var modesKinds = []modesKind{modesAuto, modesFit, modesStat}
+
 type csMode struct {
 	V, Rm, Sigma float64
 	OK           bool
@@ -131,7 +143,7 @@ func fitLognormalLn(x, y, w []float64) csMode {
 	return out
 }
 
-func analyze(r, f, w []float64, n, method int) csMode {
+func analyze(r, f, w []float64, n int, method modesKind) csMode {
 	out := csMode{V: math.NaN(), Rm: math.NaN(), Sigma: math.NaN(),
 		OK: false, Method: "insufficient points"}
 	if n < 3 {
@@ -162,7 +174,7 @@ func analyze(r, f, w []float64, n, method int) csMode {
 		out.Method = "few points with F > 0"
 		return out
 	}
-	if method != 2 {
+	if method != modesStat {
 		x := make([]float64, np)
 		y := make([]float64, np)
 		var wsub []float64
@@ -217,7 +229,7 @@ func analyze(r, f, w []float64, n, method int) csMode {
 	return out
 }
 
-func analyzeFiltered(rGrid, f, w []float64, n int, lo, hi float64, method int) csMode {
+func analyzeFiltered(rGrid, f, w []float64, n int, lo, hi float64, method modesKind) csMode {
 	cnt := 0
 	for i := 0; i < n; i++ {
 		if rGrid[i] >= lo && rGrid[i] <= hi {
@@ -246,7 +258,7 @@ func analyzeFiltered(rGrid, f, w []float64, n int, lo, hi float64, method int) c
 }
 
 func modeAnalysis(rGrid, fAvg []float64, rSplit float64, w []float64,
-	method int) modes {
+	method modesKind) modes {
 	var out modes
 	n := len(rGrid)
 	r := make([]float64, 0, n)

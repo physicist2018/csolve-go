@@ -344,7 +344,7 @@ func run(a *Args) {
 				}
 				fmt.Printf("depolarization ratio constraint δ_l: enabled "+
 					"(weight %g, mode %s; measured %s)\n", a.DepolRatioW,
-					depolModeName(a.DepolRatioMode), sb.String())
+					a.DepolRatioMode, sb.String())
 			}
 		}
 	}
@@ -439,13 +439,7 @@ func run(a *Args) {
 	reportMoments(prof.moments)
 	reportDepolarization(prof)
 
-	modeName := "auto"
-	if a.Modes == 1 {
-		modeName = "fit"
-	} else if a.Modes == 2 {
-		modeName = "stat"
-	}
-	reportModes(prof.modes, a.RSplit, modeName)
+	reportModes(prof.modes, a.RSplit, a.Modes)
 
 	// ---- выходные файлы ----
 	var plotPath string

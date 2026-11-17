@@ -9,11 +9,17 @@ import (
 	"gonum.org/v1/gonum/mat"
 )
 
+// gammaSelect — правило выбора параметра регуляризации gamma (--gamma-select).
+type gammaSelect string
+
 const (
-	gammaFixed = 0
-	gammaCV    = 1
-	gammaErr   = 2
+	gammaFixed gammaSelect = "fixed"
+	gammaCV    gammaSelect = "cv"
+	gammaErr   gammaSelect = "err"
 )
+
+// gammaSelects — значения --gamma-select в порядке справки.
+var gammaSelects = []gammaSelect{gammaFixed, gammaCV, gammaErr}
 
 type solution struct {
 	mRe, mIm  float64
@@ -231,7 +237,7 @@ func sortSolutions(sol []solution) {
 
 // scanVariants — перебор (m, окно) с регуляризацией по кривизне. Если dc
 // задано, в систему добавляется строка ограничения по измеренному δ_l.
-func scanVariants(d *design, g1 []float64, nch, gammaSelect int,
+func scanVariants(d *design, g1 []float64, nch int, gammaSel gammaSelect,
 	gammaRelFixed, gammaExpMin, gammaExpMax float64, nGamma int,
 	nonneg, relative bool, dc *depolCons) *solutions {
 	out := &solutions{}
@@ -271,7 +277,7 @@ func scanVariants(d *design, g1 []float64, nch, gammaSelect int,
 	total := nm * nw
 
 	var grel []float64
-	if gammaSelect == gammaFixed {
+	if gammaSel == gammaFixed {
 		grel = []float64{gammaRelFixed}
 	} else {
 		ng := nGamma
@@ -298,7 +304,7 @@ func scanVariants(d *design, g1 []float64, nch, gammaSelect int,
 			gamma := 0.0
 			var cNorm []float64
 
-			if gammaSelect == gammaFixed {
+			if gammaSel == gammaFixed {
 				gamma = grel[0] * s0
 				cNorm = solveGamma(A, nch, nu, gamma, weights, g1n, nonneg)
 			} else {
@@ -306,7 +312,7 @@ func scanVariants(d *design, g1 []float64, nch, gammaSelect int,
 				for k := 0; k < len(grel); k++ {
 					gk := grel[k] * s0
 					var score float64
-					if gammaSelect == gammaCV {
+					if gammaSel == gammaCV {
 						if nonneg {
 							score = cvBruteforce(A, nch, nu, gk, weights, g1n, true)
 						} else {

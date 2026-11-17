@@ -11,20 +11,17 @@ import (
 // расчёте линейной деполяризации обратного рассеяния.
 var depolWlsUm = []float64{0.355, 0.532}
 
-// способы учёта измеренного δ_l: в функционале (строка системы) или при
-// ранжировании решений.
+// depolMode — способ учёта измеренного δ_l (--depol-ratio-mode): в
+// функционале (строка системы) или при ранжировании решений.
+type depolMode string
+
 const (
-	depolModeFunc = 0
-	depolModeRank = 1
+	depolModeFunc depolMode = "func"
+	depolModeRank depolMode = "rank"
 )
 
-// depolModeName — имя режима учёта δ_l для отчёта.
-func depolModeName(mode int) string {
-	if mode == depolModeRank {
-		return "rank"
-	}
-	return "func"
-}
+// depolModes — значения --depol-ratio-mode в порядке справки.
+var depolModes = []depolMode{depolModeFunc, depolModeRank}
 
 // depolSet — таблицы ядер S11(r), S22(r) для всех m сетки и обеих длин волн.
 // kt[m][iw] == nil означает, что у таблицы для этого m нет валидных столбцов
