@@ -1,0 +1,116 @@
+name: Release
+
+# Публикация релиза для уже существующего тега.
+#
+# Нужен для тегов, созданных до появления CI, и для повторного выпуска:
+# workflow из ci.yml срабатывает только на push тега и только если файл
+# ci.yml есть в коммите этого тега.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Существующий тег (например, v1.6.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  # v1.7.0 -> stable, v1.7.0-rc1 -> dev (pre-release).
+  SUFFIX: ${{ contains(inputs.tag, '-') && 'dev' || 'stable' }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-amd64
+            goos: windows
+            goarch: amd64
+            ext: .exe
+            archive: zip
+          - target: macos-arm64
+            goos: darwin
+            goarch: arm64
+            ext: ""
+            archive: tar.gz
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: go test
+        run: go test -count=1 ./...
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
+            -o "dist/csolve-${SUFFIX}${{ matrix.ext }}" ./cmd/csolve
+          file "dist/csolve-${SUFFIX}${{ matrix.ext }}"
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          bin="csolve-${SUFFIX}${{ matrix.ext }}"
+          out="csolve-${SUFFIX}-${{ matrix.target }}"
+          case "${{ matrix.archive }}" in
+            zip)
+              (cd dist && zip -q -9 "${out}.zip" "${bin}")
+              ;;
+            tar.gz)
+              tar -czf "dist/${out}.tar.gz" -C dist "${bin}"
+              ;;
+          esac
+          rm -f "dist/${bin}"
+          (cd dist && sha256sum "${out}.${{ matrix.archive }}" > "${out}.sha256")
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: csolve-${{ env.SUFFIX }}-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish ${{ inputs.tag }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: csolve-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          prerelease: ${{ contains(inputs.tag, '-') }}
