@@ -1,0 +1,148 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+# Новый коммит отменяет ещё не завершённый прогон для той же ветки/PR.
+# Для тегов отмену не делаем, чтобы не прервать публикацию релиза.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+env:
+  # main и релизные теги (v1.7.0) -> stable; develop и pre-release теги
+  # (v1.7.0-rc1) -> dev.
+  SUFFIX: ${{ (github.ref_name == 'main' || (startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-'))) && 'stable' || 'dev' }}
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -count=1 ./...
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: test
+    # На pull_request только тестируем, бинарники не собираем.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-amd64
+            goos: windows
+            goarch: amd64
+            ext: .exe
+            archive: zip
+          - target: macos-arm64
+            goos: darwin
+            goarch: arm64
+            ext: ""
+            archive: tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      # Кросс-сборка не требует cgo, поэтому обе цели собираются на ubuntu.
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
+            -o "dist/csolve-${SUFFIX}${{ matrix.ext }}" ./cmd/csolve
+          file "dist/csolve-${SUFFIX}${{ matrix.ext }}"
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          bin="csolve-${SUFFIX}${{ matrix.ext }}"
+          out="csolve-${SUFFIX}-${{ matrix.target }}"
+          case "${{ matrix.archive }}" in
+            zip)
+              (cd dist && zip -q -9 "${out}.zip" "${bin}")
+              ;;
+            tar.gz)
+              tar -czf "dist/${out}.tar.gz" -C dist "${bin}"
+              ;;
+          esac
+          rm -f "dist/${bin}"
+          (cd dist && sha256sum "${out}.${{ matrix.archive }}" > "${out}.sha256")
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: csolve-${{ env.SUFFIX }}-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          # stable-сборки храним дольше, чем dev.
+          retention-days: ${{ (env.SUFFIX == 'stable' && 90) || 14 }}
+
+  release:
+    name: Release ${{ github.ref_name }}
+    needs:
+      - test
+      - build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          # Для релизных тегов это csolve-stable-*, для rc — csolve-dev-*.
+          pattern: csolve-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          # v1.7.0-rc1 -> prerelease, v1.7.0 -> обычный релиз.
+          prerelease: ${{ contains(github.ref_name, '-') }}
