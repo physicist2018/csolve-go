@@ -37,7 +37,8 @@ func profileFinalize(a *Args, ch []channel, kn *kernels, sols *solutions,
 	p.nr = nr
 	p.rGrid = geomspace(rMin, rMax, nr)
 
-	ens := ensembleAverage(sols, a.Best, geom, p.rGrid, true)
+	G := a.bestCount(sols.n)
+	ens := ensembleAverage(sols, G, geom, p.rGrid, true)
 	p.nBest = ens.mat
 	p.nAvgRaw = ens.avg
 	p.nAvg = append([]float64(nil), ens.avg...)
@@ -47,13 +48,6 @@ func profileFinalize(a *Args, ch []channel, kn *kernels, sols *solutions,
 		smoothDistribution(p.rGrid, p.nAvg, ens.count, a.SmoothLam)
 	}
 
-	G := a.Best
-	if G < 1 {
-		G = 1
-	}
-	if G > sols.n {
-		G = sols.n
-	}
 	p.nBestCount = G
 
 	bestIdx := make([]int, G)
