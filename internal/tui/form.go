@@ -12,6 +12,16 @@ import (
 	"csolve/internal/solve"
 )
 
+// page — страница формы с заголовком и пояснением в едином стиле.
+func page(title, desc string, fields ...huh.Field) *huh.Group {
+	g := huh.NewGroup(fields...)
+	g.Title(title)
+	if desc != "" {
+		g.Description(desc)
+	}
+	return g
+}
+
 // runPresetForm — запрос пресета и того, нужна ли полная форма. Возвращает
 // true, если решатель можно запускать сразу.
 func runPresetForm(s *state) (bool, error) {
@@ -24,18 +34,25 @@ func runPresetForm(s *state) (bool, error) {
 	key := presets[0].key
 	review := false
 	form := huh.NewForm(
-		huh.NewGroup(
+		page("csolve — particle size retrieval",
+			"Start from a ready-made parameter set or from the solver defaults.",
 			huh.NewSelect[string]().
 				Title("Preset").
-				Description("Ready-made parameter sets. Choose “Custom” to start from the defaults.").
+				DescriptionFunc(func() string { return presetByKey(key).desc }, &key).
 				Options(options...).
 				Value(&key),
 			huh.NewConfirm().
 				Title("Review all parameters?").
+				DescriptionFunc(func() string {
+					if presetByKey(key).quick {
+						return "“Run now” starts the retrieval immediately; “Review” opens the full form."
+					}
+					return "This preset always opens the full form: it needs an input file or a non-default setup."
+				}, &key).
 				Affirmative("Review").
 				Negative("Run now").
 				Value(&review),
-		).Title("csolve — particle size retrieval"),
+		),
 	).WithTheme(huh.ThemeCharm())
 
 	if err := form.Run(); err != nil {
@@ -61,13 +78,14 @@ func runFullForm(s *state) error {
 		inputGroup(s),
 		jsonFileGroup(s),
 		batchFileGroup(s),
+		demoGroup(s),
 		tablesGroup(s),
-		windowsGroup(s),
+		gridGroup(s),
 		regularizationGroup(s),
-		processingGroup(s),
+		constraintsGroup(s),
+		numericsGroup(s),
 		depolarizationGroup(s),
 		lidarGroup(s),
-		demoGroup(s),
 		outputGroup(s),
 		submitGroup(s, &run),
 	).WithTheme(huh.ThemeCharm())
@@ -81,26 +99,34 @@ func runFullForm(s *state) error {
 	return nil
 }
 
+// inputGroup — режим входа и подсказка о том, что он потребует.
 func inputGroup(s *state) *huh.Group {
-	return huh.NewGroup(
+	return page("Input data",
+		"Where the measured coefficients come from; every other page is shared by all modes.",
 		huh.NewSelect[string]().
-			Title("Input data").
+			Title("Data source").
+			DescriptionFunc(func() string {
+				switch s.mode {
+				case modeData:
+					return "Measured β/α (and optionally δ_l) come from the JSON file on the next page."
+				case modeBatch:
+					return "A TXT profile with one row per altitude; the lidar-ratio options apply."
+				default:
+					return "Synthetic coefficients computed from the parameters on the “Demo data” page."
+				}
+			}, &s.mode).
 			Options(
 				huh.NewOption("Demo — synthetic coefficients", modeDemo),
 				huh.NewOption("Single retrieval — JSON file", modeData),
 				huh.NewOption("Batch profile — TXT file", modeBatch),
 			).
 			Value(&s.mode),
-		huh.NewInput().
-			Title("Output directory").
-			Description("Relative --out/--json paths and batch results are placed here. Empty = current directory.").
-			Placeholder(".").
-			Value(&s.outDir),
-	).Title("Input")
+	)
 }
 
 func jsonFileGroup(s *state) *huh.Group {
-	return huh.NewGroup(
+	return page("Input data — JSON file",
+		"Measured coefficients for a single retrieval.",
 		huh.NewFilePicker().
 			Title("Measurements JSON").
 			Description("File with measured β/α coefficients (and optionally δ_l).").
@@ -116,11 +142,12 @@ func jsonFileGroup(s *state) *huh.Group {
 				}
 				return nil
 			}),
-	).Title("Input file").WithHideFunc(func() bool { return s.mode != modeData })
+	).WithHideFunc(func() bool { return s.mode != modeData })
 }
 
 func batchFileGroup(s *state) *huh.Group {
-	return huh.NewGroup(
+	return page("Input data — batch profile",
+		"Coefficients by altitude for a vertical profile.",
 		huh.NewFilePicker().
 			Title("Batch profile TXT").
 			Description("Header row: Altitude b<nm>... a<nm>... and optional dep<nm> columns.").
@@ -136,7 +163,34 @@ func batchFileGroup(s *state) *huh.Group {
 				}
 				return nil
 			}),
-	).Title("Input file").WithHideFunc(func() bool { return s.mode != modeBatch })
+	).WithHideFunc(func() bool { return s.mode != modeBatch })
+}
+
+// demoGroup — параметры генерации синтетических коэффициентов.
+func demoGroup(s *state) *huh.Group {
+	return page("Demo data",
+		"Synthetic measurements used when no input file is given.",
+		huh.NewInput().
+			Title("True Re(m)").
+			Description("Real part of the refractive index used to generate the data (--m-real).").
+			Value(&s.mReal).
+			Validate(vFloatPositive()),
+		huh.NewInput().
+			Title("True Im(m)").
+			Description("Imaginary part, ≤ 0 (--m-imag).").
+			Value(&s.mImag).
+			Validate(vFloatNonPositive()),
+		huh.NewInput().
+			Title("Relative noise level").
+			Description("Gaussian noise of the synthetic coefficients, ≥ 0 (--noise).").
+			Value(&s.noise).
+			Validate(vFloatNonNeg()),
+		huh.NewInput().
+			Title("Random seed").
+			Description("RNG seed, makes a demo run reproducible (--seed).").
+			Value(&s.seed).
+			Validate(vInt()),
+	).WithHideFunc(func() bool { return s.mode != modeDemo })
 }
 
 func tablesGroup(s *state) *huh.Group {
@@ -145,9 +199,10 @@ func tablesGroup(s *state) *huh.Group {
 		builtin = append(builtin, huh.NewOption(name, name))
 	}
 
-	return huh.NewGroup(
+	return page("Cross-section tables",
+		"Source of the kernel tables and the column conventions used when they are read.",
 		huh.NewSelect[string]().
-			Title("Cross-section source").
+			Title("Source").
 			Options(
 				huh.NewOption("Built-in tables", tablesBuiltin),
 				huh.NewOption("External directory (--tables)", tablesExternal),
@@ -155,12 +210,22 @@ func tablesGroup(s *state) *huh.Group {
 			Value(&s.tablesKind),
 		huh.NewSelect[string]().
 			Title("Built-in table set").
-			Description("Used when the source is “Built-in tables”.").
+			DescriptionFunc(func() string {
+				if s.tablesKind == tablesExternal {
+					return "Ignored while the source is “External directory”. Set with --type."
+				}
+				return "Cross-section data compiled into the binary (--type)."
+			}, &s.tablesKind).
 			Options(builtin...).
 			Value(&s.builtinType),
 		huh.NewInput().
 			Title("External tables directory").
-			Description("Directory containing mre_<real>_mim_<imag>/data.txt subdirectories.").
+			DescriptionFunc(func() string {
+				if s.tablesKind != tablesExternal {
+					return "Ignored while the source is “Built-in tables”. Can be set with --tables."
+				}
+				return "Directory containing mre_<real>_mim_<imag>/data.txt subdirectories (--tables)."
+			}, &s.tablesKind).
 			Placeholder("./bases/large_aggl_100/shape02").
 			Value(&s.tablesDir).
 			Validate(func(v string) error {
@@ -174,156 +239,279 @@ func tablesGroup(s *state) *huh.Group {
 			}),
 		huh.NewConfirm().
 			Title("Allow cross-section extrapolation in x?").
-			Description("--table-extrapolate").
+			Description("--table-extrapolate.").
 			Affirmative("Yes").
 			Negative("No").
 			Value(&s.tableExtrapolate),
 		huh.NewInput().
 			Title("Reference wavelength of the tables, µm").
-			Description("Cross sections are rescaled as (λ/λ_ref)².").
+			Description("Cross sections are rescaled as (λ/λ_ref)² (--table-ref-lambda-um).").
 			Value(&s.tableRefWl).
 			Validate(vFloatPositive()),
 		huh.NewSelect[string]().
 			Title("Cback column convention").
+			Description("How the backscattering column is scaled (--table-cback).").
 			Options(
 				huh.NewOption("dsigma", "dsigma"),
 				huh.NewOption("4pi", "4pi"),
 			).
 			Value(&s.tableCback),
-	).Title("Cross-section tables")
+	)
 }
 
-func windowsGroup(s *state) *huh.Group {
-	return huh.NewGroup(
+// gridGroup — базис сплайна и окна перебора размеров.
+func gridGroup(s *state) *huh.Group {
+	return page("Basis and size grid",
+		"Shape of the retrieved distribution: spline basis plus the r0/r1 windows the solver scans.",
 		huh.NewSelect[int]().
 			Title("B-spline degree").
+			Description("Order of the piecewise polynomials (--degree).").
 			Options(
-				huh.NewOption("1", 1),
-				huh.NewOption("2", 2),
-				huh.NewOption("3", 3),
-				huh.NewOption("4", 4),
+				huh.NewOption("1 — piecewise constant", 1),
+				huh.NewOption("2 — linear", 2),
+				huh.NewOption("3 — quadratic", 3),
+				huh.NewOption("4 — cubic", 4),
 			).
 			Value(&s.degree),
 		huh.NewInput().
 			Title("Basis functions per window").
-			Description("0 = as many as there are channels.").
+			Description("0 = as many as there are channels (--n-basis).").
 			Value(&s.nBasis).
 			Validate(vIntMin(0)),
-		huh.NewInput().Title("r0 min, µm").Description("Lower bound of the r0 grid (> 0).").Value(&s.r0Min).Validate(vFloatPositive()),
-		huh.NewInput().Title("r0 max, µm").Description("Upper bound of the r0 grid.").Value(&s.r0Max).Validate(vFloatPositive()),
-		huh.NewInput().Title("r0 values").Description("Geometric grid size.").Value(&s.nr0).Validate(vIntMin(1)),
-		huh.NewInput().Title("r1 min, µm").Description("Lower bound of the r1 grid.").Value(&s.r1Min).Validate(vFloatPositive()),
-		huh.NewInput().Title("r1 max, µm").Description("Upper bound; limited by table coverage.").Value(&s.r1Max).Validate(vFloatPositive()),
-		huh.NewInput().Title("r1 values").Description("Geometric grid size.").Value(&s.nr1).Validate(vIntMin(1)),
-		huh.NewInput().Title("Min ratio r1/r0").Description("Windows with r1 < ratio·r0 are dropped.").Value(&s.minRatio).Validate(vFloatNonNeg()),
 		huh.NewInput().
-			Title("Best solutions to average").
-			Description("Integer count, or a fraction in (0,1) of all solutions.").
+			Title("r0 min, µm").
+			Description("Lower bound of the r0 grid, > 0 (--r0-min).").
+			Value(&s.r0Min).
+			Validate(vFloatPositive()),
+		huh.NewInput().
+			Title("r0 max, µm").
+			Description("Upper bound of the r0 grid (--r0-max).").
+			Value(&s.r0Max).
+			Validate(vFloatPositive()),
+		huh.NewInput().
+			Title("r0 grid points").
+			Description("Size of the geometric r0 grid (--nr0).").
+			Value(&s.nr0).
+			Validate(vIntMin(1)),
+		huh.NewInput().
+			Title("r1 min, µm").
+			Description("Lower bound of the r1 grid (--r1-min).").
+			Value(&s.r1Min).
+			Validate(vFloatPositive()),
+		huh.NewInput().
+			Title("r1 max, µm").
+			Description("Upper bound; limited by the table coverage (--r1-max).").
+			Value(&s.r1Max).
+			Validate(vFloatPositive()),
+		huh.NewInput().
+			Title("r1 grid points").
+			Description("Size of the geometric r1 grid (--nr1).").
+			Value(&s.nr1).
+			Validate(vIntMin(1)),
+		huh.NewInput().
+			Title("Minimum r1/r0 ratio").
+			Description("Windows with r1 < ratio·r0 are dropped (--min-ratio).").
+			Value(&s.minRatio).
+			Validate(vFloatNonNeg()),
+		huh.NewInput().
+			Title("Solutions to average").
+			Description("Integer count, or a fraction in (0,1) of all solutions (--best).").
 			Value(&s.best).
 			Validate(vFloatPositive()),
-	).Title("Basis and windows")
+	)
 }
 
 func regularizationGroup(s *state) *huh.Group {
-	return huh.NewGroup(
+	return page("Regularization",
+		"How the Tikhonov weight γ is selected; this drives how smooth the solution is.",
 		huh.NewSelect[string]().
 			Title("Gamma selection rule").
+			Description("--gamma-select.").
 			Options(
 				huh.NewOption("fixed — γ = rel·‖A‖₂", "fixed"),
 				huh.NewOption("cv — leave-one-out cross-validation", "cv"),
 				huh.NewOption("err — minimum relative residual", "err"),
 			).
 			Value(&s.gammaSelect),
-		huh.NewInput().Title("Gamma relative weight").Description("Used by the fixed rule (≥ 0).").Value(&s.gammaRel).Validate(vFloatNonNeg()),
-		huh.NewInput().Title("Minimum lg γ").Description("Used by cv/err.").Value(&s.gammaMin).Validate(vFloat()),
-		huh.NewInput().Title("Maximum lg γ").Description("Used by cv/err.").Value(&s.gammaMax).Validate(vFloat()),
-		huh.NewInput().Title("Number of gamma values").Description("Log grid size.").Value(&s.nGamma).Validate(vIntMin(1)),
-	).Title("Regularization")
+		huh.NewInput().
+			Title("Gamma relative weight").
+			Description("Used by the fixed rule, ≥ 0 (--gamma-rel).").
+			Value(&s.gammaRel).
+			Validate(vFloatNonNeg()),
+		huh.NewInput().
+			Title("Minimum lg γ").
+			Description("Lower end of the γ grid, used by cv/err (--gamma-min).").
+			Value(&s.gammaMin).
+			Validate(vFloat()),
+		huh.NewInput().
+			Title("Maximum lg γ").
+			Description("Upper end of the γ grid, used by cv/err (--gamma-max).").
+			Value(&s.gammaMax).
+			Validate(vFloat()),
+		huh.NewInput().
+			Title("Number of γ values").
+			Description("Log grid size, ≥ 1 (--ngamma).").
+			Value(&s.nGamma).
+			Validate(vIntMin(1)),
+	)
 }
 
-func processingGroup(s *state) *huh.Group {
-	return huh.NewGroup(
-		huh.NewConfirm().Title("Constrain C ≥ 0?").Description("NNLS, Lawson–Hanson.").Affirmative("Yes").Negative("No").Value(&s.nonneg),
-		huh.NewConfirm().Title("Drop boundary conditions n(r0)=n(r1)=0?").Description("--no-zero-boundary").Affirmative("Yes").Negative("No").Value(&s.noZeroBound),
-		huh.NewConfirm().Title("Disable smoothing of the mean?").Description("--no-smooth").Affirmative("Yes").Negative("No").Value(&s.noSmooth),
-		huh.NewInput().Title("Smoothing parameter").Description("Spline smoothing weight (≥ 0).").Value(&s.smoothLam).Validate(vFloatNonNeg()),
-		huh.NewInput().Title("Fine/coarse boundary, µm").Description("--r-split").Value(&s.rSplit).Validate(vFloatPositive()),
+// constraintsGroup — ограничения на решение и усреднение по окнам.
+func constraintsGroup(s *state) *huh.Group {
+	return page("Constraints and averaging",
+		"Physical constraints on the solution and how the window solutions are combined.",
+		huh.NewConfirm().
+			Title("Constrain C ≥ 0?").
+			Description("Non-negative least squares, Lawson–Hanson (--nonneg).").
+			Affirmative("Yes").
+			Negative("No").
+			Value(&s.nonneg),
+		huh.NewConfirm().
+			Title("Drop the boundary conditions n(r0) = n(r1) = 0?").
+			Description("--no-zero-boundary.").
+			Affirmative("Yes").
+			Negative("No").
+			Value(&s.noZeroBound),
+		huh.NewConfirm().
+			Title("Disable smoothing of the mean?").
+			Description("--no-smooth.").
+			Affirmative("Yes").
+			Negative("No").
+			Value(&s.noSmooth),
+		huh.NewInput().
+			Title("Smoothing parameter").
+			Description("Spline smoothing weight, ≥ 0 (--smooth-lam).").
+			Value(&s.smoothLam).
+			Validate(vFloatNonNeg()),
+		huh.NewInput().
+			Title("Fine/coarse boundary, µm").
+			Description("Splits the size range into fine and coarse parts (--r-split).").
+			Value(&s.rSplit).
+			Validate(vFloatPositive()),
 		huh.NewSelect[string]().
 			Title("Mode parameter estimation").
+			Description("How the modal parameters are derived (--modes).").
 			Options(
 				huh.NewOption("auto", "auto"),
 				huh.NewOption("fit", "fit"),
 				huh.NewOption("stat", "stat"),
 			).
 			Value(&s.modes),
-		huh.NewConfirm().Title("Least squares on absolute residuals?").Description("--absolute; default is relative residuals.").Affirmative("Yes").Negative("No").Value(&s.absolute),
-		huh.NewInput().Title("Max step in x for kernel tables").Description("--dx-max (> 0).").Value(&s.dxMax).Validate(vFloatPositive()),
-		huh.NewInput().Title("Output grid points").Description("--nr-out (≥ 2).").Value(&s.nrOut).Validate(vIntMin(2)),
-		huh.NewInput().Title("Gauss–Legendre order").Description("--quad-order (≥ 1).").Value(&s.quadOrder).Validate(vIntMin(1)),
-		huh.NewInput().Title("Max subsegment width in ln r").Description("--log-span (> 0).").Value(&s.logSpan).Validate(vFloatPositive()),
-	).Title("Processing and numerics")
+		huh.NewConfirm().
+			Title("Least squares on absolute residuals?").
+			Description("Relative residuals otherwise (--absolute).").
+			Affirmative("Yes").
+			Negative("No").
+			Value(&s.absolute),
+	)
+}
+
+// numericsGroup — дискретизация ядер и квадратура.
+func numericsGroup(s *state) *huh.Group {
+	return page("Numerics",
+		"Discretization of the kernels and the quadrature; the defaults suit most runs.",
+		huh.NewInput().
+			Title("Max step in x for kernel tables").
+			Description("> 0 (--dx-max).").
+			Value(&s.dxMax).
+			Validate(vFloatPositive()),
+		huh.NewInput().
+			Title("Output grid points").
+			Description("≥ 2 (--nr-out).").
+			Value(&s.nrOut).
+			Validate(vIntMin(2)),
+		huh.NewInput().
+			Title("Gauss–Legendre order").
+			Description("≥ 1 (--quad-order).").
+			Value(&s.quadOrder).
+			Validate(vIntMin(1)),
+		huh.NewInput().
+			Title("Max subsegment width in ln r").
+			Description("> 0 (--log-span).").
+			Value(&s.logSpan).
+			Validate(vFloatPositive()),
+	)
 }
 
 func depolarizationGroup(s *state) *huh.Group {
-	return huh.NewGroup(
+	return page("Depolarization",
+		"Measured linear depolarization δ_l used as an extra constraint on the retrieval.",
 		huh.NewConfirm().
 			Title("Use measured depolarization δ_l?").
-			Description("Requires a “depolarization” group in JSON or dep<nm> columns in batch TXT.").
+			Description("Requires a “depolarization” group in JSON or dep<nm> columns in TXT (--depol-ratio-cons).").
 			Affirmative("Yes").
 			Negative("No").
 			Value(&s.depolCons),
 		huh.NewInput().
 			Title("Weight of the δ_l residual").
-			Description("--depol-ratio-w (≥ 0).").
+			DescriptionFunc(func() string {
+				if !s.depolCons {
+					return "Ignored while the δ_l constraint is off (--depol-ratio-w)."
+				}
+				return "≥ 0 (--depol-ratio-w)."
+			}, &s.depolCons).
 			Value(&s.depolW).
 			Validate(vFloatNonNeg()),
 		huh.NewSelect[string]().
 			Title("How δ_l is applied").
+			DescriptionFunc(func() string {
+				if !s.depolCons {
+					return "Ignored while the δ_l constraint is off (--depol-ratio-mode)."
+				}
+				return "--depol-ratio-mode."
+			}, &s.depolCons).
 			Options(
 				huh.NewOption("func — residual row in the functional", "func"),
 				huh.NewOption("rank — penalty when ranking solutions", "rank"),
 			).
 			Value(&s.depolMode),
-	).Title("Depolarization")
+	)
 }
 
 func lidarGroup(s *state) *huh.Group {
-	return huh.NewGroup(
+	return page("Lidar ratio",
+		"Smoothness of S = α/β along altitude; batch mode only.",
 		huh.NewConfirm().
 			Title("Smooth the lidar ratio S = α/β along altitude?").
-			Description("--lidar-ratio-cons; batch mode only.").
+			Description("--lidar-ratio-cons.").
 			Affirmative("Yes").
 			Negative("No").
 			Value(&s.lidarCons),
-		huh.NewInput().Title("Weight of the S deviation penalty").Description("--lidar-ratio-w (≥ 0).").Value(&s.lidarW).Validate(vFloatNonNeg()),
-		huh.NewInput().Title("Iterations to refine reference S").Description("--lidar-ratio-iter (≥ 1).").Value(&s.lidarIter).Validate(vIntMin(1)),
-	).Title("Lidar ratio").WithHideFunc(func() bool { return s.mode != modeBatch })
-}
-
-func demoGroup(s *state) *huh.Group {
-	return huh.NewGroup(
-		huh.NewInput().Title("True Re(m) for the demo").Value(&s.mReal).Validate(vFloatPositive()),
-		huh.NewInput().Title("True Im(m) for the demo").Value(&s.mImag).Validate(vFloatNonPositive()),
-		huh.NewInput().Title("Relative noise level").Description("Gaussian noise of the synthetic coefficients (≥ 0).").Value(&s.noise).Validate(vFloatNonNeg()),
-		huh.NewInput().Title("Random seed").Value(&s.seed).Validate(vInt()),
-	).Title("Demo data").WithHideFunc(func() bool { return s.mode != modeDemo })
+		huh.NewInput().
+			Title("Weight of the S deviation penalty").
+			Description("≥ 0 (--lidar-ratio-w).").
+			Value(&s.lidarW).
+			Validate(vFloatNonNeg()),
+		huh.NewInput().
+			Title("Iterations to refine reference S").
+			Description("≥ 1 (--lidar-ratio-iter).").
+			Value(&s.lidarIter).
+			Validate(vIntMin(1)),
+	).WithHideFunc(func() bool { return s.mode != modeBatch })
 }
 
 func outputGroup(s *state) *huh.Group {
-	return huh.NewGroup(
+	return page("Output",
+		"Where the results go and how the plots are rendered.",
+		huh.NewInput().
+			Title("Output directory").
+			Description("Relative --out/--json paths and batch results are placed here; empty = current directory (--out-dir).").
+			Placeholder(".").
+			Value(&s.outDir),
 		huh.NewInput().
 			Title("Plot file").
-			Description("Empty = result.<format>. The internal renderer writes PDF only.").
+			Description("Empty = result.<format>; the internal renderer writes PDF only (--out).").
 			Placeholder("result.pdf").
 			Value(&s.out).
 			Validate(s.validateOut),
 		huh.NewInput().
 			Title("JSON result file").
-			Description("Empty = do not write JSON.").
+			Description("Empty = do not write JSON (--json).").
 			Placeholder("result.json").
 			Value(&s.jsonOut),
 		huh.NewSelect[string]().
 			Title("Plotting backend").
+			Description("--plotting.").
 			Options(
 				huh.NewOption("internal — built-in PDF renderer", "internal"),
 				huh.NewOption("gnuplot — external gnuplot", "gnuplot"),
@@ -331,21 +519,45 @@ func outputGroup(s *state) *huh.Group {
 			Value(&s.plotting),
 		huh.NewSelect[string]().
 			Title("Plot format").
-			Description("Used by the gnuplot backend; internal always writes PDF.").
+			DescriptionFunc(func() string {
+				if s.plotting == "internal" {
+					return "Ignored: the internal renderer always writes PDF (--plot-format)."
+				}
+				return "Format written by gnuplot (--plot-format)."
+			}, &s.plotting).
 			Options(
 				huh.NewOption("png", "png"),
 				huh.NewOption("pdf", "pdf"),
 				huh.NewOption("svg", "svg"),
 			).
 			Value(&s.plotFormat),
-		huh.NewInput().Title("Plot DPI").Description("png/svg resolution for gnuplot (> 0).").Value(&s.plotDpi).Validate(vFloatPositive()),
-		huh.NewInput().Title("Plot font size, pt").Description("0 = default, otherwise 4–72.").Value(&s.plotFontSize).Validate(vFontSize()),
-		huh.NewConfirm().Title("Skip plot generation?").Description("--no-plot").Affirmative("Yes").Negative("No").Value(&s.noPlot),
-	).Title("Output")
+		huh.NewInput().
+			Title("Plot DPI").
+			DescriptionFunc(func() string {
+				if s.plotting == "internal" {
+					return "Ignored by the internal renderer (--plot-dpi)."
+				}
+				return "png/svg resolution for gnuplot, > 0 (--plot-dpi)."
+			}, &s.plotting).
+			Value(&s.plotDpi).
+			Validate(vFloatPositive()),
+		huh.NewInput().
+			Title("Plot font size, pt").
+			Description("0 = default, otherwise 4–72 (--plot-font-size).").
+			Value(&s.plotFontSize).
+			Validate(vFontSize()),
+		huh.NewConfirm().
+			Title("Skip plot generation?").
+			Description("--no-plot.").
+			Affirmative("Yes").
+			Negative("No").
+			Value(&s.noPlot),
+	)
 }
 
 func submitGroup(s *state, run *bool) *huh.Group {
-	return huh.NewGroup(
+	return page("Summary",
+		"Check the equivalent command and the files that will be written, then confirm.",
 		huh.NewNote().
 			Title("Review").
 			DescriptionFunc(func() string {
@@ -371,7 +583,7 @@ func submitGroup(s *state, run *bool) *huh.Group {
 				_, _, err := buildArgv(s)
 				return err
 			}),
-	).Title("Summary")
+	)
 }
 
 // showError — показ ошибки проверки с выбором «назад» или «выход».
