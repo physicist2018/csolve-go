@@ -232,7 +232,8 @@ func TestDepol(t *testing.T) {
 	wq := []float64{1.0}
 	nq := []float64{1.0}
 	ds := &depolSet{wl: append([]float64(nil), depolWlsUm...),
-		kt: make([][2]*ktable, 1)}
+		kt: make([][]*ktable, 1)}
+	ds.kt[0] = make([]*ktable, len(ds.wl))
 	for iw, wl := range ds.wl {
 		kt, err := depolKtableBuild(tb, wl, tableRefWlUm, rq, testConsole())
 		if err != nil {
@@ -260,7 +261,8 @@ func TestDepol(t *testing.T) {
 
 	// таблица без S11/S22 — δ_l не определена
 	dsEmpty := &depolSet{wl: append([]float64(nil), depolWlsUm...),
-		kt: make([][2]*ktable, 1)}
+		kt: make([][]*ktable, 1)}
+	dsEmpty.kt[0] = make([]*ktable, len(dsEmpty.wl))
 	_, _, deltaEmpty := depolFromProfile(dsEmpty, []int{0}, rq, wq, nq)
 	for iw := range deltaEmpty {
 		if !math.IsNaN(deltaEmpty[iw]) {
@@ -296,7 +298,8 @@ func TestDepolProjection(t *testing.T) {
 		t.Fatalf("rGridFor: %v", err)
 	}
 	ds := &depolSet{wl: append([]float64(nil), depolWlsUm...),
-		kt: make([][2]*ktable, 1)}
+		kt: make([][]*ktable, 1)}
+	ds.kt[0] = make([]*ktable, len(ds.wl))
 	for iw, wl := range ds.wl {
 		kt, err := depolKtableBuild(tb, wl, tableRefWlUm, r, testConsole())
 		if err != nil {
@@ -418,7 +421,8 @@ func TestDepolFunctional(t *testing.T) {
 }
 
 // TestWriteProfileDepolColumns: в dist_<H>.txt добавляются колонки
-// depol_calc_532 (всегда) и depol_meas_532 (если есть dep532).
+// depol_calc_<wl> на всех длинах волн набора и depol_meas_<wl> для каждого
+// столбца dep<nm>.
 func TestWriteProfileDepolColumns(t *testing.T) {
 	dir := t.TempDir()
 	b := &batchInput{nch: 2, ndep: 1, nAlt: 1,
@@ -428,7 +432,7 @@ func TestWriteProfileDepolColumns(t *testing.T) {
 	prof := &profile{nr: 2, rGrid: []float64{0.1, 0.2},
 		nAvg: []float64{1, 2}, gFit: append([]float64(nil), g1...)}
 	if _, err := writeProfile(dir, 500, b, g1, prof,
-		distDepol{calc: 6.25, meas: 7.5, hasMeas: true}); err != nil {
+		[]float64{0.532}, []float64{6.25}, []float64{7.5}); err != nil {
 		t.Fatalf("writeProfile: %v", err)
 	}
 
@@ -461,7 +465,8 @@ func TestWriteProfileDepolColumns(t *testing.T) {
 	// без измерения — только колонка расчёта (nan при отсутствии S11/S22)
 	b2 := &batchInput{nch: 2, nAlt: 1,
 		ch: []batchChannel{{chBeta, 0.532, "b532"}, {chAlpha, 0.532, "a532"}}}
-	if _, err := writeProfile(dir, 700, b2, g1, prof, distDepol{calc: math.NaN()}); err != nil {
+	if _, err := writeProfile(dir, 700, b2, g1, prof,
+		[]float64{0.532}, []float64{math.NaN()}, nil); err != nil {
 		t.Fatalf("writeProfile: %v", err)
 	}
 	data, err = os.ReadFile(filepath.Join(dir, "dist_700.txt"))
@@ -482,6 +487,25 @@ func TestWriteProfileDepolColumns(t *testing.T) {
 		if len(f) != 3 || f[2] != "nan" {
 			t.Errorf("expected 3 columns with nan depol, got %q", ln)
 		}
+	}
+}
+
+// TestDepolWavelengths: объединение, дедупликация и сортировка длин волн δ_l,
+// а также откат на стандартный набор при пустом списке.
+func TestDepolWavelengths(t *testing.T) {
+	got := depolWavelengths([]float64{0.532, 0.355, 0.532, 1.064, 0, math.NaN()})
+	want := []float64{0.355, 0.532, 1.064}
+	if len(got) != len(want) {
+		t.Fatalf("depolWavelengths = %v, want %v", got, want)
+	}
+	for i := range want {
+		if math.Abs(got[i]-want[i]) > 1e-12 {
+			t.Errorf("depolWavelengths[%d] = %g, want %g", i, got[i], want[i])
+		}
+	}
+	def := depolWavelengths(nil)
+	if len(def) != len(depolWlsUm) {
+		t.Fatalf("default wavelengths = %v, want %v", def, depolWlsUm)
 	}
 }
 

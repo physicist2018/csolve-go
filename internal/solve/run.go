@@ -257,7 +257,7 @@ func run(a *Args) error {
 	c.phase("output", tPhase)
 
 	reportSummary(a, sols, g1, baseCh, prof.nAvg, prof.gFit, prof.rGrid,
-		prof.mRe, prof.mIm, c)
+		prof.mRe, prof.mIm, depWl, depVal, prof.deltaLwl, prof.deltaL, c)
 	reportMoments(prof.moments, c)
 	reportDepolarization(prof, c)
 

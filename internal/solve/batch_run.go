@@ -144,8 +144,14 @@ func prepareBatch(a *Args, c *console) (*batchSetup, error) {
 	}
 	c.printf("  table: %d r points per m\n", st.kts[0].n)
 
-	// ядра S11/S22 для линейной деполяризации — тоже один раз на пакет
-	st.ds, err = depolSetBuild(src, mre, mim, a.TableRefWl, a.R0Min,
+	// ядра S11/S22 для линейной деполяризации — один раз на пакет;
+	// δ_l считается на всех длинах волн каналов и столбцов dep<nm>
+	depWls := make([]float64, 0, len(b.ch)+len(b.depWl))
+	for _, ch := range b.ch {
+		depWls = append(depWls, ch.wlUm)
+	}
+	depWls = append(depWls, b.depWl...)
+	st.ds, err = depolSetBuild(src, mre, mim, depWls, a.TableRefWl, a.R0Min,
 		st.r1MaxEff, a.DxMax, a.TableExtrapolate)
 	if err != nil {
 		return nil, err

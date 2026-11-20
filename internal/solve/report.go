@@ -1,5 +1,9 @@
 package solve
 
+import (
+	"strconv"
+)
+
 // reportEnsembleSize — общее число найденных решений и число усредняемых.
 // Печатается один раз на прогон (высоту / пакет).
 func reportEnsembleSize(a *Args, nTot int, c *console) {
@@ -11,9 +15,11 @@ func reportEnsembleSize(a *Args, nTot int, c *console) {
 	c.printf("\n")
 }
 
-// reportSummary — сводка по ансамблю решений и согласию по каналам.
+// reportSummary — сводка по ансамблю решений и согласию по каналам и по
+// деполяризации (измеренной δ_l против рассчитанной).
 func reportSummary(a *Args, sols *solutions, g1 []float64, ch []channel,
-	nAvg, gFit, rGrid []float64, mAvgRe, mAvgIm float64, c *console) {
+	nAvg, gFit, rGrid []float64, mAvgRe, mAvgIm float64,
+	depWl, depVal, calcWl, calcDelta []float64, c *console) {
 	nch := len(ch)
 	G := a.bestCount(sols.n)
 	c.printf("\n=== Solution ensemble (scan over m, r0, r1) ===\n")
@@ -67,8 +73,50 @@ func reportSummary(a *Args, sols *solutions, g1 []float64, ch []channel,
 			ch[j].name(), g1[j], gFit[j], rel)
 		errAvg += absf(gFit[j]-g1[j]) / g1[j]
 	}
-	errAvg /= float64(nch)
-	c.printf("  Err (mean solution) = %.5f\n", errAvg)
+	// деполяризация: измеренная δ_l (на всех длинах волн из блока
+	// depolarization) против рассчитанной по среднему решению
+	nVal := nch
+	for k, wl := range depWl {
+		meas := 0.0
+		hasMeas := false
+		if k < len(depVal) && isFinite(depVal[k]) {
+			meas, hasMeas = depVal[k], true
+		}
+		calc := 0.0
+		hasCalc := false
+		if i := depolWlIndex(calcWl, wl); i >= 0 && i < len(calcDelta) &&
+			isFinite(calcDelta[i]) {
+			calc, hasCalc = calcDelta[i], true
+		}
+		switch {
+		case !hasMeas:
+			// измерения нет (nan) — только расчётный коэффициент,
+			// в функционал не добавляется
+			if hasCalc {
+				c.printf("  %-14s δ_calc = %.4g %%   (measured n/a)\n",
+					depolName(wl), calc)
+			} else {
+				c.printf("  %-14s no data (measured n/a, no S11/S22)\n",
+					depolName(wl))
+			}
+		case !hasCalc:
+			c.printf("  %-14s δ_meas = %.4g %%   δ_calc = no data\n",
+				depolName(wl), meas)
+		case meas == 0:
+			// относительная невязка не определена — только абсолютная
+			c.printf("  %-14s δ_meas = %.4g %%   δ_calc = %.4g %%   "+
+				"|δ-δ_meas| = %.4g п.п.\n", depolName(wl), meas, calc,
+				absf(calc-meas))
+		default:
+			rel := absf(calc-meas) / absf(meas) * 100.0
+			c.printf("  %-14s δ_meas = %.4g %%   δ_calc = %.4g %%   "+
+				"|δ-δ_meas|/δ_meas = %.2f%%\n", depolName(wl), meas, calc, rel)
+			errAvg += absf(calc-meas) / absf(meas)
+			nVal++
+		}
+	}
+	errAvg /= float64(nVal)
+	c.printf("  Err (mean solution) = %.1f%%\n", errAvg*100.0)
 }
 
 // reportDepolarization — линейная деполяризация обратного рассеяния,
@@ -127,6 +175,11 @@ func reportModes(m modes, rSplit float64, method modesKind, c *console) {
 				v.Method)
 		}
 	}
+}
+
+// depolName — подпись строки деполяризации для заданной длины волны (µm).
+func depolName(wlUm float64) string {
+	return "δ_l(" + strconv.FormatFloat(wlUm*1e3, 'g', -1, 64) + " nm)"
 }
 
 func absf(v float64) float64 {

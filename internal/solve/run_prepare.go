@@ -209,10 +209,16 @@ func prepareRun(a *Args, c *console, in *runInput) (*runSetup, error) {
 	c.printf("  table: %d points in r per m\n", st.kts[0].n)
 	c.phase("kernels", tPhase)
 
-	// ядра S11/S22 для линейной деполяризации (независимо от каналов)
+	// ядра S11/S22 для линейной деполяризации (независимо от каналов);
+	// считаем δ_l на всех длинах волн входных данных
 	tPhase = nowSec()
-	st.ds, err = depolSetBuild(src, st.mre, st.mim, a.TableRefWl, a.R0Min,
-		st.r1MaxEff, a.DxMax, a.TableExtrapolate)
+	depWls := make([]float64, 0, len(in.channels)+len(in.depWl))
+	for _, ch := range in.channels {
+		depWls = append(depWls, ch.wlUm)
+	}
+	depWls = append(depWls, in.depWl...)
+	st.ds, err = depolSetBuild(src, st.mre, st.mim, depWls, a.TableRefWl,
+		a.R0Min, st.r1MaxEff, a.DxMax, a.TableExtrapolate)
 	if err != nil {
 		return nil, err
 	}

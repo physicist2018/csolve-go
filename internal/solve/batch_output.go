@@ -40,15 +40,11 @@ func closeFile(f *os.File) error {
 	return nil
 }
 
-// distDepol — скалярные δ_l на 532 нм для файла dist_<H>.txt.
-type distDepol struct {
-	calc    float64
-	meas    float64
-	hasMeas bool
-}
-
+// writeProfile — запись dist_<H>.txt и накопление строк в сводных файлах.
+// calcWl/calcVals — расчётные δ_l по длинам волн, measVals — измеренные
+// значения, выровненные с b.depWl.
 func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
-	p *profile, dd distDepol) (float64, error) {
+	p *profile, calcWl, calcVals, measVals []float64) (float64, error) {
 	path := filepath.Join(outDir, fmt.Sprintf("dist_%s.txt", formatG6(h)))
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# altitude H = %g m\n", h)
@@ -59,21 +55,28 @@ func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
 		}
 		fmt.Fprintf(&sb, "%s=%s", b.ch[j].name, formatG6(g1[j]))
 	}
-	sb.WriteString("\n# r, µm  dV/dln r, µm³/cm³  depol_calc_532")
-	if dd.hasMeas {
-		sb.WriteString("  depol_meas_532")
+	sb.WriteString("\n# r, µm  dV/dln r, µm³/cm³")
+	for _, wl := range calcWl {
+		fmt.Fprintf(&sb, "  depol_calc_%g", wl*1e3)
 	}
-	sb.WriteString("\n# depol — линейная деполяризация на 532 нм, % (nan если нет " +
+	for _, wl := range b.depWl {
+		fmt.Fprintf(&sb, "  depol_meas_%g", wl*1e3)
+	}
+	sb.WriteString("\n# depol — линейная деполяризация, % (nan если нет " +
 		"S11/S22 или измерения)\n")
 	for i := 0; i < p.nr; i++ {
 		nv := p.nAvg[i] / cm3PerM3
-		if isFinite(nv) {
-			fmt.Fprintf(&sb, "%s  %s  %s", formatG6(p.rGrid[i]), formatG6(nv), formatG6(dd.calc))
-			if dd.hasMeas {
-				fmt.Fprintf(&sb, "  %s", formatG6(dd.meas))
-			}
-			sb.WriteString("\n")
+		if !isFinite(nv) {
+			continue
 		}
+		fmt.Fprintf(&sb, "%s  %s", formatG6(p.rGrid[i]), formatG6(nv))
+		for _, v := range calcVals {
+			fmt.Fprintf(&sb, "  %s", formatG6(v))
+		}
+		for _, v := range measVals {
+			fmt.Fprintf(&sb, "  %s", formatG6(v))
+		}
+		sb.WriteString("\n")
 	}
 	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
 		return 0, fmt.Errorf("failed to open file for writing: %w", err)
@@ -147,15 +150,24 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 	if err != nil {
 		return err
 	}
-	dd := distDepol{calc: math.NaN(), meas: math.NaN()}
-	if i := depolWlIndex(prof.deltaLwl, 0.532); i >= 0 && i < len(prof.deltaL) {
-		dd.calc = prof.deltaL[i]
+	// расчётные δ_l на всех длинах волн набора (nan без S11/S22)
+	var calcWl []float64
+	if ds != nil {
+		calcWl = ds.wl
 	}
-	if k := depolWlIndex(b.depWl, 0.532); k >= 0 {
-		dd.meas = b.dep[hi*b.ndep+k]
-		dd.hasMeas = true
+	calcVals := make([]float64, len(calcWl))
+	for i, wl := range calcWl {
+		calcVals[i] = math.NaN()
+		if j := depolWlIndex(prof.deltaLwl, wl); j >= 0 && j < len(prof.deltaL) {
+			calcVals[i] = prof.deltaL[j]
+		}
 	}
-	errSum, err := writeProfile(outDir, h, b, g1, prof, dd)
+	// измеренные δ_l по всем столбцам dep<nm> для текущей высоты
+	var measVals []float64
+	if b.ndep > 0 {
+		measVals = b.dep[hi*b.ndep : (hi+1)*b.ndep]
+	}
+	errSum, err := writeProfile(outDir, h, b, g1, prof, calcWl, calcVals, measVals)
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package solve
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 )
 
@@ -27,19 +28,50 @@ var depolModes = []depolMode{depolModeFunc, depolModeRank}
 // S11/S22 (например, старые базы `base/average` или `miedir`).
 type depolSet struct {
 	wl  []float64
-	kt  [][2]*ktable
+	kt  [][]*ktable // [m][длина волны]
 	nOK int
 }
 
 func depolSetAvailable(ds *depolSet) bool { return ds != nil && ds.nOK > 0 }
 
+// depolWavelengths — отсортированный уникальный набор длин волн (µm) для
+// расчёта δ_l. Пустой результат заменяется на стандартный depolWlsUm.
+func depolWavelengths(wl []float64) []float64 {
+	out := make([]float64, 0, len(wl))
+	for _, w := range wl {
+		if !(w > 0) || !isFinite(w) {
+			continue
+		}
+		dup := false
+		for _, v := range out {
+			if math.Abs(v-w) <= 1e-6*w {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			out = append(out, w)
+		}
+	}
+	if len(out) == 0 {
+		return append([]float64(nil), depolWlsUm...)
+	}
+	sort.Float64s(out)
+	return out
+}
+
 // depolSetBuild — построение ядер деполяризации по всем m из таблиц. Сетка r
 // совпадает с сеткой основных ядер (dxMax, минимальная длина волны).
-func depolSetBuild(src *tableSource, mre, mim []float64, refWl, rMin, rMax,
+// wl — длины волн (µm), на которых считается δ_l; пустой список означает
+// стандартный набор depolWlsUm.
+func depolSetBuild(src *tableSource, mre, mim, wl []float64, refWl, rMin, rMax,
 	dxMax float64, extrapolate bool) (*depolSet, error) {
 	ds := &depolSet{
-		wl: append([]float64(nil), depolWlsUm...),
-		kt: make([][2]*ktable, len(mre)),
+		wl: depolWavelengths(wl),
+		kt: make([][]*ktable, len(mre)),
+	}
+	for i := range ds.kt {
+		ds.kt[i] = make([]*ktable, len(ds.wl))
 	}
 	if !(rMax > rMin) || len(mre) == 0 {
 		return ds, nil
@@ -65,7 +97,12 @@ func depolSetBuild(src *tableSource, mre, mim []float64, refWl, rMin, rMax,
 		for iw, wl := range ds.wl {
 			kt, err := depolKtableBuild(tab, wl, refWl, r, src.con)
 			if err != nil {
-				return nil, err
+				// δ_l — диагностическая величина: если ядро на данной
+				// длине волны не строится, пропускаем её (δ_l = no data),
+				// не срывая остальной расчёт
+				src.con.warnf("[warning] %s: δ_l kernel at %.6g nm is not "+
+					"built: %v; wavelength skipped\n", tab.path, wl*1e3, err)
+				continue
 			}
 			ds.kt[i][iw] = kt
 		}
