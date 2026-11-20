@@ -238,8 +238,10 @@ go build -trimpath -o csolve.exe .\cmd\csolve
 ```
 
 На Windows для отрисовки через `--plotting=gnuplot` (по умолчанию не
-требуется) установите gnuplot из каталога `needed`: запустите
-`needed\gp605-win64-mingw.exe` (есть также архив `gp605-win64-mingw.7z`) и
+требуется) установите gnuplot 6.0.5: инсталлятор
+[`gp605-win64-mingw.exe`](https://sourceforge.net/projects/gnuplot/files/gnuplot/6.0.5/gp605-win64-mingw.exe/download)
+или архив
+[`gp605-win64-mingw.7z`](https://sourceforge.net/projects/gnuplot/files/gnuplot/6.0.5/gp605-win64-mingw.7z/download);
 добавьте каталог `bin` установки в `PATH`.
 
 ## Быстрый старт

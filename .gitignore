@@ -17,3 +17,6 @@
 /ex
 /out_batch/
 /bases/*.zip
+
+# Локальные инсталляторы gnuplot (ссылки на скачивание — в README)
+/needed/
