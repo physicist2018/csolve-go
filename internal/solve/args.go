@@ -58,6 +58,7 @@ type Args struct {
 	OutDir       string
 	Out          string
 	JSON         string
+	Report       string
 	NoPlot       bool
 	Plotting     plotBackend
 	PlotFormat   plotFormat
@@ -224,6 +225,8 @@ Options:
                                  --batch-out-dir is given [current dir]
   --out <FILE>                   plot output file [result.<fmt>]
   --json <JSON>                  save results to JSON
+  --report <FILE>                save console report and plot to a document
+                                 (.docx or .odt; single mode only)
   --plotting {internal|gnuplot}
                                  plotting backend [internal]; internal
                                  renders PDF only, without gnuplot
@@ -361,6 +364,7 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.StringVar(&a.OutDir, "out-dir", "", "")
 	fs.StringVar(&a.Out, "out", "", "")
 	fs.StringVar(&a.JSON, "json", "", "")
+	fs.StringVar(&a.Report, "report", "", "")
 	plotFormatFlag := &enumFlag[plotFormat]{allowed: plotFormats,
 		value: a.PlotFormat}
 	fs.Var(plotFormatFlag, "plot-format", "")
@@ -448,6 +452,17 @@ func ParseArgs(argv []string) (*Args, error) {
 // checkArgs — согласование зависимых опций (встроенный backend ⇒ pdf,
 // нецелый --best округляется) и проверка диапазонов числовых опций.
 func checkArgs(a *Args, seen map[string]bool) error {
+	if a.Report != "" {
+		if a.Batch != "" {
+			return fmt.Errorf("option --report is only supported in single mode")
+		}
+		switch strings.ToLower(filepath.Ext(a.Report)) {
+		case ".docx", ".odt":
+		default:
+			return fmt.Errorf("option --report must have a .docx or .odt "+
+				"extension, got %q", a.Report)
+		}
+	}
 	if a.Plotting == plottingInternal {
 		if seen["plot-format"] && a.PlotFormat != plotFmtPdf && !a.NoPlot {
 			return fmt.Errorf("option --plot-format=%s is not "+

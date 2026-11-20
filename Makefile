@@ -13,11 +13,11 @@ WIN_BIN := csolve.exe
 all: build
 
 build:
-	$(GO) build -trimpath -o $(BIN) ./cmd/csolve
+	$(GO) build -trimpath -ldflags='-s -w' -o $(BIN) ./cmd/csolve
 
 # Кросс-сборка под Windows x86_64 (с macOS/Linux): make build-windows
 build-windows:
-	GOOS=windows GOARCH=amd64 $(GO) build -trimpath -o $(WIN_BIN) ./cmd/csolve
+	GOOS=windows GOARCH=amd64 $(GO) build -trimpath -ldflags='-s -w' -o $(WIN_BIN) ./cmd/csolve
 
 test:
 	$(GO) test ./...

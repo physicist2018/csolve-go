@@ -524,11 +524,11 @@ func internalRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []flo
 }
 
 // internalResults — основной график одиночного режима (2 панели).
-func internalResults(po *plotOpts, outPath string, rGrid []float64,
+func internalResultsDraw(po *plotOpts, rGrid []float64,
 	nTrue, nAvg, nAvgRaw []float64, nBest [][]float64, nBestCount int,
-	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64) bool {
+	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64) (func(draw.Canvas), bool) {
 	if len(rGrid) == 0 {
-		return false
+		return nil, false
 	}
 	scale := func(v []float64) []float64 {
 		out := make([]float64, len(v))
@@ -565,7 +565,7 @@ func internalResults(po *plotOpts, outPath string, rGrid []float64,
 	}
 	all = append(all, sols...)
 
-	return internalRender(po, outPath, 8.6667*vg.Inch, 3.4667*vg.Inch, func(c draw.Canvas) {
+	return func(c draw.Canvas) {
 		tiles := internalTiles(2)
 
 		p1 := internalNewPlot(po)
@@ -602,5 +602,5 @@ func internalResults(po *plotOpts, outPath string, rGrid []float64,
 			[]color.Color{internalColor(0), internalColor(1)},
 			internalPanelDataWidth(8.6667*vg.Inch, 2))
 		p2.Draw(tiles.At(c, 1, 0))
-	})
+	}, true
 }

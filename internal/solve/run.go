@@ -129,7 +129,8 @@ func Main(argv []string) int {
 }
 
 func run(a *Args) error {
-	c := newConsole(os.Stdout, os.Stderr, os.Getenv("CSOLVE_TIME") != "")
+	out, errOut, rep := reportWriters(a)
+	c := newConsole(out, errOut, os.Getenv("CSOLVE_TIME") != "")
 	tAll := nowSec()
 
 	slices.Sort(a.Degrees)
@@ -268,5 +269,10 @@ func run(a *Args) error {
 	}
 
 	c.phase("total", tAll)
+	if rep != nil {
+		if err := writeReportDoc(a, c, rep, prof, baseCh, g1, nTrueFn); err != nil {
+			return err
+		}
+	}
 	return nil
 }
