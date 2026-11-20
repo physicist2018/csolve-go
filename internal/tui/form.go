@@ -271,6 +271,16 @@ func gridGroup(s *state) *huh.Group {
 				huh.NewOption("spline — B-spline expansion", "spline"),
 			).
 			Value(&s.method),
+		huh.NewSelect[int]().
+			Title("Distribution solved for (kernel order)").
+			Description("The inverse problem is solved for this distribution to improve numerical stability, then converted back to dV/dln r (--kernel-order).").
+			Options(
+				huh.NewOption("1 — dN/dln r", 1),
+				huh.NewOption("2 — dS/dln r", 2),
+				huh.NewOption("3 — dV/dln r (default)", 3),
+				huh.NewOption("4 — d(r⁴N)/dln r", 4),
+			).
+			Value(&s.kernelOrder),
 		huh.NewInput().
 			Title("Size bins per window").
 			DescriptionFunc(func() string {

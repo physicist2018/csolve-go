@@ -84,9 +84,17 @@ func loadRunInput(a *Args, c *console) (*runInput, error) {
 		c.printf("smoothing of the mean over best solutions: enabled "+
 			"(rel-lam=%g)\n", a.SmoothLam)
 	}
+	c.printf("kernel order: %d (%s; result converted to dV/dln r)\n",
+		normalizeKernelOrder(a.KernelOrder), kernelOrderLabel(a.KernelOrder))
 	if a.Method == methodMonotone {
-		c.printf("method: monotone functions — V(r) = ∫ dV/dln r′ dln r′ is " +
-			"reconstructed from non-negative bin increments\n")
+		if normalizeKernelOrder(a.KernelOrder) == kernelOrderVolume {
+			c.printf("method: monotone functions — V(r) = ∫ dV/dln r′ dln r′ is " +
+				"reconstructed from non-negative bin increments\n")
+		} else {
+			c.printf("method: monotone functions — %s is reconstructed from "+
+				"non-negative bin increments, then converted to dV/dln r\n",
+				kernelOrderLabel(a.KernelOrder))
+		}
 		c.printf("size bins per window: %d (regularization order %d)\n",
 			binsFor(a.VBins, len(in.channels)), a.RegOrder)
 		if a.VBins == 0 {

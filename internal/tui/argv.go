@@ -99,6 +99,9 @@ func (b *argvBuilder) grid(s *state, d *solve.Args) {
 			b.add("--reg-order", strconv.Itoa(s.regOrder))
 		}
 	}
+	if s.kernelOrder != d.KernelOrder {
+		b.add("--kernel-order", strconv.Itoa(s.kernelOrder))
+	}
 	defDegree := 1
 	if len(d.Degrees) > 0 {
 		defDegree = d.Degrees[0]

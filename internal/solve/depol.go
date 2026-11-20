@@ -264,7 +264,7 @@ func depolProjBuild(ds *depolSet, d *design, iwDep []int) *depolProj {
 				a22 := p.a22[k][base : base+d.nu]
 				for q := 0; q < g.nNodes; q++ {
 					r := g.nodes[q]
-					wgt := g.weights[q] * g.dvol[q]
+					wgt := g.weights[q] * kernelWeight(d.kernelOrder, r)
 					if wgt == 0 {
 						continue
 					}

@@ -47,6 +47,14 @@ func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
 	p.rGrid = geomspace(rMin, rMax, nr)
 
 	ens := ensembleAverage(sols, a.bestCount(sols.n), geom, p.rGrid, true)
+	// Решение получено для выбранного порядка --kernel-order (y_k);
+	// пересчитываем усреднённое распределение и все лучшие решения обратно
+	// в dV/dln r до всякой обработки (сглаживание, моменты, графики).
+	ko := normalizeKernelOrder(a.KernelOrder)
+	applyKernelToVolume(ko, p.rGrid, ens.avg)
+	for t := range ens.mat {
+		applyKernelToVolume(ko, p.rGrid, ens.mat[t])
+	}
 	p.nBest = ens.mat
 	p.nAvgRaw = ens.avg
 	p.nAvg = append([]float64(nil), ens.avg...)

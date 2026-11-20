@@ -6,21 +6,43 @@ import (
 	"gonum.org/v1/gonum/mat"
 )
 
-// svdNorm2 — спектральная норма (||A||_2) через SVD gonum.
-func svdNorm2(a []float64, m, n int) float64 {
+// svdNormCond — спектральная норма ||A||_2 и число обусловленности
+// (s_max/s_min по ненулевым сингулярным числам) через SVD gonum.
+func svdNormCond(a []float64, m, n int) (norm, cond float64) {
 	if m <= 0 || n <= 0 {
-		return 0
+		return 0, math.Inf(1)
 	}
 	data := append([]float64(nil), a[:m*n]...)
 	var svd mat.SVD
 	if !svd.Factorize(mat.NewDense(m, n, data), mat.SVDNone) {
-		return 0
+		return 0, math.NaN()
 	}
 	vals := svd.Values(nil)
 	if len(vals) == 0 {
-		return 0
+		return 0, math.NaN()
 	}
-	return vals[0]
+	norm = vals[0]
+	if !(norm > 0) {
+		return norm, math.Inf(1)
+	}
+	// сингулярные числа упорядочены по убыванию; s_min — последнее выше
+	// порога численного ранга (как в lstsq)
+	rcond := machineEps * float64(max(m, n))
+	smin := 0.0
+	rank := 0
+	for _, v := range vals {
+		if v > rcond*norm && v > 0 {
+			smin = v
+			rank++
+		} else {
+			break
+		}
+	}
+	// дефицит ранга — обусловленность бесконечна
+	if rank < min(m, n) {
+		return norm, math.Inf(1)
+	}
+	return norm, norm / smin
 }
 
 // lstsq — МНК min ||a x - b|| с отсечкой как в numpy lstsq(rcond=None):

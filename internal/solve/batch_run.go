@@ -171,11 +171,13 @@ func prepareBatch(a *Args, c *console) (*batchSetup, error) {
 			quadOrder:    a.QuadOrder,
 			maxLogSpan:   a.LogSpan,
 			regOrder:     a.RegOrder,
+			kernelOrder:  a.KernelOrder,
 		})
 	if err != nil {
 		return nil, err
 	}
 	c.printf("  matrices A precomputed: %d windows × %d m\n", st.design.nW, nm)
+	reportCondition(st.design, c)
 	if a.Method == methodMonotone {
 		c.printf("  method: monotone functions, %d bins per window, "+
 			"regularization order %d\n", st.design.bins, st.design.regOrder)
@@ -184,6 +186,8 @@ func prepareBatch(a *Args, c *console) (*batchSetup, error) {
 				"--method monotone; ignored\n")
 		}
 	}
+	c.printf("  kernel order: %d (%s); result converted to dV/dln r\n",
+		st.design.kernelOrder, kernelOrderLabel(st.design.kernelOrder))
 	reportEnsembleSize(a, st.design.nW*st.design.nM, c)
 	return st, nil
 }

@@ -35,12 +35,13 @@ type solution struct {
 }
 
 type solutions struct {
-	sol      []solution
-	n        int
-	scale    float64
-	method   methodKind
-	bins     int
-	regOrder int
+	sol         []solution
+	n           int
+	scale       float64
+	method      methodKind
+	bins        int
+	regOrder    int
+	kernelOrder int
 }
 
 // nLrows — число строк штрафа за негладкость для порядка регуляризации order.
@@ -257,7 +258,8 @@ func sortSolutions(sol []solution) {
 func scanVariants(d *design, g1 []float64, nch int, gammaSel gammaSelect,
 	gammaRelFixed, gammaExpMin, gammaExpMax float64, nGamma int,
 	nonneg, relative bool, dc *depolCons, c *console) (*solutions, error) {
-	out := &solutions{method: d.method, bins: d.bins, regOrder: d.regOrder}
+	out := &solutions{method: d.method, bins: d.bins, regOrder: d.regOrder,
+		kernelOrder: d.kernelOrder}
 	if d.nW == 0 || d.nM == 0 {
 		out.scale = 1.0
 		return out, nil

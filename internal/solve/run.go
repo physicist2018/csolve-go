@@ -219,11 +219,13 @@ func run(a *Args) error {
 			quadOrder:    a.QuadOrder,
 			maxLogSpan:   a.LogSpan,
 			regOrder:     a.RegOrder,
+			kernelOrder:  a.KernelOrder,
 		})
 	if err != nil {
 		return err
 	}
 	c.phase("design", tPhase)
+	reportCondition(design, c)
 
 	// ограничение по измеренному δ_l: строка в функционале или ранжирование
 	var depProj *depolProj

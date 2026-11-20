@@ -240,7 +240,6 @@ type geom struct {
 	nodes                    []float64
 	weights                  []float64
 	values                   []float64 // nNodes × nUnknown (только basisSpline)
-	dvol                     []float64 // nNodes
 
 	// basisBins: бины по ln r и их обратные ширины
 	binEdges []float64 // N+1 границ (r)
@@ -310,10 +309,6 @@ func geomBuild(r0, r1 float64, degree, nBasis int, interiorOnly bool, order int,
 			values[q*nu+i] = full[off+i]
 		}
 	}
-	dvol := make([]float64, len(nodes))
-	for q, r := range nodes {
-		dvol[q] = 3.0 / (4.0 * math.Pi * r * r * r * r)
-	}
 
 	return &geom{
 		kind:         basisSpline,
@@ -329,6 +324,5 @@ func geomBuild(r0, r1 float64, degree, nBasis int, interiorOnly bool, order int,
 		nodes:        nodes,
 		weights:      weights,
 		values:       values,
-		dvol:         dvol,
 	}, nil
 }

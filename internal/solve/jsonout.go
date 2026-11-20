@@ -65,6 +65,16 @@ type outModel struct {
 	Name     string `json:"name"`
 	Bins     int    `json:"bins,omitempty"`
 	RegOrder int    `json:"reg_order,omitempty"`
+	// KernelOrder — порядок --kernel-order; распределение, относительно
+	// которого решалась обратная задача (1=dN/dln r, 2=dS/dln r,
+	// 3=dV/dln r, 4=d(r^4 N)/dln r).
+	KernelOrder int `json:"kernel_order"`
+	// KernelDistribution — обозначение этого распределения.
+	KernelDistribution string `json:"kernel_distribution"`
+	// KernelVolumeConversion — что означают коэффициенты решения при данном
+	// порядке и как пересчитать приращения по бинам (v_bins) в приращения
+	// объёма. n_avg и v_cum уже пересчитаны в dV/dln r.
+	KernelVolumeConversion string `json:"kernel_volume_conversion"`
 }
 
 type outMode struct {
@@ -195,12 +205,20 @@ func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw, vCum []float6
 		}
 	}
 
-	if sols.method == methodMonotone {
-		out.Model = outModel{Name: string(sols.method), Bins: sols.bins,
-			RegOrder: sols.regOrder}
-	} else {
-		out.Model = outModel{Name: string(methodSpline)}
+	ko := normalizeKernelOrder(sols.kernelOrder)
+	model := outModel{
+		KernelOrder:            ko,
+		KernelDistribution:     kernelOrderLabel(ko),
+		KernelVolumeConversion: kernelVolumeConversion(ko, sols.method),
 	}
+	if sols.method == methodMonotone {
+		model.Name = string(sols.method)
+		model.Bins = sols.bins
+		model.RegOrder = sols.regOrder
+	} else {
+		model.Name = string(methodSpline)
+	}
+	out.Model = model
 
 	if len(deltaWlUm) > 0 {
 		wlNm := make([]float64, len(deltaWlUm))

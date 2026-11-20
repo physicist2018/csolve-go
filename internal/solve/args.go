@@ -47,10 +47,11 @@ type Args struct {
 	Modes          modesKind
 	Absolute       bool
 
-	DxMax     float64
-	NrOut     int
-	QuadOrder int
-	LogSpan   float64
+	DxMax       float64
+	NrOut       int
+	QuadOrder   int
+	LogSpan     float64
+	KernelOrder int // 1=dN/dlnr, 2=dS/dlnr, 3=dV/dlnr, 4=d(r⁴N)/dlnr
 
 	HasMReal, HasMImag bool
 	MReal, MImag       float64
@@ -226,6 +227,13 @@ Options:
   --nr-out <N>                   points in output grid, >= 2 [25]
   --quad-order <N>               Gauss-Legendre order, >= 1 [24]
   --log-span <X>                 max subsegment width in ln r, > 0 [0.1]
+  --kernel-order {1|2|3|4}       distribution solved for (numerical stability):
+                                 1 = dN/dln r, 2 = dS/dln r, 3 = dV/dln r,
+                                 4 = d(r^4 N)/dln r; the result is always
+                                 converted back to dV/dln r [3]
+                                 (for monotone: v_bins hold increments of
+                                 the chosen distribution; see JSON
+                                 kernel_volume_conversion for the conversion)
 
   --m-real <X>                   true Re(m) for demo
   --m-imag <X>                   true Im(m) for demo
@@ -304,6 +312,7 @@ func ParseArgs(argv []string) (*Args, error) {
 		NrOut:          25,
 		QuadOrder:      24,
 		LogSpan:        0.1,
+		KernelOrder:    defaultKernelOrder,
 		Seed:           1,
 		Plotting:       plottingInternal,
 		PlotFormat:     plotFmtPdf,
@@ -373,6 +382,8 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.IntVar(&a.NrOut, "nr-out", a.NrOut, "")
 	fs.IntVar(&a.QuadOrder, "quad-order", a.QuadOrder, "")
 	fs.Float64Var(&a.LogSpan, "log-span", a.LogSpan, "")
+	kernelOrder := &singleIntFlag{minV: 1, maxV: 4, name: "kernel-order"}
+	fs.Var(kernelOrder, "kernel-order", "")
 
 	mReal := math.NaN()
 	mImag := math.NaN()
@@ -454,6 +465,9 @@ func ParseArgs(argv []string) (*Args, error) {
 	}
 	if regOrder.set {
 		a.RegOrder = regOrder.value
+	}
+	if kernelOrder.set {
+		a.KernelOrder = kernelOrder.value
 	}
 	a.Method = methodFlag.Value()
 	if seen["m-real"] {

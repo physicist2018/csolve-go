@@ -1,6 +1,9 @@
 package solve
 
-import "math"
+import (
+	"math"
+	"sort"
+)
 
 // design — матрицы A для всех (m, окно) за один проход:
 // A[j,i] = int K_j(r) q(r) B_i(r) dr, q(r) = 3/(4 pi r^4).
@@ -8,6 +11,7 @@ type design struct {
 	nM, nW, nch, nu int
 	A               []float64 // [nM][nW][nch][nu]
 	s0              []float64 // [nM][nW]
+	cond            []float64 // [nM][nW] число обусловленности A
 	degree          []int
 	r0, r1          []float64
 	mRe, mIm        []float64
@@ -15,15 +19,17 @@ type design struct {
 	method          methodKind
 	bins            int
 	regOrder        int
+	kernelOrder     int
 }
 
 func designBuild(ch []channel, nch int, kts []*ktable, mRe, mIm []float64,
 	r0Grid, r1Grid []float64, minRatio float64, spec designSpec) (*design, error) {
 	_ = ch
 	d := &design{
-		nch:      nch,
-		method:   spec.method,
-		regOrder: spec.regOrder,
+		nch:         nch,
+		method:      spec.method,
+		regOrder:    spec.regOrder,
+		kernelOrder: normalizeKernelOrder(spec.kernelOrder),
 	}
 	if d.method == methodMonotone {
 		d.bins = binsFor(spec.bins, nch)
@@ -92,6 +98,7 @@ func designBuild(ch []channel, nch int, kts []*ktable, mRe, mIm []float64,
 	total := d.nM * d.nW * nch * nu
 	d.A = make([]float64, total)
 	d.s0 = make([]float64, d.nM*d.nW)
+	d.cond = make([]float64, d.nM*d.nW)
 
 	for im := 0; im < d.nM; im++ {
 		for w := 0; w < d.nW; w++ {
@@ -117,12 +124,54 @@ func designBuild(ch []channel, nch int, kts []*ktable, mRe, mIm []float64,
 				row := Ab[j*nunk : (j+1)*nunk]
 				for q := 0; q < nn; q++ {
 					k := math.Exp(kts[im].sp[j].evalHint(logr[q], &hint))
-					wgt := k * g.dvol[q] * g.weights[q]
+					wgt := k * kernelWeight(d.kernelOrder, g.nodes[q]) * g.weights[q]
 					g.addNodeContribution(row, q, wgt)
 				}
 			}
-			d.s0[im*d.nW+w] = svdNorm2(Ab, nch, nunk)
+			d.s0[im*d.nW+w], d.cond[im*d.nW+w] = svdNormCond(Ab, nch, nunk)
 		}
 	}
 	return d, nil
+}
+
+// reportCondition — отдельная строка диагностики: число обусловленности A по
+// окнам. Для каждого окна берётся максимум по m (худшая обусловленность), затем
+// выводятся min/median/max по окнам и худшее окно.
+func reportCondition(d *design, c *console) {
+	if d == nil || d.nW <= 0 || d.nM <= 0 {
+		return
+	}
+	worst := make([]float64, d.nW)
+	for w := 0; w < d.nW; w++ {
+		v := math.Inf(-1)
+		for im := 0; im < d.nM; im++ {
+			cv := d.cond[im*d.nW+w]
+			if math.IsNaN(cv) {
+				cv = math.Inf(1)
+			}
+			if cv > v {
+				v = cv
+			}
+		}
+		worst[w] = v
+	}
+	vals := append([]float64(nil), worst...)
+	sort.Float64s(vals)
+	median := vals[len(vals)/2]
+	wi := 0
+	for w := 1; w < d.nW; w++ {
+		if worst[w] > worst[wi] {
+			wi = w
+		}
+	}
+	if d.method == methodMonotone {
+		c.printf("A condition number (max over m, by window): min %.3g, "+
+			"median %.3g, max %.3g; worst window r0 = %g µm, r1 = %g µm\n",
+			vals[0], median, vals[len(vals)-1], d.r0[wi], d.r1[wi])
+		return
+	}
+	c.printf("A condition number (max over m, by window): min %.3g, "+
+		"median %.3g, max %.3g; worst window r0 = %g µm, r1 = %g µm, "+
+		"degree %d\n", vals[0], median, vals[len(vals)-1], d.r0[wi],
+		d.r1[wi], d.degree[wi])
 }

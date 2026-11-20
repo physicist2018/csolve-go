@@ -30,6 +30,7 @@ type designSpec struct {
 	quadOrder    int
 	maxLogSpan   float64
 	regOrder     int
+	kernelOrder  int
 }
 
 // binsFor — число бинов монотонной сетки при заданном --v-bins (0 = auto).
@@ -91,10 +92,6 @@ func geomBuildBins(r0, r1 float64, bins, order int, maxLogSpan float64) (*geom, 
 		}
 	}
 	g.nNodes = len(g.nodes)
-	g.dvol = make([]float64, g.nNodes)
-	for q, r := range g.nodes {
-		g.dvol[q] = 3.0 / (4.0 * math.Pi * r * r * r * r)
-	}
 	return g, nil
 }
 
