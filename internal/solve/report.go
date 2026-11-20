@@ -18,21 +18,31 @@ func reportEnsembleSize(a *Args, nTot int, c *console) {
 // reportSummary — сводка по ансамблю решений и согласию по каналам и по
 // деполяризации (измеренной δ_l против рассчитанной).
 func reportSummary(a *Args, sols *solutions, g1 []float64, ch []channel,
-	nAvg, gFit, rGrid []float64, mAvgRe, mAvgIm float64,
+	nAvg, vCum, gFit, rGrid []float64, mAvgRe, mAvgIm float64,
 	depWl, depVal, calcWl, calcDelta []float64, c *console) {
 	nch := len(ch)
 	G := a.bestCount(sols.n)
 	c.printf("\n=== Solution ensemble (scan over m, r0, r1) ===\n")
-	c.printf("%4s %13s %7s %9s %9s %10s %9s\n",
-		"rank", "m", "degree", "r0, µm", "r1, µm", "gamma", "Err")
+	if sols.method == methodMonotone {
+		c.printf("%4s %13s %6s %9s %9s %10s %9s\n",
+			"rank", "m", "bins", "r0, µm", "r1, µm", "gamma", "Err")
+	} else {
+		c.printf("%4s %13s %7s %9s %9s %10s %9s\n",
+			"rank", "m", "degree", "r0, µm", "r1, µm", "gamma", "Err")
+	}
 	for t := 0; t < sols.n; t++ {
 		s := &sols.sol[t]
 		mark := ""
 		if t == 0 {
 			mark = " <--"
 		}
-		c.printf("%4d %6.3f%+7.3fj %7d %9.4g %9.4g %10.3g %9.5f%s\n",
-			t+1, s.mRe, s.mIm, s.degree, s.r0, s.r1, s.gamma, s.err, mark)
+		if sols.method == methodMonotone {
+			c.printf("%4d %6.3f%+7.3fj %6d %9.4g %9.4g %10.3g %9.5f%s\n",
+				t+1, s.mRe, s.mIm, s.bins, s.r0, s.r1, s.gamma, s.err, mark)
+		} else {
+			c.printf("%4d %6.3f%+7.3fj %7d %9.4g %9.4g %10.3g %9.5f%s\n",
+				t+1, s.mRe, s.mIm, s.degree, s.r0, s.r1, s.gamma, s.err, mark)
+		}
 		if t+1 >= G {
 			break
 		}
@@ -64,6 +74,8 @@ func reportSummary(a *Args, sols *solutions, g1 []float64, ch []channel,
 		c.printf("  r = %9.4g µm,  dV/dln r = %.4g µm³/cm³\n", r,
 			nAvg[i]/cm3PerM3)
 	}
+
+	reportCumulativeVolume(vCum, rGrid, sols.method == methodMonotone, c)
 
 	c.printf("\n=== Channel agreement (mean solution) ===\n")
 	errAvg := 0.0
@@ -137,6 +149,47 @@ func reportDepolarization(p *profile, c *console) {
 			c.printf("  δ_l(%g nm) = no data (no S11/S22 for the mean m)\n",
 				wl*1e3)
 		}
+	}
+}
+
+// reportCumulativeVolume — восстановленная монотонная функция V(r) в
+// ключевых точках и контроль её согласия с C_v.
+func reportCumulativeVolume(vCum, rGrid []float64, monotone bool, c *console) {
+	if len(vCum) == 0 {
+		return
+	}
+	c.printf("\n=== Cumulative volume V(r) = ∫ dV/dln r′ dln r′ ===\n")
+	if total := volumeTotal(vCum); isFinite(total) {
+		c.printf("  total over the covered range V(r_end) = %.4g µm³/cm³\n",
+			total/cm3PerM3)
+	}
+	minStep, viol := monotoneCheck(vCum)
+	switch {
+	case !monotone:
+	case viol == 0:
+		c.printf("  monotone: yes (V(r) does not decrease)\n")
+	default:
+		c.printf("  monotone: %d decreasing step(s), worst = %.3g of the total\n",
+			viol, minStep)
+	}
+	nr := len(vCum)
+	npts := nr
+	if npts > 7 {
+		npts = 7
+	}
+	for k := 0; k < npts; k++ {
+		i := 0
+		if npts > 1 {
+			i = int(float64(k)*float64(nr-1)/float64(npts-1) + 1e-9)
+		}
+		if i >= nr {
+			i = nr - 1
+		}
+		if !isFinite(vCum[i]) {
+			continue
+		}
+		c.printf("  r = %9.4g µm,  V(r) = %.4g µm³/cm³\n", rGrid[i],
+			vCum[i]/cm3PerM3)
 	}
 }
 

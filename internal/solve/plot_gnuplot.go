@@ -19,8 +19,8 @@ func gnuplotOK(outPath, script string) bool {
 	return statErr == nil
 }
 
-// gnuplotProfile — компактный график одной высоты пакетного режима (2 панели).
-func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
+// gnuplotProfile — компактный график одной высоты пакетного режима (3 панели).
+func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg, vCum []float64,
 	ch []channel, g1, gFit []float64, h float64) bool {
 	dir, ok := po.tempDir()
 	if !ok {
@@ -43,6 +43,16 @@ func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
 		default:
 			prof.WriteString(formatG17(1e-30))
 		}
+		prof.WriteByte(' ')
+		cv := math.NaN()
+		if i < len(vCum) {
+			cv = vCum[i] / cm3PerM3
+		}
+		if isFinite(cv) {
+			prof.WriteString(formatG17(cv))
+		} else {
+			prof.WriteString("NaN")
+		}
 		prof.WriteByte('\n')
 	}
 	po.writeDataFile(pProf, prof.String())
@@ -51,16 +61,19 @@ func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
 	fa := plotFontAttr(po)
 	var sb strings.Builder
 	sb.WriteString("set encoding utf8\n")
-	setTerminal(&sb, po, 8.0, 3.0667)
+	setTerminal(&sb, po, 10.0, 3.0667)
 	fmt.Fprintf(&sb, "set output %q\n", gpPath(outPath))
 	sb.WriteString("set datafile missing 'NaN'\n")
 	fmt.Fprintf(&sb, "set title 'H = %g m'\n", h)
-	sb.WriteString("set multiplot layout 1,2\n")
+	sb.WriteString("set multiplot layout 1,3\n")
 	sb.WriteString("set logscale x\n")
 	fmt.Fprintf(&sb, "set xlabel 'r, µm'%s\n", fa)
 	fmt.Fprintf(&sb, "set ylabel 'dV/dln r, µm³/cm³'%s\n", fa)
 	sb.WriteString("set grid\n")
 	fmt.Fprintf(&sb, "plot %q using 1:2 with lines lw 2 lc rgb '#1f77b4' "+
+		"notitle\n", gpPath(pProf))
+	fmt.Fprintf(&sb, "set ylabel 'V, µm³/cm³'%s\n", fa)
+	fmt.Fprintf(&sb, "plot %q using 1:3 with lines lw 2 lc rgb '#2ca02c' "+
 		"notitle\n", gpPath(pProf))
 	sb.WriteString("unset logscale x\n")
 	sb.WriteString("set xlabel ''\n")
@@ -221,9 +234,9 @@ func gnuplotProfilesStyled(po *plotOpts, outPath, title, xlabel string,
 	return true
 }
 
-// gnuplotResults — основной график одиночного режима (2 панели), gnuplot.
+// gnuplotResults — основной график одиночного режима (3 панели), gnuplot.
 func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
-	nTrue, nAvg, nAvgRaw []float64, nBest [][]float64, nBestCount int,
+	nTrue, nAvg, nAvgRaw, vCum []float64, nBest [][]float64, nBestCount int,
 	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64) bool {
 	dir, ok := po.tempDir()
 	if !ok {
@@ -248,6 +261,16 @@ func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 		rv := nAvgRaw[i] / cm3PerM3
 		if isFinite(rv) {
 			avg.WriteString(formatG17(rv))
+		} else {
+			avg.WriteString("NaN")
+		}
+		avg.WriteByte(' ')
+		cv := math.NaN()
+		if i < len(vCum) {
+			cv = vCum[i] / cm3PerM3
+		}
+		if isFinite(cv) {
+			avg.WriteString(formatG17(cv))
 		} else {
 			avg.WriteString("NaN")
 		}
@@ -286,7 +309,7 @@ func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 	setTerminal(&sb, po, 8.6667, 3.4667)
 	fmt.Fprintf(&sb, "set output %q\n", gpPath(outPath))
 	sb.WriteString("set datafile missing 'NaN'\n")
-	sb.WriteString("set multiplot layout 1,2\n")
+	sb.WriteString("set multiplot layout 1,3\n")
 	sb.WriteString("set logscale x\n")
 	fmt.Fprintf(&sb, "set xlabel 'r, µm'%s\n", fa)
 	fmt.Fprintf(&sb, "set ylabel 'dV/dln r, µm³/cm³'%s\n", fa)
@@ -319,6 +342,11 @@ func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 	sep()
 	fmt.Fprintf(&sb, "%q using 1:2 with lines lw 2.6 "+
 		"lc rgb '#1f77b4' title 'mean of best solutions'\n", gpPath(pAvg))
+	fmt.Fprintf(&sb, "set ylabel 'V, µm³/cm³'%s\n", fa)
+	sb.WriteString("set title 'Cumulative volume V(r)'\n")
+	fmt.Fprintf(&sb, "set key top left%s\n", fa)
+	fmt.Fprintf(&sb, "plot %q using 1:4 with lines lw 2.6 "+
+		"lc rgb '#2ca02c' title 'V(r)'\n", gpPath(pAvg))
 	sb.WriteString("unset logscale x\n")
 	sb.WriteString("set xlabel ''\n")
 	fmt.Fprintf(&sb, "set ylabel 'coefficient, rel. units'%s\n", fa)

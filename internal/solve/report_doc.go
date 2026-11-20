@@ -67,8 +67,8 @@ func writeReportDoc(a *Args, c *console, rep *reportCapture, prof *profile,
 			}
 		}
 		if b, ok := internalResultsPNG(&po, prof.rGrid, nTrue, prof.nAvg,
-			prof.nAvgRaw, prof.nBest, prof.nBestCount, ch, g1, prof.gFit,
-			prof.mRe, prof.mIm); ok {
+			prof.nAvgRaw, prof.vCum, prof.nBest, prof.nBestCount, ch, g1,
+			prof.gFit, prof.mRe, prof.mIm); ok {
 			img = b
 		}
 	}

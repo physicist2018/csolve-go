@@ -55,21 +55,27 @@ func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
 		}
 		fmt.Fprintf(&sb, "%s=%s", b.ch[j].name, formatG6(g1[j]))
 	}
-	sb.WriteString("\n# r, µm  dV/dln r, µm³/cm³")
+	sb.WriteString("\n# r, µm  dV/dln r, µm³/cm³  V, µm³/cm³")
 	for _, wl := range calcWl {
 		fmt.Fprintf(&sb, "  depol_calc_%g", wl*1e3)
 	}
 	for _, wl := range b.depWl {
 		fmt.Fprintf(&sb, "  depol_meas_%g", wl*1e3)
 	}
-	sb.WriteString("\n# depol — линейная деполяризация, % (nan если нет " +
+	sb.WriteString("\n# V — кумулятивный объём ∫ dV/dln r′ dln r′ (монотонный)\n")
+	sb.WriteString("# depol — линейная деполяризация, % (nan если нет " +
 		"S11/S22 или измерения)\n")
 	for i := 0; i < p.nr; i++ {
 		nv := p.nAvg[i] / cm3PerM3
 		if !isFinite(nv) {
 			continue
 		}
-		fmt.Fprintf(&sb, "%s  %s", formatG6(p.rGrid[i]), formatG6(nv))
+		vv := math.NaN()
+		if i < len(p.vCum) {
+			vv = p.vCum[i] / cm3PerM3
+		}
+		fmt.Fprintf(&sb, "%s  %s  %s", formatG6(p.rGrid[i]), formatG6(nv),
+			formatG6(vv))
 		for _, v := range calcVals {
 			fmt.Fprintf(&sb, "  %s", formatG6(v))
 		}
@@ -243,7 +249,8 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 			fontSize: a.PlotFontSize, backend: a.Plotting, con: c}
 		pp := filepath.Join(outDir,
 			fmt.Sprintf("plot_%s.%s", formatG6(h), plotFormatExt(a.PlotFormat)))
-		plotProfile(&po, pp, prof.rGrid, prof.nAvg, solveCh, g1, prof.gFit, h)
+		plotProfile(&po, pp, prof.rGrid, prof.nAvg, prof.vCum, solveCh, g1,
+			prof.gFit, h)
 	}
 
 	sStr := ""

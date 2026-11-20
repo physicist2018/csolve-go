@@ -22,10 +22,11 @@ var gammaSelects = []gammaSelect{gammaFixed, gammaCV, gammaErr}
 
 type solution struct {
 	mRe, mIm  float64
-	degree    int
+	degree    int // степень B-сплайна (0 в монотонном режиме)
+	bins      int // число бинов (0 в режиме spline)
 	r0, r1    float64
 	gamma     float64
-	C         []float64
+	C         []float64 // коэффициенты (spline) или приращения объёма v (monotone)
 	nu        int
 	geomIndex int
 	err       float64
@@ -34,24 +35,52 @@ type solution struct {
 }
 
 type solutions struct {
-	sol   []solution
-	n     int
-	scale float64
+	sol      []solution
+	n        int
+	scale    float64
+	method   methodKind
+	bins     int
+	regOrder int
 }
 
-func nLrows(nu int) int {
-	if nu > 2 {
-		return nu - 2
+// nLrows — число строк штрафа за негладкость для порядка регуляризации order.
+func nLrows(nu, order int) int {
+	switch order {
+	case 0:
+		return nu
+	case 1:
+		return max(nu-1, 0)
+	default:
+		return max(nu-2, 0)
 	}
-	return 0
 }
 
-// buildAugRows — расширенная система [W A; gamma L; D] c = [W g1n; 0; 0],
-// где D — nExtra дополнительных строк ограничений (например, по δ_l),
-// записанных подряд в extra (nExtra × nu).
+// regRowInto заполняет строку штрафа k для порядка order:
+// 0 — γ·e_k (минимальный объём), 1 — γ·(e_k − e_{k+1}),
+// 2 — γ·(e_k − 2·e_{k+1} + e_{k+2}).
+func regRowInto(row []float64, k, order int, gamma float64) {
+	for i := range row {
+		row[i] = 0
+	}
+	switch order {
+	case 0:
+		row[k] = gamma
+	case 1:
+		row[k] = gamma
+		row[k+1] = -gamma
+	default:
+		row[k] = gamma
+		row[k+1] = -2.0 * gamma
+		row[k+2] = gamma
+	}
+}
+
+// buildAugRows — расширенная система [W A; gamma D; E] c = [W g1n; 0; 0],
+// где D — строки штрафа порядка order, E — nExtra дополнительных строк
+// ограничений (например, по δ_l), записанных подряд в extra (nExtra × nu).
 func buildAugRows(a []float64, nch, nu int, gamma float64, weights, g1n []float64,
-	extra []float64, nExtra int, aug, rhs []float64) {
-	nL := nLrows(nu)
+	extra []float64, nExtra, order int, aug, rhs []float64) {
+	nL := nLrows(nu, order)
 	for j := 0; j < nch; j++ {
 		for i := 0; i < nu; i++ {
 			aug[j*nu+i] = weights[j] * a[j*nu+i]
@@ -59,13 +88,7 @@ func buildAugRows(a []float64, nch, nu int, gamma float64, weights, g1n []float6
 		rhs[j] = weights[j] * g1n[j]
 	}
 	for k := 0; k < nL; k++ {
-		row := aug[(nch+k)*nu : (nch+k+1)*nu]
-		for i := range row {
-			row[i] = 0
-		}
-		row[k] = gamma
-		row[k+1] = -2.0 * gamma
-		row[k+2] = gamma
+		regRowInto(aug[(nch+k)*nu:(nch+k+1)*nu], k, order, gamma)
 		rhs[nch+k] = 0
 	}
 	for k := 0; k < nExtra; k++ {
@@ -75,19 +98,19 @@ func buildAugRows(a []float64, nch, nu int, gamma float64, weights, g1n []float6
 }
 
 func buildAug(a []float64, nch, nu int, gamma float64, weights, g1n []float64,
-	aug, rhs []float64) {
-	buildAugRows(a, nch, nu, gamma, weights, g1n, nil, 0, aug, rhs)
+	order int, aug, rhs []float64) {
+	buildAugRows(a, nch, nu, gamma, weights, g1n, nil, 0, order, aug, rhs)
 }
 
 // solveGammaRows — то же, что solveGamma, но с nExtra дополнительными
 // строками ограничений extra (nExtra × nu, правая часть — нули).
 func solveGammaRows(a []float64, nch, nu int, gamma float64, weights, g1n []float64,
-	nonneg bool, extra []float64, nExtra int) []float64 {
-	nL := nLrows(nu)
+	nonneg bool, extra []float64, nExtra, order int) []float64 {
+	nL := nLrows(nu, order)
 	rows := nch + nL + nExtra
 	aug := make([]float64, rows*nu)
 	rhs := make([]float64, rows)
-	buildAugRows(a, nch, nu, gamma, weights, g1n, extra, nExtra, aug, rhs)
+	buildAugRows(a, nch, nu, gamma, weights, g1n, extra, nExtra, order, aug, rhs)
 	if nonneg {
 		return nnls(aug, rows, nu, rhs)
 	}
@@ -95,8 +118,8 @@ func solveGammaRows(a []float64, nch, nu int, gamma float64, weights, g1n []floa
 }
 
 func solveGamma(a []float64, nch, nu int, gamma float64, weights, g1n []float64,
-	nonneg bool) []float64 {
-	return solveGammaRows(a, nch, nu, gamma, weights, g1n, nonneg, nil, 0)
+	nonneg bool, order int) []float64 {
+	return solveGammaRows(a, nch, nu, gamma, weights, g1n, nonneg, nil, 0, order)
 }
 
 func residualErr(a []float64, nch, nu int, c, g1n []float64) float64 {
@@ -114,8 +137,8 @@ func residualErr(a []float64, nch, nu int, c, g1n []float64) float64 {
 // cvBruteforce — LOO-кросс-валидация прямым пересчётом (для NNLS и
 // вырожденных leverage).
 func cvBruteforce(a []float64, nch, nu int, gamma float64, weights, g1n []float64,
-	nonneg bool) float64 {
-	nL := nLrows(nu)
+	nonneg bool, order int) float64 {
+	nL := nLrows(nu, order)
 	rows := (nch - 1) + nL
 	aug := make([]float64, max(rows, 0)*nu)
 	rhs := make([]float64, max(rows, 0))
@@ -133,13 +156,7 @@ func cvBruteforce(a []float64, nch, nu int, gamma float64, weights, g1n []float6
 			r++
 		}
 		for k := 0; k < nL; k++ {
-			row := aug[(nch-1+k)*nu : (nch-1+k+1)*nu]
-			for i := range row {
-				row[i] = 0
-			}
-			row[k] = gamma
-			row[k+1] = -2.0 * gamma
-			row[k+2] = gamma
+			regRowInto(aug[(nch-1+k)*nu:(nch-1+k+1)*nu], k, order, gamma)
 			rhs[nch-1+k] = 0
 		}
 		var c []float64
@@ -159,16 +176,16 @@ func cvBruteforce(a []float64, nch, nu int, gamma float64, weights, g1n []float6
 
 // cvClosed — LOO-оценка закрытой формулой через рычаги; ok=false — нужен
 // брутфорс.
-func cvClosed(a []float64, nch, nu int, gamma float64, weights, g1n []float64) (
-	score float64, ok bool) {
-	nL := nLrows(nu)
+func cvClosed(a []float64, nch, nu int, gamma float64, weights, g1n []float64,
+	order int) (score float64, ok bool) {
+	nL := nLrows(nu, order)
 	rows := nch + nL
 	if nu <= 0 || rows <= 0 {
 		return 0, true
 	}
 	aug := make([]float64, rows*nu)
 	rhs := make([]float64, rows)
-	buildAug(a, nch, nu, gamma, weights, g1n, aug, rhs)
+	buildAug(a, nch, nu, gamma, weights, g1n, order, aug, rhs)
 
 	data := append([]float64(nil), aug...)
 	var svd mat.SVD
@@ -234,12 +251,13 @@ func sortSolutions(sol []solution) {
 	slices.SortStableFunc(sol, func(a, b solution) int { return compareFloats(a.err, b.err) })
 }
 
-// scanVariants — перебор (m, окно) с регуляризацией по кривизне. Если dc
-// задано, в систему добавляется строка ограничения по измеренному δ_l.
+// scanVariants — перебор (m, окно) с регуляризацией. Если dc задано, в систему
+// добавляется строка ограничения по измеренному δ_l. В монотонном режиме
+// решение всегда ищется при условии v ≥ 0 (V(r) не убывает).
 func scanVariants(d *design, g1 []float64, nch int, gammaSel gammaSelect,
 	gammaRelFixed, gammaExpMin, gammaExpMax float64, nGamma int,
 	nonneg, relative bool, dc *depolCons, c *console) (*solutions, error) {
-	out := &solutions{}
+	out := &solutions{method: d.method, bins: d.bins, regOrder: d.regOrder}
 	if d.nW == 0 || d.nM == 0 {
 		out.scale = 1.0
 		return out, nil
@@ -265,7 +283,9 @@ func scanVariants(d *design, g1 []float64, nch int, gammaSel gammaSelect,
 			weights[j] = 1.0
 		}
 	}
-	if d.nu > nch {
+	// монотонность V требует неотрицательности приращений при любых опциях
+	nonneg = nonneg || d.method == methodMonotone
+	if d.nu > nch && d.method == methodSpline {
 		c.warnf("[warning] unknowns per window (%d) exceed "+
 			"measurements (%d): the solution relies mainly on regularization "+
 			"(the system is underdetermined)\n", d.nu, nch)
@@ -305,7 +325,8 @@ func scanVariants(d *design, g1 []float64, nch int, gammaSel gammaSelect,
 
 			if gammaSel == gammaFixed {
 				gamma = grel[0] * s0
-				cNorm = solveGamma(A, nch, nu, gamma, weights, g1n, nonneg)
+				cNorm = solveGamma(A, nch, nu, gamma, weights, g1n, nonneg,
+					d.regOrder)
 			} else {
 				best := math.Inf(1)
 				for k := 0; k < len(grel); k++ {
@@ -313,25 +334,30 @@ func scanVariants(d *design, g1 []float64, nch int, gammaSel gammaSelect,
 					var score float64
 					if gammaSel == gammaCV {
 						if nonneg {
-							score = cvBruteforce(A, nch, nu, gk, weights, g1n, true)
+							score = cvBruteforce(A, nch, nu, gk, weights, g1n, true,
+								d.regOrder)
 						} else {
-							sc, ok := cvClosed(A, nch, nu, gk, weights, g1n)
+							sc, ok := cvClosed(A, nch, nu, gk, weights, g1n,
+								d.regOrder)
 							if !ok {
-								score = cvBruteforce(A, nch, nu, gk, weights, g1n, false)
+								score = cvBruteforce(A, nch, nu, gk, weights, g1n,
+									false, d.regOrder)
 							} else {
 								score = sc
 							}
 						}
 					} else {
-						c := solveGamma(A, nch, nu, gk, weights, g1n, nonneg)
-						score = residualErr(A, nch, nu, c, g1n)
+						cv := solveGamma(A, nch, nu, gk, weights, g1n, nonneg,
+							d.regOrder)
+						score = residualErr(A, nch, nu, cv, g1n)
 					}
 					if score < best {
 						best = score
 						gamma = gk
 					}
 				}
-				cNorm = solveGamma(A, nch, nu, gamma, weights, g1n, nonneg)
+				cNorm = solveGamma(A, nch, nu, gamma, weights, g1n, nonneg,
+					d.regOrder)
 			}
 
 			cAbs := make([]float64, nu)
@@ -341,7 +367,7 @@ func scanVariants(d *design, g1 []float64, nch int, gammaSel gammaSelect,
 			// второй проход: то же γ, но с строкой ограничения δ_l
 			if extra, nExtra := dc.rows(im, iw, cAbs); nExtra > 0 {
 				c2 := solveGammaRows(A, nch, nu, gamma, weights, g1n,
-					nonneg, extra, nExtra)
+					nonneg, extra, nExtra, d.regOrder)
 				for i := 0; i < nu; i++ {
 					cAbs[i] = c2[i] * scale
 				}
@@ -364,6 +390,7 @@ func scanVariants(d *design, g1 []float64, nch int, gammaSel gammaSelect,
 			so.mRe = d.mRe[im]
 			so.mIm = d.mIm[im]
 			so.degree = d.degree[iw]
+			so.bins = d.bins
 			so.r0 = d.r0[iw]
 			so.r1 = d.r1[iw]
 			so.gamma = gamma

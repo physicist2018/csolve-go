@@ -209,9 +209,17 @@ func run(a *Args) error {
 
 	c.printf("scan (m, r0, r1, degree)...\n")
 	tPhase := nowSec()
-	design, err := designBuild(baseCh, nch, kts, mre, mim, a.Degrees, r0Grid,
-		r1Grid, a.MinRatio, a.NBasis, !a.NoZeroBoundary, a.QuadOrder,
-		a.LogSpan)
+	design, err := designBuild(baseCh, nch, kts, mre, mim, r0Grid, r1Grid,
+		a.MinRatio, designSpec{
+			method:       a.Method,
+			degrees:      a.Degrees,
+			nBasis:       a.NBasis,
+			bins:         a.VBins,
+			zeroBoundary: !a.NoZeroBoundary,
+			quadOrder:    a.QuadOrder,
+			maxLogSpan:   a.LogSpan,
+			regOrder:     a.RegOrder,
+		})
 	if err != nil {
 		return err
 	}
@@ -257,8 +265,9 @@ func run(a *Args) error {
 	}
 	c.phase("output", tPhase)
 
-	reportSummary(a, sols, g1, baseCh, prof.nAvg, prof.gFit, prof.rGrid,
-		prof.mRe, prof.mIm, depWl, depVal, prof.deltaLwl, prof.deltaL, c)
+	reportSummary(a, sols, g1, baseCh, prof.nAvg, prof.vCum, prof.gFit,
+		prof.rGrid, prof.mRe, prof.mIm, depWl, depVal, prof.deltaLwl,
+		prof.deltaL, c)
 	reportMoments(prof.moments, c)
 	reportDepolarization(prof, c)
 

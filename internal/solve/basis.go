@@ -218,8 +218,19 @@ func quadratureGrid(breaks []float64, order int, maxLogSpan float64) ([]float64,
 	return nodes, weights
 }
 
+// basisKind — способ параметризации решения внутри окна.
+type basisKind int
+
+const (
+	// basisSpline — B-сплайны степени degree (алгоритм --method spline).
+	basisSpline basisKind = iota
+	// basisBins — приращения объёма на бинах сетки ln r (--method monotone).
+	basisBins
+)
+
 // geom — базис, квадратура и геометрия окна [r0, r1].
 type geom struct {
+	kind                     basisKind
 	degree, nBasis, nUnknown int
 	interiorOnly             bool
 	r0, r1                   float64
@@ -228,8 +239,28 @@ type geom struct {
 	nNodes                   int
 	nodes                    []float64
 	weights                  []float64
-	values                   []float64 // nNodes × nUnknown
+	values                   []float64 // nNodes × nUnknown (только basisSpline)
 	dvol                     []float64 // nNodes
+
+	// basisBins: бины по ln r и их обратные ширины
+	binEdges []float64 // N+1 границ (r)
+	invBinW  []float64 // 1/Δln r_k
+	nodeBin  []int     // индекс бина каждого квадратурного узла
+}
+
+// addNodeContribution добавляет вклад квадратурного узла q с множителем w в
+// строку row: row[i] += w·B_i(r_q), где B_i — значения базисных функций.
+// Для бинов B_k(r) = 1/Δln r_k на бине k, т.е. row[k] += w/Δln r_k.
+func (g *geom) addNodeContribution(row []float64, q int, w float64) {
+	if g.kind == basisBins {
+		b := g.nodeBin[q]
+		row[b] += w * g.invBinW[b]
+		return
+	}
+	bv := g.values[q*g.nUnknown : (q+1)*g.nUnknown]
+	for i, v := range bv {
+		row[i] += w * v
+	}
 }
 
 func geomBuild(r0, r1 float64, degree, nBasis int, interiorOnly bool, order int, maxLogSpan float64) (*geom, error) {
@@ -285,6 +316,7 @@ func geomBuild(r0, r1 float64, degree, nBasis int, interiorOnly bool, order int,
 	}
 
 	return &geom{
+		kind:         basisSpline,
 		degree:       degree,
 		nBasis:       nBasis,
 		nUnknown:     nu,

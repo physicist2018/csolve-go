@@ -161,13 +161,29 @@ func prepareBatch(a *Args, c *console) (*batchSetup, error) {
 	// матрицы A — тоже один раз
 	r0Grid := geomspace(a.R0Min, a.R0Max, a.NR0)
 	r1Grid := geomspace(a.R1Min, st.r1MaxEff, a.NR1)
-	st.design, err = designBuild(st.solveCh, b.nch, st.kts, mre, mim, a.Degrees,
-		r0Grid, r1Grid, a.MinRatio, a.NBasis, !a.NoZeroBoundary, a.QuadOrder,
-		a.LogSpan)
+	st.design, err = designBuild(st.solveCh, b.nch, st.kts, mre, mim, r0Grid,
+		r1Grid, a.MinRatio, designSpec{
+			method:       a.Method,
+			degrees:      a.Degrees,
+			nBasis:       a.NBasis,
+			bins:         a.VBins,
+			zeroBoundary: !a.NoZeroBoundary,
+			quadOrder:    a.QuadOrder,
+			maxLogSpan:   a.LogSpan,
+			regOrder:     a.RegOrder,
+		})
 	if err != nil {
 		return nil, err
 	}
 	c.printf("  matrices A precomputed: %d windows × %d m\n", st.design.nW, nm)
+	if a.Method == methodMonotone {
+		c.printf("  method: monotone functions, %d bins per window, "+
+			"regularization order %d\n", st.design.bins, st.design.regOrder)
+		if a.NoZeroBoundary {
+			c.warnf("[warning] --no-zero-boundary has no effect with " +
+				"--method monotone; ignored\n")
+		}
+	}
 	reportEnsembleSize(a, st.design.nW*st.design.nM, c)
 	return st, nil
 }

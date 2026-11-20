@@ -51,11 +51,20 @@ type outSolution struct {
 	MReal  jfloat   `json:"m_real"`
 	MImag  jfloat   `json:"m_imag"`
 	Degree int      `json:"degree"`
+	Bins   int      `json:"bins,omitempty"`
 	R0     jfloat   `json:"r0"`
 	R1     jfloat   `json:"r1"`
 	Gamma  jfloat   `json:"gamma"`
 	Err    jfloat   `json:"err"`
-	C      []jfloat `json:"C"`
+	C      []jfloat `json:"C,omitempty"`
+	VBins  []jfloat `json:"v_bins,omitempty"`
+}
+
+// outModel — параметры метода восстановления.
+type outModel struct {
+	Name     string `json:"name"`
+	Bins     int    `json:"bins,omitempty"`
+	RegOrder int    `json:"reg_order,omitempty"`
 }
 
 type outMode struct {
@@ -80,12 +89,14 @@ type outDepol struct {
 }
 
 type outFile struct {
+	Model          outModel      `json:"model"`
 	MAvg           outMAvg       `json:"m_avg"`
 	Moments        outMoments    `json:"moments"`
 	UnitsInput     outUnits      `json:"units_input"`
 	Channels       []outChannel  `json:"channels"`
 	RUm            []jfloat      `json:"r_um"`
 	NAvg           []jfloat      `json:"n_avg"`
+	VCum           []jfloat      `json:"v_cum_um3_per_cm3"`
 	BestSolutions  []outSolution `json:"best_solutions"`
 	NAvgRaw        []jfloat      `json:"n_avg_raw"`
 	Modes          outModes      `json:"modes"`
@@ -123,7 +134,7 @@ func outModeFrom(m csMode) outMode {
 }
 
 // writeJSON — запись результатов (структура как в Python-версии).
-func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw []float64,
+func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw, vCum []float64,
 	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64,
 	mom moments, md modes, deltaWlUm, deltaL []float64) error {
 
@@ -141,6 +152,7 @@ func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw []float64,
 		UnitsInput: outUnits{Beta: "1/(m·sr)", Alpha: "1/m"},
 		RUm:        toJ(rGrid),
 		NAvg:       toJPerCm3(nAvg),
+		VCum:       toJPerCm3(vCum),
 		NAvgRaw:    toJPerCm3(nAvgRaw),
 		Modes: outModes{
 			Fine:    outModeFrom(md.Fine),
@@ -169,12 +181,25 @@ func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw []float64,
 			MReal:  jfloat(s.mRe),
 			MImag:  jfloat(s.mIm),
 			Degree: s.degree,
+			Bins:   s.bins,
 			R0:     jfloat(s.r0),
 			R1:     jfloat(s.r1),
 			Gamma:  jfloat(s.gamma),
 			Err:    jfloat(s.err),
 			C:      toJ(s.C),
 		}
+		if sols.method == methodMonotone {
+			// для монотонного метода C — это приращения объёма по бинам
+			out.BestSolutions[t].C = nil
+			out.BestSolutions[t].VBins = toJPerCm3(s.C)
+		}
+	}
+
+	if sols.method == methodMonotone {
+		out.Model = outModel{Name: string(sols.method), Bins: sols.bins,
+			RegOrder: sols.regOrder}
+	} else {
+		out.Model = outModel{Name: string(methodSpline)}
 	}
 
 	if len(deltaWlUm) > 0 {

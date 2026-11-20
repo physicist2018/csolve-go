@@ -70,13 +70,13 @@ func plotFormatExt(f plotFormat) string {
 	}
 }
 
-// plotProfile — компактный график одной высоты пакетного режима (2 панели).
-func plotProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
+// plotProfile — компактный график одной высоты пакетного режима (3 панели).
+func plotProfile(po *plotOpts, outPath string, rGrid, nAvg, vCum []float64,
 	ch []channel, g1, gFit []float64, h float64) bool {
 	if po != nil && po.backend == plottingInternal {
-		return internalProfile(po, outPath, rGrid, nAvg, ch, g1, gFit, h)
+		return internalProfile(po, outPath, rGrid, nAvg, vCum, ch, g1, gFit, h)
 	}
-	return gnuplotProfile(po, outPath, rGrid, nAvg, ch, g1, gFit, h)
+	return gnuplotProfile(po, outPath, rGrid, nAvg, vCum, ch, g1, gFit, h)
 }
 
 // plotRefractiveProfile — сводный вертикальный профиль m по высотам.
@@ -337,18 +337,18 @@ func refractiveAxes(alt, mRe, mIm []float64) (reLo, reHi, imLo, imHi, hLo, hHi f
 		hLo - hPad, hHi + hPad
 }
 
-// plotResults — основной график одиночного режима (2 панели).
+// plotResults — основной график одиночного режима (3 панели).
 func plotResults(po *plotOpts, outPath string, rGrid []float64,
-	nTrue, nAvg, nAvgRaw []float64, nBest [][]float64, nBestCount int,
+	nTrue, nAvg, nAvgRaw, vCum []float64, nBest [][]float64, nBestCount int,
 	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64) bool {
 	if po != nil && po.backend == plottingInternal {
-		ok := internalResults(po, outPath, rGrid, nTrue, nAvg, nAvgRaw, nBest,
-			nBestCount, ch, g1, gFit, mAvgRe, mAvgIm)
+		ok := internalResults(po, outPath, rGrid, nTrue, nAvg, nAvgRaw, vCum,
+			nBest, nBestCount, ch, g1, gFit, mAvgRe, mAvgIm)
 		if ok {
 			po.printf("plot saved: %s\n", outPath)
 		}
 		return ok
 	}
-	return gnuplotResults(po, outPath, rGrid, nTrue, nAvg, nAvgRaw, nBest,
+	return gnuplotResults(po, outPath, rGrid, nTrue, nAvg, nAvgRaw, vCum, nBest,
 		nBestCount, ch, g1, gFit, mAvgRe, mAvgIm)
 }

@@ -21,8 +21,11 @@ type Args struct {
 	TableRefWl       float64
 	TableCback4pi    bool
 
-	Degrees []int
-	NBasis  int
+	Method   methodKind
+	Degrees  []int
+	NBasis   int
+	VBins    int // число бинов монотонной сетки; 0 = auto
+	RegOrder int // порядок штрафа за негладкость (0..2)
 
 	R0Min, R0Max float64
 	NR0          int
@@ -182,8 +185,16 @@ Options:
   --table-cback {dsigma|4pi}     Cback column convention [dsigma]
 
   --degree <1|2|3|4>             B-spline degree (single value) [1]
+                                 (--method spline only)
   --n-basis <N>                  basis functions per window; 0 = number of
-                                 channels [7]
+                                 channels (--method spline only) [7]
+  --method {monotone|spline}     retrieval method: monotone V(r) reconstruction
+                                 or B-spline expansion [monotone]
+  --v-bins <N>                   size bins on [r0, r1] for --method monotone;
+                                 0 = auto (max(2*channels, 8), at most 64) [0]
+  --reg-order {0|1|2}            smoothness penalty on the bin volumes:
+                                 0 = min volume, 1 = few jumps, 2 = smooth n
+                                 (--method monotone only) [2]
   --r0-min <X>                   lower bound of r0 grid, > 0 [0.05]
   --r0-max <X>                   upper bound of r0 grid [0.3]
   --nr0 <N>                      number of r0 values, >= 1 [7]
@@ -202,7 +213,9 @@ Options:
 
   --nonneg                       constrain C >= 0 (default: on)
   --no-nonneg                    disable the C >= 0 constraint
+                                 (not allowed with --method monotone)
   --no-zero-boundary             no boundary conditions n(r0)=n(r1)=0
+                                 (--method spline only)
   --no-smooth                    disable smoothing of the mean
   --smooth-lam <X>               smoothing parameter [1e-4]
   --r-split <X>                  fine/coarse boundary [0.5]
@@ -267,8 +280,10 @@ func ParseArgs(argv []string) (*Args, error) {
 	a := &Args{
 		TableRefWl:     tableRefWlUm,
 		Type:           defaultTableType,
+		Method:         methodMonotone,
 		Degrees:        []int{1},
 		NBasis:         7,
+		RegOrder:       2,
 		R0Min:          0.05,
 		R0Max:          0.3,
 		NR0:            7,
@@ -321,6 +336,12 @@ func ParseArgs(argv []string) (*Args, error) {
 	degree := &singleIntFlag{minV: 1, maxV: 4, name: "degree"}
 	fs.Var(degree, "degree", "")
 	fs.IntVar(&a.NBasis, "n-basis", a.NBasis, "")
+	methodFlag := &enumFlag[methodKind]{allowed: methodKinds, value: a.Method}
+	fs.Var(methodFlag, "method", "")
+	vBins := &singleIntFlag{minV: 0, maxV: vBinsMax, name: "v-bins"}
+	fs.Var(vBins, "v-bins", "")
+	regOrder := &singleIntFlag{minV: 0, maxV: 2, name: "reg-order"}
+	fs.Var(regOrder, "reg-order", "")
 	fs.Float64Var(&a.R0Min, "r0-min", a.R0Min, "")
 	fs.Float64Var(&a.R0Max, "r0-max", a.R0Max, "")
 	fs.IntVar(&a.NR0, "nr0", a.NR0, "")
@@ -428,6 +449,13 @@ func ParseArgs(argv []string) (*Args, error) {
 	if degree.set {
 		a.Degrees = []int{degree.value}
 	}
+	if vBins.set {
+		a.VBins = vBins.value
+	}
+	if regOrder.set {
+		a.RegOrder = regOrder.value
+	}
+	a.Method = methodFlag.Value()
 	if seen["m-real"] {
 		a.HasMReal = true
 		a.MReal = mReal
@@ -482,6 +510,11 @@ func checkArgs(a *Args, seen map[string]bool) error {
 		}
 	}
 
+	if a.Method == methodMonotone && !a.Nonneg {
+		return fmt.Errorf("option --no-nonneg is incompatible with " +
+			"--method monotone: monotonicity of V(r) requires non-negative " +
+			"increments")
+	}
 	if a.NR0 < 1 {
 		return fmt.Errorf("option --nr0 must be >= 1")
 	}

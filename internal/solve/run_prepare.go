@@ -77,13 +77,6 @@ func loadRunInput(a *Args, c *console) (*runInput, error) {
 		c.printf("  channel: %s\n", in.channels[j].name())
 	}
 	c.printf("input units: β [1/(m·sr)], α [1/m]\n")
-	if a.NoZeroBoundary {
-		c.printf("boundary conditions n(r0)=n(r1)=0 (each elementary " +
-			"solution): disabled (--no-zero-boundary)\n")
-	} else {
-		c.printf("boundary conditions n(r0)=n(r1)=0 (each elementary " +
-			"solution): enabled\n")
-	}
 	if a.NoSmooth {
 		c.printf("smoothing of the mean over best solutions: disabled " +
 			"(--no-smooth)\n")
@@ -91,15 +84,38 @@ func loadRunInput(a *Args, c *console) (*runInput, error) {
 		c.printf("smoothing of the mean over best solutions: enabled "+
 			"(rel-lam=%g)\n", a.SmoothLam)
 	}
-	nBasis := a.NBasis
-	if nBasis <= 0 {
-		nBasis = len(in.channels)
-	}
-	if !a.NoZeroBoundary {
-		c.printf("basis functions per window: %d (unknowns with BC: %d)\n",
-			nBasis, nBasis-2)
+	if a.Method == methodMonotone {
+		c.printf("method: monotone functions — V(r) = ∫ dV/dln r′ dln r′ is " +
+			"reconstructed from non-negative bin increments\n")
+		c.printf("size bins per window: %d (regularization order %d)\n",
+			binsFor(a.VBins, len(in.channels)), a.RegOrder)
+		if a.VBins == 0 {
+			c.printf("  (--v-bins 0: automatic count max(2·channels, 8), "+
+				"at most %d)\n", vBinsMax)
+		}
+		if a.NoZeroBoundary {
+			c.warnf("[warning] --no-zero-boundary has no effect with " +
+				"--method monotone: V(r0) = 0 is kept and n at the window " +
+				"edges is not forced to zero\n")
+		}
 	} else {
-		c.printf("basis functions per window: %d\n", nBasis)
+		if a.NoZeroBoundary {
+			c.printf("boundary conditions n(r0)=n(r1)=0 (each elementary " +
+				"solution): disabled (--no-zero-boundary)\n")
+		} else {
+			c.printf("boundary conditions n(r0)=n(r1)=0 (each elementary " +
+				"solution): enabled\n")
+		}
+		nBasis := a.NBasis
+		if nBasis <= 0 {
+			nBasis = len(in.channels)
+		}
+		if !a.NoZeroBoundary {
+			c.printf("basis functions per window: %d (unknowns with BC: %d)\n",
+				nBasis, nBasis-2)
+		} else {
+			c.printf("basis functions per window: %d\n", nBasis)
+		}
 	}
 	return in, nil
 }
@@ -289,8 +305,8 @@ func writeRunOutputs(a *Args, c *console, baseCh []channel, g1 []float64,
 
 	if a.JSON != "" {
 		if err := writeJSON(jsonPath, sols, prof.rGrid, prof.nAvg, prof.nAvgRaw,
-			baseCh, g1, prof.gFit, prof.mRe, prof.mIm, prof.moments, prof.modes,
-			prof.deltaLwl, prof.deltaL); err != nil {
+			prof.vCum, baseCh, g1, prof.gFit, prof.mRe, prof.mIm, prof.moments,
+			prof.modes, prof.deltaLwl, prof.deltaL); err != nil {
 			return err
 		}
 		c.printf("results saved: %s\n", jsonPath)
@@ -307,7 +323,7 @@ func writeRunOutputs(a *Args, c *console, baseCh []channel, g1 []float64,
 		po := plotOpts{format: a.PlotFormat, dpi: a.PlotDpi,
 			fontSize: a.PlotFontSize, backend: a.Plotting, con: c}
 		plotResults(&po, plotPath, prof.rGrid, nTrueVals, prof.nAvg,
-			prof.nAvgRaw, prof.nBest, prof.nBestCount, baseCh, g1,
+			prof.nAvgRaw, prof.vCum, prof.nBest, prof.nBestCount, baseCh, g1,
 			prof.gFit, prof.mRe, prof.mIm)
 	}
 	return nil

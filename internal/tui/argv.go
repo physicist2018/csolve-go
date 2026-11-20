@@ -85,16 +85,28 @@ func (b *argvBuilder) tables(s *state, d *solve.Args) error {
 	return nil
 }
 
-// grid — базис, сетка окон и число усредняемых решений.
+// grid — метод восстановления, базис/бины, сетка окон и число усредняемых
+// решений.
 func (b *argvBuilder) grid(s *state, d *solve.Args) {
+	if s.method != string(d.Method) {
+		b.add("--method", s.method)
+	}
+	if s.method == "monotone" {
+		if changedInt(s.vBins, d.VBins) {
+			b.add("--v-bins", s.vBins)
+		}
+		if s.regOrder != d.RegOrder {
+			b.add("--reg-order", strconv.Itoa(s.regOrder))
+		}
+	}
 	defDegree := 1
 	if len(d.Degrees) > 0 {
 		defDegree = d.Degrees[0]
 	}
-	if s.degree != defDegree {
+	if s.method != "monotone" && s.degree != defDegree {
 		b.add("--degree", strconv.Itoa(s.degree))
 	}
-	if changedInt(s.nBasis, d.NBasis) {
+	if s.method != "monotone" && changedInt(s.nBasis, d.NBasis) {
 		b.add("--n-basis", s.nBasis)
 	}
 	if changedFloat(s.r0Min, d.R0Min) {
@@ -140,15 +152,19 @@ func (b *argvBuilder) regularization(s *state, d *solve.Args) {
 	if changedInt(s.nGamma, d.NGamma) {
 		b.add("--ngamma", s.nGamma)
 	}
-	if s.nonneg != d.Nonneg {
-		if s.nonneg {
-			b.flag("--nonneg")
-		} else {
-			b.flag("--no-nonneg")
+	// неотрицательность приращений неявно требуется методом монотонных
+	// функций — флаг имеет смысл только для --method spline
+	if s.method != "monotone" {
+		if s.nonneg != d.Nonneg {
+			if s.nonneg {
+				b.flag("--nonneg")
+			} else {
+				b.flag("--no-nonneg")
+			}
 		}
-	}
-	if s.noZeroBound {
-		b.flag("--no-zero-boundary")
+		if s.noZeroBound {
+			b.flag("--no-zero-boundary")
+		}
 	}
 	if s.noSmooth {
 		b.flag("--no-smooth")

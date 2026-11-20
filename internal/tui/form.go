@@ -259,13 +259,50 @@ func tablesGroup(s *state) *huh.Group {
 	)
 }
 
-// gridGroup — базис сплайна и окна перебора размеров.
+// gridGroup — метод восстановления, базис/бины и окна перебора размеров.
 func gridGroup(s *state) *huh.Group {
-	return page("Basis and size grid",
-		"Shape of the retrieved distribution: spline basis plus the r0/r1 windows the solver scans.",
+	return page("Method and size grid",
+		"How the distribution is reconstructed and which r0/r1 windows the solver scans.",
+		huh.NewSelect[string]().
+			Title("Retrieval method").
+			Description("Monotone functions reconstruct the cumulative volume V(r) from non-negative bin increments; spline is the previous B-spline algorithm (--method).").
+			Options(
+				huh.NewOption("monotone — V(r) from bin increments", "monotone"),
+				huh.NewOption("spline — B-spline expansion", "spline"),
+			).
+			Value(&s.method),
+		huh.NewInput().
+			Title("Size bins per window").
+			DescriptionFunc(func() string {
+				if s.method != "monotone" {
+					return "Used only by the monotone method (--v-bins)."
+				}
+				return "0 = auto: max(2·channels, 8), at most 64 (--v-bins)."
+			}, &s.method).
+			Value(&s.vBins).
+			Validate(vIntMin(0)),
+		huh.NewSelect[int]().
+			Title("Smoothness penalty order").
+			DescriptionFunc(func() string {
+				if s.method != "monotone" {
+					return "Used only by the monotone method (--reg-order)."
+				}
+				return "Penalty on the bin volumes (--reg-order)."
+			}, &s.method).
+			Options(
+				huh.NewOption("0 — minimal volume", 0),
+				huh.NewOption("1 — few jumps in n", 1),
+				huh.NewOption("2 — smooth n (curvature)", 2),
+			).
+			Value(&s.regOrder),
 		huh.NewSelect[int]().
 			Title("B-spline degree").
-			Description("Order of the piecewise polynomials (--degree).").
+			DescriptionFunc(func() string {
+				if s.method != "monotone" {
+					return "Order of the piecewise polynomials (--degree)."
+				}
+				return "Used only by --method spline (--degree); ignored now."
+			}, &s.method).
 			Options(
 				huh.NewOption("1 — piecewise constant", 1),
 				huh.NewOption("2 — linear", 2),
@@ -275,7 +312,12 @@ func gridGroup(s *state) *huh.Group {
 			Value(&s.degree),
 		huh.NewInput().
 			Title("Basis functions per window").
-			Description("0 = as many as there are channels (--n-basis).").
+			DescriptionFunc(func() string {
+				if s.method != "monotone" {
+					return "0 = as many as there are channels (--n-basis)."
+				}
+				return "Used only by --method spline (--n-basis); ignored now."
+			}, &s.method).
 			Value(&s.nBasis).
 			Validate(vIntMin(0)),
 		huh.NewInput().
@@ -362,13 +404,23 @@ func constraintsGroup(s *state) *huh.Group {
 		"Physical constraints on the solution and how the window solutions are combined.",
 		huh.NewConfirm().
 			Title("Constrain C ≥ 0?").
-			Description("Non-negative least squares, Lawson–Hanson (--nonneg).").
+			DescriptionFunc(func() string {
+				if s.method == "monotone" {
+					return "Implicit in the monotone method: non-negative increments ⇒ n(r) ≥ 0 (--nonneg)."
+				}
+				return "Non-negative least squares, Lawson–Hanson (--nonneg)."
+			}, &s.method).
 			Affirmative("Yes").
 			Negative("No").
 			Value(&s.nonneg),
 		huh.NewConfirm().
 			Title("Drop the boundary conditions n(r0) = n(r1) = 0?").
-			Description("--no-zero-boundary.").
+			DescriptionFunc(func() string {
+				if s.method == "monotone" {
+					return "Used only by --method spline (--no-zero-boundary); ignored now."
+				}
+				return "--no-zero-boundary."
+			}, &s.method).
 			Affirmative("Yes").
 			Negative("No").
 			Value(&s.noZeroBound),

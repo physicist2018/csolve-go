@@ -270,11 +270,8 @@ func depolProjBuild(ds *depolSet, d *design, iwDep []int) *depolProj {
 					}
 					s11 := ktableKernel(kt, 0, r)
 					s22 := ktableKernel(kt, 1, r)
-					bv := g.values[q*d.nu : (q+1)*d.nu]
-					for i := 0; i < d.nu; i++ {
-						a11[i] += wgt * s11 * bv[i]
-						a22[i] += wgt * s22 * bv[i]
-					}
+					g.addNodeContribution(a11, q, wgt*s11)
+					g.addNodeContribution(a22, q, wgt*s22)
 				}
 			}
 		}

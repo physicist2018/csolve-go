@@ -10,6 +10,7 @@ type profile struct {
 	rGrid      []float64
 	nAvg       []float64
 	nAvgRaw    []float64
+	vCum       []float64 // кумулятивный объём V(r) = ∫ n dln r, µm³/cm³
 	nBest      [][]float64
 	nBestCount int
 	mRe, mIm   float64
@@ -53,7 +54,15 @@ func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
 	p.mIm = ens.mIm
 	if !a.NoSmooth {
 		smoothDistribution(p.rGrid, p.nAvg, ens.count, a.SmoothLam)
+		// монотонный метод по построению даёт n ≥ 0; сглаживающий сплайн
+		// может дать небольшой отрицательный выброс у нуля — ограничиваем
+		if sols.method == methodMonotone {
+			clampNonNegative(p.nAvg)
+		}
 	}
+	// кумулятивный объём строится по итоговому среднему n ≥ 0, поэтому V(r)
+	// монотонна и V(r_end) совпадает с C_v
+	p.vCum = cumulativeVolume(p.rGrid, p.nAvg)
 
 	G := a.bestCount(sols.n)
 	p.nBestCount = G

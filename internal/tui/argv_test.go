@@ -65,6 +65,9 @@ func TestBuildArgvDefaults(t *testing.T) {
 
 func TestDefaultConstraintsCanBeDisabled(t *testing.T) {
 	s := newTestState(t)
+	// in the monotone method non-negativity is implicit; the flags exist for
+	// --method spline only
+	s.method = "spline"
 	s.nonneg = false
 	s.depolCons = false
 

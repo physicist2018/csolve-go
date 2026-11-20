@@ -35,8 +35,11 @@ type state struct {
 	tableRefWl       string
 	tableCback       string
 
+	method   string
 	degree   int
 	nBasis   string
+	vBins    string
+	regOrder int
 	r0Min    string
 	r0Max    string
 	nr0      string
@@ -116,11 +119,14 @@ func (s *state) reset() {
 		s.tableCback = "4pi"
 	}
 
+	s.method = string(d.Method)
 	s.degree = 1
 	if len(d.Degrees) > 0 {
 		s.degree = d.Degrees[0]
 	}
 	s.nBasis = strconv.Itoa(d.NBasis)
+	s.vBins = strconv.Itoa(d.VBins)
+	s.regOrder = d.RegOrder
 	s.r0Min = formatFloat(d.R0Min)
 	s.r0Max = formatFloat(d.R0Max)
 	s.nr0 = strconv.Itoa(d.NR0)
@@ -198,7 +204,7 @@ func (s *state) bindings() []any {
 		&s.mode, &s.dataPath, &s.batchPath,
 		&s.tablesKind, &s.builtinType, &s.tablesDir, &s.tableExtrapolate,
 		&s.tableRefWl, &s.tableCback,
-		&s.degree, &s.nBasis,
+		&s.degree, &s.nBasis, &s.method, &s.vBins, &s.regOrder,
 		&s.r0Min, &s.r0Max, &s.nr0, &s.r1Min, &s.r1Max, &s.nr1,
 		&s.minRatio, &s.best,
 		&s.gammaSelect, &s.gammaRel, &s.gammaMin, &s.gammaMax, &s.nGamma,

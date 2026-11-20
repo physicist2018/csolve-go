@@ -394,7 +394,7 @@ func internalPanelDataWidth(w vg.Length, cols int) vg.Length {
 }
 
 // internalProfile — компактный график одной высоты пакетного режима.
-func internalProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
+func internalProfile(po *plotOpts, outPath string, rGrid, nAvg, vCum []float64,
 	ch []channel, g1, gFit []float64, h float64) bool {
 	if len(rGrid) == 0 || len(nAvg) == 0 {
 		return false
@@ -411,9 +411,20 @@ func internalProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
 			dv[i] = 1e-30
 		}
 	}
+	cum := make([]float64, len(rGrid))
+	for i := range rGrid {
+		v := math.NaN()
+		if i < len(vCum) {
+			v = vCum[i] / cm3PerM3
+		}
+		if !isFinite(v) {
+			v = math.NaN()
+		}
+		cum[i] = v
+	}
 
-	return internalRender(po, outPath, 8.0*vg.Inch, 3.0667*vg.Inch, func(c draw.Canvas) {
-		tiles := internalTiles(2)
+	return internalRender(po, outPath, 10.0*vg.Inch, 3.0667*vg.Inch, func(c draw.Canvas) {
+		tiles := internalTiles(3)
 
 		p1 := internalNewPlot(po)
 		p1.Title.Text = fmt.Sprintf("H = %g m", h)
@@ -434,8 +445,21 @@ func internalProfile(po *plotOpts, outPath string, rGrid, nAvg []float64,
 		internalAddBars(p2, barLabels(ch), [][]float64{g1, gFit},
 			[]string{"measured g1", "computed g"},
 			[]color.Color{internalColor(0), internalColor(1)},
-			internalPanelDataWidth(8.0*vg.Inch, 2))
+			internalPanelDataWidth(10.0*vg.Inch, 3))
 		p2.Draw(tiles.At(c, 1, 0))
+
+		p3 := internalNewPlot(po)
+		p3.X.Label.Text = internalLabel("r, µm")
+		p3.Y.Label.Text = internalLabel("V, µm³/cm³")
+		p3.X.Scale = plot.LogScale{}
+		p3.X.Tick.Marker = plot.LogTicks{}
+		if xLo, xHi, yLo, yHi, ok := internalRanges(rGrid, true, cum); ok {
+			p3.X.Min, p3.X.Max = xLo, xHi
+			p3.Y.Min, p3.Y.Max = yLo, yHi
+		}
+		internalAddSeries(p3, rGrid, cum, internalColor(2), vg.Points(2), false,
+			nil, false, "", false)
+		p3.Draw(tiles.At(c, 2, 0))
 	})
 }
 
@@ -523,9 +547,9 @@ func internalRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []flo
 	})
 }
 
-// internalResults — основной график одиночного режима (2 панели).
+// internalResultsDraw — основной график одиночного режима (3 панели).
 func internalResultsDraw(po *plotOpts, rGrid []float64,
-	nTrue, nAvg, nAvgRaw []float64, nBest [][]float64, nBestCount int,
+	nTrue, nAvg, nAvgRaw, vCum []float64, nBest [][]float64, nBestCount int,
 	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64) (func(draw.Canvas), bool) {
 	if len(rGrid) == 0 {
 		return nil, false
@@ -542,6 +566,7 @@ func internalResultsDraw(po *plotOpts, rGrid []float64,
 	}
 	mean := scale(nAvg)
 	raw := scale(nAvgRaw)
+	cum := scale(vCum)
 	var tru []float64
 	if nTrue != nil {
 		tru = scale(nTrue)
@@ -566,7 +591,7 @@ func internalResultsDraw(po *plotOpts, rGrid []float64,
 	all = append(all, sols...)
 
 	return func(c draw.Canvas) {
-		tiles := internalTiles(2)
+		tiles := internalTiles(3)
 
 		p1 := internalNewPlot(po)
 		p1.X.Scale = plot.LogScale{}
@@ -600,7 +625,21 @@ func internalResultsDraw(po *plotOpts, rGrid []float64,
 		internalAddBars(p2, barLabels(ch), [][]float64{g1, gFit},
 			[]string{"measured g1", "computed g (mean)"},
 			[]color.Color{internalColor(0), internalColor(1)},
-			internalPanelDataWidth(8.6667*vg.Inch, 2))
+			internalPanelDataWidth(8.6667*vg.Inch, 3))
 		p2.Draw(tiles.At(c, 1, 0))
+
+		p3 := internalNewPlot(po)
+		p3.X.Scale = plot.LogScale{}
+		p3.X.Tick.Marker = plot.LogTicks{}
+		p3.X.Label.Text = internalLabel("r, µm")
+		p3.Y.Label.Text = internalLabel("V, µm³/cm³")
+		p3.Title.Text = internalLabel("Cumulative volume V(r)")
+		if xLo, xHi, yLo, yHi, ok := internalRanges(rGrid, true, cum); ok {
+			p3.X.Min, p3.X.Max = xLo, xHi
+			p3.Y.Min, p3.Y.Max = yLo, yHi
+		}
+		internalAddSeries(p3, rGrid, cum, internalColor(2), vg.Points(2.4),
+			false, nil, false, "V(r)", true)
+		p3.Draw(tiles.At(c, 2, 0))
 	}, true
 }

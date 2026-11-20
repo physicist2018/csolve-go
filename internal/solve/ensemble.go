@@ -7,6 +7,13 @@ func distAt(s *solution, g *geom, r float64) float64 {
 	if r < s.r0 || r > s.r1 {
 		return 0
 	}
+	if g.kind == basisBins {
+		k := binIndexAt(g.binEdges, r)
+		if k < 0 || k >= len(s.C) {
+			return 0
+		}
+		return s.C[k] * g.invBinW[k]
+	}
 	full := bsplineValues(g.knots, g.degree, r)
 	off := 0
 	if g.interiorOnly {

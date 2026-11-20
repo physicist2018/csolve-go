@@ -373,12 +373,12 @@ func TestDepolFunctional(t *testing.T) {
 	g1n := []float64{1, 0.5}
 	const nch = 2
 
-	c0 := solveGamma(A, nch, p.nu, 0, weights, g1n, false)
+	c0 := solveGamma(A, nch, p.nu, 0, weights, g1n, false, 2)
 	d0 := p.depolModel(0, 0, 0, c0)
 	checkClose(t, "channel-only delta_l", d0, 50.0, 1e-9)
 
 	// без дополнительных строк результат тот же
-	cEq := solveGammaRows(A, nch, p.nu, 0, weights, g1n, false, nil, 0)
+	cEq := solveGammaRows(A, nch, p.nu, 0, weights, g1n, false, nil, 0, 2)
 	for i := range cEq {
 		checkClose(t, "solveGammaRows without extra rows", cEq[i], c0[i], 1e-12)
 	}
@@ -389,7 +389,7 @@ func TestDepolFunctional(t *testing.T) {
 		t.Fatalf("expected 1 row of length %d, got %d rows / %d values",
 			p.nu, nExtra, len(extra))
 	}
-	c1 := solveGammaRows(A, nch, p.nu, 0, weights, g1n, false, extra, nExtra)
+	c1 := solveGammaRows(A, nch, p.nu, 0, weights, g1n, false, extra, nExtra, 2)
 	d1 := p.depolModel(0, 0, 0, c1)
 	if !(d1 > d0 && d1 < 60) {
 		t.Errorf("delta_l must move towards the measurement: %g -> %g", d0, d1)
@@ -398,7 +398,7 @@ func TestDepolFunctional(t *testing.T) {
 	// большой вес — ограничение выполняется почти точно
 	dc.w = 1e4
 	extra, nExtra = dc.rows(0, 0, c0)
-	c2 := solveGammaRows(A, nch, p.nu, 0, weights, g1n, false, extra, nExtra)
+	c2 := solveGammaRows(A, nch, p.nu, 0, weights, g1n, false, extra, nExtra, 2)
 	checkClose(t, "large weight delta_l", p.depolModel(0, 0, 0, c2), 60.0, 1e-3)
 
 	// w = 0 — строки нет
@@ -430,7 +430,8 @@ func TestWriteProfileDepolColumns(t *testing.T) {
 		depWl: []float64{0.532}, dep: []float64{7.5}}
 	g1 := []float64{1e-4, 3e-4}
 	prof := &profile{nr: 2, rGrid: []float64{0.1, 0.2},
-		nAvg: []float64{1, 2}, gFit: append([]float64(nil), g1...)}
+		nAvg: []float64{1, 2}, vCum: []float64{0, 0.5},
+		gFit: append([]float64(nil), g1...)}
 	if _, err := writeProfile(dir, 500, b, g1, prof,
 		[]float64{0.532}, []float64{6.25}, []float64{7.5}); err != nil {
 		t.Fatalf("writeProfile: %v", err)
@@ -451,11 +452,12 @@ func TestWriteProfileDepolColumns(t *testing.T) {
 			continue
 		}
 		f := strings.Fields(ln)
-		if len(f) != 4 {
-			t.Fatalf("expected 4 columns, got %d: %q", len(f), ln)
+		if len(f) != 5 {
+			t.Fatalf("expected 5 columns, got %d: %q", len(f), ln)
 		}
-		checkClose(t, "dist depol_calc", mustFloat(t, f[2]), 6.25, 1e-12)
-		checkClose(t, "dist depol_meas", mustFloat(t, f[3]), 7.5, 1e-12)
+		checkClose(t, "dist V", mustFloat(t, f[2]), float64(rows)*5e-7, 1e-18)
+		checkClose(t, "dist depol_calc", mustFloat(t, f[3]), 6.25, 1e-12)
+		checkClose(t, "dist depol_meas", mustFloat(t, f[4]), 7.5, 1e-12)
 		rows++
 	}
 	if rows != 2 {
@@ -484,8 +486,11 @@ func TestWriteProfileDepolColumns(t *testing.T) {
 			continue
 		}
 		f := strings.Fields(ln)
-		if len(f) != 3 || f[2] != "nan" {
-			t.Errorf("expected 3 columns with nan depol, got %q", ln)
+		if len(f) != 4 || f[3] != "nan" {
+			t.Errorf("expected 4 columns with nan depol, got %q", ln)
+		}
+		if _, err := strconv.ParseFloat(f[2], 64); err != nil {
+			t.Errorf("V column must be numeric, got %q", f[2])
 		}
 	}
 }
@@ -735,12 +740,16 @@ func TestArgs(t *testing.T) {
 		}
 	}
 	{
-		a, err := ParseArgs([]string{"--tables", "dir", "--no-nonneg"})
+		a, err := ParseArgs([]string{"--tables", "dir", "--method", "spline",
+			"--no-nonneg"})
 		if err != nil {
 			t.Fatalf("--no-nonneg: %v", err)
 		}
 		if a.Nonneg {
 			t.Errorf("--no-nonneg must disable the constraint")
+		}
+		if _, err := ParseArgs([]string{"--tables", "dir", "--no-nonneg"}); err == nil {
+			t.Errorf("--no-nonneg must be rejected with --method monotone")
 		}
 		a, err = ParseArgs([]string{"--tables", "dir", "--no-depol-ratio-cons"})
 		if err != nil {
@@ -1037,11 +1046,12 @@ func TestInternalPlotSmoke(t *testing.T) {
 	nTrue := []float64{0, 1, 2, 1, 0}
 	nAvg := []float64{0, 1.1, 2.1, 0.9, 0.1}
 	nRaw := []float64{0, 1.2, 2.0, 1.0, 0.2}
+	vCum := []float64{0, 0.08, 0.29, 0.5, 0.62}
 	nBest := [][]float64{nAvg, nAvg}
 	ch := []channel{{kind: chBeta, wlUm: 0.355}, {kind: chBeta, wlUm: 0.532},
 		{kind: chAlpha, wlUm: 0.532}}
 	p = filepath.Join(dir, "results.pdf")
-	if !plotResults(po, p, rGrid, nTrue, nAvg, nRaw, nBest, len(nBest), ch,
+	if !plotResults(po, p, rGrid, nTrue, nAvg, nRaw, vCum, nBest, len(nBest), ch,
 		[]float64{0.9, 0.8, 0.7}, []float64{0.85, 0.82, 0.72}, 1.45, -0.005) {
 		t.Fatalf("internal results plot failed")
 	}
@@ -1055,7 +1065,7 @@ func TestInternalPlotSmoke(t *testing.T) {
 	checkPDF(t, p)
 
 	p = filepath.Join(dir, "profile.pdf")
-	if !plotProfile(po, p, rGrid, []float64{1, 2, 3, 2, 1}, ch,
+	if !plotProfile(po, p, rGrid, []float64{1, 2, 3, 2, 1}, vCum, ch,
 		[]float64{0.9, 0.8, 0.7}, []float64{0.85, 0.82, 0.72}, 500) {
 		t.Fatalf("internal single profile plot failed")
 	}
