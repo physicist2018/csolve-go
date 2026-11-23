@@ -1095,8 +1095,9 @@ func TestInternalPlotSmoke(t *testing.T) {
 	checkPDF(t, p)
 
 	p = filepath.Join(dir, "profile.pdf")
-	if !plotProfile(po, p, rGrid, []float64{1, 2, 3, 2, 1}, vCum, ch,
-		[]float64{0.9, 0.8, 0.7}, []float64{0.85, 0.82, 0.72}, 500) {
+	if !plotProfile(po, p, rGrid, []float64{1, 2, 3, 2, 1}, nLow, nHigh,
+		vCum, ch, []float64{0.9, 0.8, 0.7}, []float64{0.85, 0.82, 0.72},
+		500, len(nBest)) {
 		t.Fatalf("internal single profile plot failed")
 	}
 	checkPDF(t, p)

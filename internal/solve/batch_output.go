@@ -321,8 +321,8 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 			fontSize: a.PlotFontSize, backend: a.Plotting, con: c}
 		pp := filepath.Join(outDir,
 			fmt.Sprintf("plot_%s.%s", formatG6(h), plotFormatExt(a.PlotFormat)))
-		plotProfile(&po, pp, prof.rGrid, prof.nAvg, prof.vCum, solveCh, g1,
-			prof.gFit, h)
+		plotProfile(&po, pp, prof.rGrid, prof.nAvg, prof.nLow, prof.nHigh,
+			prof.vCum, solveCh, g1, prof.gFit, h, prof.nBestCount)
 		if prof.spectra != nil {
 			ps := filepath.Join(outDir, fmt.Sprintf("spectrum_%s.%s",
 				formatG6(h), plotFormatExt(a.PlotFormat)))

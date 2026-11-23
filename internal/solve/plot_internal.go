@@ -419,8 +419,9 @@ func internalPanelDataWidth(w vg.Length, cols int) vg.Length {
 }
 
 // internalProfile — компактный график одной высоты пакетного режима.
-func internalProfile(po *plotOpts, outPath string, rGrid, nAvg, vCum []float64,
-	ch []channel, g1, gFit []float64, h float64) bool {
+func internalProfile(po *plotOpts, outPath string, rGrid, nAvg, nLow, nHigh,
+	vCum []float64, ch []channel, g1, gFit []float64, h float64,
+	gBest int) bool {
 	if len(rGrid) == 0 || len(nAvg) == 0 {
 		return false
 	}
@@ -434,6 +435,18 @@ func internalProfile(po *plotOpts, outPath string, rGrid, nAvg, vCum []float64,
 			dv[i] = v
 		default:
 			dv[i] = 1e-30
+		}
+	}
+	// огибающие — минимум/максимум по G лучшим решениям
+	lo := make([]float64, len(rGrid))
+	hi := make([]float64, len(rGrid))
+	for i := range rGrid {
+		lo[i], hi[i] = math.NaN(), math.NaN()
+		if i < len(nLow) && isFinite(nLow[i]) {
+			lo[i] = nLow[i] / cm3PerM3
+		}
+		if i < len(nHigh) && isFinite(nHigh[i]) {
+			hi[i] = nHigh[i] / cm3PerM3
 		}
 	}
 	cum := make([]float64, len(rGrid))
@@ -457,12 +470,17 @@ func internalProfile(po *plotOpts, outPath string, rGrid, nAvg, vCum []float64,
 		p1.Y.Label.Text = internalLabel("dV/dln r, µm³/cm³")
 		p1.X.Scale = plot.LogScale{}
 		p1.X.Tick.Marker = plot.LogTicks{}
-		if xLo, xHi, yLo, yHi, ok := internalRanges(rGrid, true, dv); ok {
+		if xLo, xHi, yLo, yHi, ok := internalRanges(rGrid, true, dv, lo, hi); ok {
 			p1.X.Min, p1.X.Max = xLo, xHi
 			p1.Y.Min, p1.Y.Max = yLo, yHi
 		}
+		loLabel, hiLabel := envelopeLegend(gBest)
+		internalAddSeries(p1, rGrid, lo, internalColor(1), vg.Points(1.4),
+			false, nil, true, loLabel, true)
+		internalAddSeries(p1, rGrid, hi, internalColor(1), vg.Points(1.4),
+			false, nil, true, hiLabel, true)
 		internalAddSeries(p1, rGrid, dv, internalColor(0), vg.Points(2), false,
-			nil, false, "", false)
+			nil, false, "mean", true)
 		p1.Draw(tiles.At(c, 0, 0))
 
 		p2 := internalNewPlot(po)
@@ -638,10 +656,11 @@ func internalResultsDraw(po *plotOpts, rGrid []float64,
 				nil, false, "", false)
 		}
 		envCol := internalColor(1)
+		loLabel, hiLabel := envelopeLegend(nBestCount)
 		internalAddSeries(p1, rGrid, low, envCol, vg.Points(1.6), false,
-			nil, true, "lower envelope", true)
+			nil, true, loLabel, true)
 		internalAddSeries(p1, rGrid, high, envCol, vg.Points(1.6), false,
-			nil, true, "upper envelope", true)
+			nil, true, hiLabel, true)
 		if tru != nil {
 			internalAddSeries(p1, rGrid, tru, color.Black, vg.Points(1.6),
 				false, nil, true, "true n(r)", true)

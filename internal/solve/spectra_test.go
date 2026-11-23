@@ -245,6 +245,117 @@ func TestSpectrumWavelengths(t *testing.T) {
 	}
 }
 
+// TestEnvelopeUsesBestSolutions — огибающие строятся только по первым G
+// (лучшим) решениям: решения за пределами G не влияют на low/high.
+func TestEnvelopeUsesBestSolutions(t *testing.T) {
+	g := testBinGeom(t, 0.1, 4)
+	geoms := []*geom{g}
+	mk := func(n int, c []float64) *solutions {
+		s := &solutions{n: n, method: methodMonotone, kernelOrder: 3}
+		for i := 0; i < n; i++ {
+			s.sol = append(s.sol, solution{mRe: 1.5, mIm: -0.001, r0: 0.1,
+				r1: 1.0, geomIndex: 0, C: c})
+		}
+		return s
+	}
+	weak := []float64{1e-6, 1e-6, 1e-6, 1e-6}
+	strong := []float64{3e-6, 3e-6, 3e-6, 3e-6}
+	extreme := []float64{1e-2, 1e-2, 1e-2, 1e-2}
+
+	rGrid := []float64{0.2, 0.5, 0.9}
+	// G = 2: третье (экстремальное) решение в огибающие попасть не должно
+	sols := mk(3, weak)
+	sols.sol[1].C = strong
+	sols.sol[2].C = extreme
+	ens := ensembleAverage(sols, 2, geoms, rGrid, false)
+	for i, r := range rGrid {
+		v0 := distAt(&sols.sol[0], g, r)
+		v1 := distAt(&sols.sol[1], g, r)
+		checkClose(t, fmt.Sprintf("low at r=%g", r), ens.low[i],
+			math.Min(v0, v1), 1e-15)
+		checkClose(t, fmt.Sprintf("high at r=%g", r), ens.high[i],
+			math.Max(v0, v1), 1e-15)
+		checkClose(t, fmt.Sprintf("avg at r=%g", r), ens.avg[i],
+			0.5*(v0+v1), 1e-15)
+		if ens.high[i] >= distAt(&sols.sol[2], g, r) {
+			t.Errorf("r=%g: extreme solution beyond G must not affect the envelope", r)
+		}
+	}
+
+	// G = 1: огибающие совпадают со средним
+	sols1 := mk(2, weak)
+	sols1.sol[1].C = extreme
+	ens1 := ensembleAverage(sols1, 1, geoms, rGrid, false)
+	for i := range rGrid {
+		if ens1.low[i] != ens1.avg[i] || ens1.high[i] != ens1.avg[i] {
+			t.Errorf("G=1: expected low=high=avg, got %g, %g, %g",
+				ens1.low[i], ens1.avg[i], ens1.high[i])
+		}
+	}
+}
+
+// TestSpectraUseBestSolutions — спектры тоже агрегируются только по G лучшим
+// решениям (спектр линеен по распределению, поэтому среднее двух решений
+// равно полусумме их спектров).
+func TestSpectraUseBestSolutions(t *testing.T) {
+	src := testSpectrumSource(t, testX2Table(t))
+	g := testBinGeom(t, 0.1, 4)
+	weak := []float64{1e-6, 1e-6, 1e-6, 1e-6}
+	strong := []float64{3e-6, 3e-6, 3e-6, 3e-6}
+	extreme := []float64{1e-2, 1e-2, 1e-2, 1e-2}
+	sols := &solutions{n: 3, method: methodMonotone, kernelOrder: 3,
+		sol: []solution{
+			{mRe: 1.5, mIm: -0.001, r0: 0.1, r1: 1.0, geomIndex: 0, C: weak},
+			{mRe: 1.5, mIm: -0.001, r0: 0.1, r1: 1.0, geomIndex: 0, C: strong},
+			{mRe: 1.5, mIm: -0.001, r0: 0.1, r1: 1.0, geomIndex: 0, C: extreme},
+		}}
+	rq, wq := quadratureGrid([]float64{0.1, 1.0}, 24, 0.1)
+	ch := []channel{{kind: chAlpha, wlUm: 0.532}}
+	base := Args{Spectra: true, SpectrumPoints: 4, KernelOrder: 3,
+		TableRefWl: tableRefWlUm}
+
+	sp1 := buildSpectra(&Args{Spectra: true, SpectrumPoints: 4, Best: 1,
+		KernelOrder: 3, TableRefWl: tableRefWlUm}, sols, []*geom{g}, rq, wq,
+		nil, src, ch, nil, nil, nil)
+	if sp1 == nil || sp1.g != 1 {
+		t.Fatalf("expected G=1 spectra, got %+v", sp1)
+	}
+	for i := range sp1.wlNm {
+		if sp1.alpha.low[i] != sp1.alpha.mean[i] ||
+			sp1.alpha.high[i] != sp1.alpha.mean[i] {
+			t.Errorf("G=1: expected low=high=mean for α, got %g, %g, %g",
+				sp1.alpha.low[i], sp1.alpha.mean[i], sp1.alpha.high[i])
+		}
+	}
+
+	// G=2: экстремальное третье решение не входит ни в среднее, ни в огибающие
+	a2 := base
+	a2.Best = 2
+	sp2 := buildSpectra(&a2, sols, []*geom{g}, rq, wq, nil, src, ch, nil,
+		nil, nil)
+	if sp2 == nil || sp2.g != 2 {
+		t.Fatalf("expected G=2 spectra, got %+v", sp2)
+	}
+	// спектр одного решения (weak или strong) для той же сетки
+	one := func(c []float64) *spectra {
+		s := &solutions{n: 1, method: methodMonotone, kernelOrder: 3,
+			sol: []solution{{mRe: 1.5, mIm: -0.001, r0: 0.1, r1: 1.0,
+				geomIndex: 0, C: c}}}
+		return buildSpectra(&Args{Spectra: true, SpectrumPoints: 4, Best: 1,
+			KernelOrder: 3, TableRefWl: tableRefWlUm}, s, []*geom{g}, rq, wq,
+			nil, src, ch, nil, nil, nil)
+	}
+	sw, ss := one(weak), one(strong)
+	for i := range sp2.wlNm {
+		checkClose(t, "spectra mean = average of best two", sp2.alpha.mean[i],
+			0.5*(sw.alpha.mean[i]+ss.alpha.mean[i]), 1e-12)
+		if sp2.alpha.low[i] > sw.alpha.mean[i]+1e-18 ||
+			sp2.alpha.high[i] < ss.alpha.mean[i]-1e-18 {
+			t.Errorf("λ=%g: envelope must span the best two solutions", sp2.wlNm[i])
+		}
+	}
+}
+
 // TestWriteSpectrum — файл пакетного режима: 10 столбцов, измеренные значения
 // в комментарии, nan для отсутствующих величин.
 func TestWriteSpectrum(t *testing.T) {

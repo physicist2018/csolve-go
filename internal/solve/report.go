@@ -84,8 +84,8 @@ func reportSummary(a *Args, sols *solutions, g1 []float64, ch []channel,
 		c.printf("  %9.4g %12.4g %12.4g %12.4g\n", r, nAvg[i]/cm3PerM3,
 			lo/cm3PerM3, hi/cm3PerM3)
 	}
-	c.printf("  (lower/upper — min/max over the best solutions covering r, " +
-		"before smoothing)\n")
+	c.printf("  (lower/upper — min/max over the G = %d best solutions "+
+		"covering r, before smoothing)\n", G)
 
 	reportCumulativeVolume(vCum, rGrid, sols.method == methodMonotone, c)
 

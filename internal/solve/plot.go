@@ -71,12 +71,25 @@ func plotFormatExt(f plotFormat) string {
 }
 
 // plotProfile — компактный график одной высоты пакетного режима (3 панели).
-func plotProfile(po *plotOpts, outPath string, rGrid, nAvg, vCum []float64,
-	ch []channel, g1, gFit []float64, h float64) bool {
+func plotProfile(po *plotOpts, outPath string, rGrid, nAvg, nLow, nHigh,
+	vCum []float64, ch []channel, g1, gFit []float64, h float64,
+	gBest int) bool {
 	if po != nil && po.backend == plottingInternal {
-		return internalProfile(po, outPath, rGrid, nAvg, vCum, ch, g1, gFit, h)
+		return internalProfile(po, outPath, rGrid, nAvg, nLow, nHigh, vCum, ch,
+			g1, gFit, h, gBest)
 	}
-	return gnuplotProfile(po, outPath, rGrid, nAvg, vCum, ch, g1, gFit, h)
+	return gnuplotProfile(po, outPath, rGrid, nAvg, nLow, nHigh, vCum, ch, g1,
+		gFit, h, gBest)
+}
+
+// envelopeLegend — подписи огибающих с числом лучших решений (g <= 0 —
+// без числа).
+func envelopeLegend(g int) (lower, upper string) {
+	if g > 0 {
+		return fmt.Sprintf("lower envelope (G=%d)", g),
+			fmt.Sprintf("upper envelope (G=%d)", g)
+	}
+	return "lower envelope", "upper envelope"
 }
 
 // plotRefractiveProfile — сводный вертикальный профиль m по высотам.

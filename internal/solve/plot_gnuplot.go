@@ -20,8 +20,9 @@ func gnuplotOK(outPath, script string) bool {
 }
 
 // gnuplotProfile — компактный график одной высоты пакетного режима (3 панели).
-func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg, vCum []float64,
-	ch []channel, g1, gFit []float64, h float64) bool {
+func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg, nLow, nHigh,
+	vCum []float64, ch []channel, g1, gFit []float64, h float64,
+	gBest int) bool {
 	dir, ok := po.tempDir()
 	if !ok {
 		return false
@@ -53,6 +54,26 @@ func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg, vCum []float64,
 		} else {
 			prof.WriteString("NaN")
 		}
+		prof.WriteByte(' ')
+		lv := math.NaN()
+		if i < len(nLow) {
+			lv = nLow[i] / cm3PerM3
+		}
+		if isFinite(lv) {
+			prof.WriteString(formatG17(lv))
+		} else {
+			prof.WriteString("NaN")
+		}
+		prof.WriteByte(' ')
+		hv := math.NaN()
+		if i < len(nHigh) {
+			hv = nHigh[i] / cm3PerM3
+		}
+		if isFinite(hv) {
+			prof.WriteString(formatG17(hv))
+		} else {
+			prof.WriteString("NaN")
+		}
 		prof.WriteByte('\n')
 	}
 	po.writeDataFile(pProf, prof.String())
@@ -70,8 +91,13 @@ func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg, vCum []float64,
 	fmt.Fprintf(&sb, "set xlabel 'r, µm'%s\n", fa)
 	fmt.Fprintf(&sb, "set ylabel 'dV/dln r, µm³/cm³'%s\n", fa)
 	sb.WriteString("set grid\n")
-	fmt.Fprintf(&sb, "plot %q using 1:2 with lines lw 2 lc rgb '#1f77b4' "+
-		"notitle\n", gpPath(pProf))
+	loLabel, hiLabel := envelopeLegend(gBest)
+	fmt.Fprintf(&sb, "set key top right%s\n", fa)
+	fmt.Fprintf(&sb, "plot %q using 1:4 with lines dt 2 lw 1.4 "+
+		"lc rgb '#d62728' title '%s', \\\n"+
+		"     '' using 1:5 with lines dt 2 lw 1.4 lc rgb '#d62728' title '%s', \\\n"+
+		"     '' using 1:2 with lines lw 2 lc rgb '#1f77b4' title 'mean'\n",
+		gpPath(pProf), loLabel, hiLabel)
 	fmt.Fprintf(&sb, "set ylabel 'V, µm³/cm³'%s\n", fa)
 	fmt.Fprintf(&sb, "plot %q using 1:3 with lines lw 2 lc rgb '#2ca02c' "+
 		"notitle\n", gpPath(pProf))
@@ -357,11 +383,12 @@ func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 			"notitle", gpPath(solFiles[t]))
 	}
 	sep()
+	loLabel, hiLabel := envelopeLegend(nBestCount)
 	fmt.Fprintf(&sb, "%q using 1:5 with lines dt 2 lw 1.6 "+
-		"lc rgb '#d62728' title 'lower envelope'", gpPath(pAvg))
+		"lc rgb '#d62728' title '%s'", gpPath(pAvg), loLabel)
 	sep()
 	fmt.Fprintf(&sb, "%q using 1:6 with lines dt 2 lw 1.6 "+
-		"lc rgb '#d62728' title 'upper envelope'", gpPath(pAvg))
+		"lc rgb '#d62728' title '%s'", gpPath(pAvg), hiLabel)
 	sep()
 	fmt.Fprintf(&sb, "%q using 1:3 with lines lw 1 dt 3 "+
 		"lc rgb 'dark-orange' title 'mean (unsmoothed)'", gpPath(pAvg))
