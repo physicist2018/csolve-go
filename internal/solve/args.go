@@ -81,6 +81,11 @@ type Args struct {
 	DepolRatioExplicit bool
 	DepolRatioW        float64
 	DepolRatioMode     depolMode
+
+	Spectra        bool    // считать α(λ), β(λ), δ_l(λ) и строить их графики
+	SpectrumPoints int     // число длин волн в сетке спектров
+	SpectrumWlMin  float64 // нижняя граница сетки, нм (0 = авто)
+	SpectrumWlMax  float64 // верхняя граница сетки, нм (0 = авто)
 }
 
 var errHelp = errors.New("help requested")
@@ -255,7 +260,16 @@ Options:
                                  internal backend requires pdf
   --plot-dpi <N>                 resolution for png/svg, dpi, > 0 [150]
   --plot-font-size <pt>          axis/series label size, pt (0 or 4..72) [12]
-  --no-plot                      do not build plots
+  	--no-plot                      do not build plots
+
+    --no-spectra                   do not compute the α(λ)/β(λ)/δ_l(λ) spectra
+                                   (no spectral plots, JSON section or batch
+                                   files)
+    --spectrum-points <N>          wavelengths in the spectra grid, 2..512 [40]
+    --spectrum-wl-min <nm>         lower wavelength of the spectra grid; 0 =
+                                   from the input data [0]
+    --spectrum-wl-max <nm>         upper wavelength of the spectra grid; 0 =
+                                   from the input data [0]
 
   --batch <TXT>                  batch processing from txt
                                  (Altitude b<nm>... a<nm>...)
@@ -324,6 +338,8 @@ func ParseArgs(argv []string) (*Args, error) {
 		DepolRatioMode: depolModeFunc,
 		Nonneg:         true,
 		DepolRatioCons: true,
+		Spectra:        true,
+		SpectrumPoints: 40,
 	}
 
 	fs := flag.NewFlagSet("csolve", flag.ContinueOnError)
@@ -406,6 +422,13 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.Float64Var(&a.PlotDpi, "plot-dpi", a.PlotDpi, "")
 	fs.Float64Var(&a.PlotFontSize, "plot-font-size", a.PlotFontSize, "")
 	fs.BoolVar(&a.NoPlot, "no-plot", false, "")
+	fs.BoolVar(&a.Spectra, "spectra", a.Spectra, "")
+	var noSpectra bool
+	fs.BoolVar(&noSpectra, "no-spectra", false, "")
+	spectrumPoints := &singleIntFlag{minV: 2, maxV: 512, name: "spectrum-points"}
+	fs.Var(spectrumPoints, "spectrum-points", "")
+	fs.Float64Var(&a.SpectrumWlMin, "spectrum-wl-min", a.SpectrumWlMin, "")
+	fs.Float64Var(&a.SpectrumWlMax, "spectrum-wl-max", a.SpectrumWlMax, "")
 
 	fs.StringVar(&a.Batch, "batch", "", "")
 	fs.StringVar(&a.BatchOutDir, "batch-out-dir", "", "")
@@ -449,11 +472,21 @@ func ParseArgs(argv []string) (*Args, error) {
 		return nil, fmt.Errorf("options --depol-ratio-cons and " +
 			"--no-depol-ratio-cons are mutually exclusive")
 	}
+	if seen["spectra"] && seen["no-spectra"] {
+		return nil, fmt.Errorf("options --spectra and --no-spectra are " +
+			"mutually exclusive")
+	}
 	if noNonneg {
 		a.Nonneg = false
 	}
 	if noDepolCons {
 		a.DepolRatioCons = false
+	}
+	if noSpectra {
+		a.Spectra = false
+	}
+	if spectrumPoints.set {
+		a.SpectrumPoints = spectrumPoints.value
 	}
 	a.DepolRatioExplicit = seen["depol-ratio-cons"]
 
@@ -583,6 +616,18 @@ func checkArgs(a *Args, seen map[string]bool) error {
 	}
 	if a.PlotFontSize != 0 && !(a.PlotFontSize >= 4 && a.PlotFontSize <= 72) {
 		return fmt.Errorf("option --plot-font-size must be 0 or between 4 and 72")
+	}
+	if a.SpectrumWlMin < 0 || a.SpectrumWlMax < 0 {
+		return fmt.Errorf("options --spectrum-wl-min/--spectrum-wl-max " +
+			"must be >= 0 (0 = auto)")
+	}
+	if a.SpectrumWlMin > 0 && a.SpectrumWlMax > 0 &&
+		!(a.SpectrumWlMax > a.SpectrumWlMin) {
+		return fmt.Errorf("option --spectrum-wl-max must be greater than " +
+			"--spectrum-wl-min")
+	}
+	if a.SpectrumPoints < 2 {
+		return fmt.Errorf("option --spectrum-points must be >= 2")
 	}
 	return nil
 }

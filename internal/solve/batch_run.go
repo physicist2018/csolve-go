@@ -450,7 +450,7 @@ func solveBatchAltitudes(a *Args, c *console, st *batchSetup, outDir string,
 			g1 := b.data[h*b.nch:]
 			if err := emitProfile(a, outDir, b.alt[h], b, st.solveCh, g1, per[h],
 				st.kts, st.mre, st.mim, st.design.geom, st.r1MaxEff, common, nl,
-				writeLidar, met, h, st.ds, c); err != nil {
+				writeLidar, met, h, st.ds, st.src, c); err != nil {
 				return err
 			}
 		}
@@ -482,7 +482,7 @@ func solveBatchAltitudes(a *Args, c *console, st *batchSetup, outDir string,
 		bd.rank(sols, h)
 		if err := emitProfile(a, outDir, b.alt[h], b, st.solveCh, g1, sols,
 			st.kts, st.mre, st.mim, st.design.geom, st.r1MaxEff, common, nl,
-			writeLidar, met, h, st.ds, c); err != nil {
+			writeLidar, met, h, st.ds, st.src, c); err != nil {
 			return err
 		}
 	}

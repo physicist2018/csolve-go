@@ -70,7 +70,8 @@ func TestWriteDocx(t *testing.T) {
 	path := filepath.Join(dir, "report.docx")
 	text := "=== Channel agreement ===\n  beta(355 nm)  g = 1 < 2 & 3\n"
 	warn := "[warning] something happened"
-	if err := writeDocx(path, "Title", "meta", text, warn, testPNG(t, 8, 4)); err != nil {
+	imgs := [][]byte{testPNG(t, 8, 4), testPNG(t, 6, 4)}
+	if err := writeDocx(path, "Title", "meta", text, warn, imgs); err != nil {
 		t.Fatalf("writeDocx: %v", err)
 	}
 
@@ -88,12 +89,14 @@ func TestWriteDocx(t *testing.T) {
 			t.Errorf("invalid XML in %s: %v", part, err)
 		}
 	}
-	if read("word/media/image1.png") == "" {
+	if read("word/media/image1.png") == "" ||
+		read("word/media/image2.png") == "" {
 		t.Errorf("missing embedded image")
 	}
 	doc := read("word/document.xml")
-	if !strings.Contains(doc, "w:drawing") {
-		t.Errorf("document.xml must embed the image")
+	if !strings.Contains(doc, "w:drawing") ||
+		!strings.Contains(doc, `r:embed="rId2"`) {
+		t.Errorf("document.xml must embed both images")
 	}
 	if !strings.Contains(doc, "g = 1 &lt; 2 &amp; 3") {
 		t.Errorf("document text must be XML-escaped:\n%s", doc)
@@ -107,7 +110,8 @@ func TestWriteOdt(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "report.odt")
 	text := "line one\n  indented text"
-	if err := writeOdt(path, "Title", "meta", text, "", testPNG(t, 8, 4)); err != nil {
+	imgs := [][]byte{testPNG(t, 8, 4), testPNG(t, 6, 4)}
+	if err := writeOdt(path, "Title", "meta", text, "", imgs); err != nil {
 		t.Fatalf("writeOdt: %v", err)
 	}
 
@@ -131,8 +135,9 @@ func TestWriteOdt(t *testing.T) {
 	}
 	content := read("content.xml")
 	if !strings.Contains(content, "draw:image") ||
-		!strings.Contains(content, "Pictures/image1.png") {
-		t.Errorf("content.xml must reference the image")
+		!strings.Contains(content, "Pictures/image1.png") ||
+		!strings.Contains(content, "Pictures/image2.png") {
+		t.Errorf("content.xml must reference both images")
 	}
 	if !strings.Contains(content, "indented<text:s/>text") {
 		t.Errorf("spaces must be preserved via text:s:\n%s", content)

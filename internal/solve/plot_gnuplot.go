@@ -236,8 +236,8 @@ func gnuplotProfilesStyled(po *plotOpts, outPath, title, xlabel string,
 
 // gnuplotResults — основной график одиночного режима (3 панели), gnuplot.
 func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
-	nTrue, nAvg, nAvgRaw, vCum []float64, nBest [][]float64, nBestCount int,
-	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64) bool {
+	nTrue, nAvg, nAvgRaw, nLow, nHigh, vCum []float64, nBest [][]float64,
+	nBestCount int, ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64) bool {
 	dir, ok := po.tempDir()
 	if !ok {
 		return false
@@ -271,6 +271,26 @@ func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 		}
 		if isFinite(cv) {
 			avg.WriteString(formatG17(cv))
+		} else {
+			avg.WriteString("NaN")
+		}
+		avg.WriteByte(' ')
+		lv := math.NaN()
+		if i < len(nLow) {
+			lv = nLow[i] / cm3PerM3
+		}
+		if isFinite(lv) {
+			avg.WriteString(formatG17(lv))
+		} else {
+			avg.WriteString("NaN")
+		}
+		avg.WriteByte(' ')
+		hv := math.NaN()
+		if i < len(nHigh) {
+			hv = nHigh[i] / cm3PerM3
+		}
+		if isFinite(hv) {
+			avg.WriteString(formatG17(hv))
 		} else {
 			avg.WriteString("NaN")
 		}
@@ -337,6 +357,12 @@ func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 			"notitle", gpPath(solFiles[t]))
 	}
 	sep()
+	fmt.Fprintf(&sb, "%q using 1:5 with lines dt 2 lw 1.6 "+
+		"lc rgb '#d62728' title 'lower envelope'", gpPath(pAvg))
+	sep()
+	fmt.Fprintf(&sb, "%q using 1:6 with lines dt 2 lw 1.6 "+
+		"lc rgb '#d62728' title 'upper envelope'", gpPath(pAvg))
+	sep()
 	fmt.Fprintf(&sb, "%q using 1:3 with lines lw 1 dt 3 "+
 		"lc rgb 'dark-orange' title 'mean (unsmoothed)'", gpPath(pAvg))
 	sep()
@@ -368,5 +394,121 @@ func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 	files := append([]string{pAvg, pTrue, pBars, pScript}, solFiles...)
 	cleanupPlot(dir, files...)
 	po.printf("plot saved: %s\n", outPath)
+	return true
+}
+
+// gnuplotSpectrumFigure — одна или несколько панелей «величина vs λ» через
+// gnuplot: тонкие серые кривые решений, штриховые огибающие, среднее и
+// измеренные точки.
+func gnuplotSpectrumFigure(po *plotOpts, outPath string, panels []spectrumPanel,
+	wIn, hIn float64) bool {
+	if len(panels) == 0 {
+		return false
+	}
+	dir, ok := po.tempDir()
+	if !ok {
+		return false
+	}
+	fa := plotFontAttr(po)
+	var sb strings.Builder
+	sb.WriteString("set encoding utf8\n")
+	setTerminal(&sb, po, wIn, hIn)
+	fmt.Fprintf(&sb, "set output %q\n", gpPath(outPath))
+	sb.WriteString("set datafile missing 'NaN'\n")
+	if len(panels) > 1 {
+		fmt.Fprintf(&sb, "set multiplot layout 1,%d\n", len(panels))
+	}
+
+	files := make([]string, 0, 2*len(panels)+1)
+	for i, pn := range panels {
+		dataPath := filepath.Join(dir, fmt.Sprintf("spec_%d.dat", i))
+		files = append(files, dataPath)
+		nc := len(pn.set.curves)
+		var data strings.Builder
+		for k, wl := range pn.wl {
+			data.WriteString(formatG17(wl))
+			for _, series := range [][]float64{pn.set.mean, pn.set.low,
+				pn.set.high} {
+				data.WriteByte(' ')
+				v := math.NaN()
+				if k < len(series) {
+					v = series[k]
+				}
+				if isFinite(v) {
+					data.WriteString(formatG17(v))
+				} else {
+					data.WriteString("NaN")
+				}
+			}
+			for c := 0; c < nc; c++ {
+				data.WriteByte(' ')
+				v := math.NaN()
+				if k < len(pn.set.curves[c]) {
+					v = pn.set.curves[c][k]
+				}
+				if isFinite(v) {
+					data.WriteString(formatG17(v))
+				} else {
+					data.WriteString("NaN")
+				}
+			}
+			data.WriteByte('\n')
+		}
+		po.writeDataFile(dataPath, data.String())
+
+		measPath := ""
+		if len(pn.set.meas) > 0 {
+			measPath = filepath.Join(dir, fmt.Sprintf("meas_%d.dat", i))
+			files = append(files, measPath)
+			var mb strings.Builder
+			for _, m := range pn.set.meas {
+				fmt.Fprintf(&mb, "%s %s\n", formatG17(m.wlNm),
+					formatG17(m.value))
+			}
+			po.writeDataFile(measPath, mb.String())
+		}
+
+		fmt.Fprintf(&sb, "set title '%s'\n", pn.title)
+		fmt.Fprintf(&sb, "set xlabel 'λ, nm'%s\n", fa)
+		fmt.Fprintf(&sb, "set ylabel '%s'%s\n", pn.ylabel, fa)
+		sb.WriteString("set grid\n")
+		fmt.Fprintf(&sb, "set key top right%s\n", fa)
+		sb.WriteString("unset logscale y\n")
+
+		parts := make([]string, 0, nc+4)
+		for c := 0; c < nc; c++ {
+			parts = append(parts, fmt.Sprintf("%q using 1:%d with lines "+
+				"lw 0.8 lc rgb '#bbbbbb' notitle", gpPath(dataPath), 5+c))
+		}
+		parts = append(parts,
+			fmt.Sprintf("%q using 1:3 with lines dt 2 lw 1.6 "+
+				"lc rgb '#d62728' title 'lower envelope'", gpPath(dataPath)),
+			fmt.Sprintf("%q using 1:4 with lines dt 2 lw 1.6 "+
+				"lc rgb '#d62728' title 'upper envelope'", gpPath(dataPath)),
+			fmt.Sprintf("%q using 1:2 with lines lw 2.4 "+
+				"lc rgb '#1f77b4' title 'mean of best solutions'",
+				gpPath(dataPath)))
+		if measPath != "" {
+			parts = append(parts, fmt.Sprintf("%q using 1:2 with points "+
+				"pt 7 ps 1.1 lc rgb 'black' title '%s'", gpPath(measPath),
+				pn.set.measName))
+		}
+		sb.WriteString("plot ")
+		sb.WriteString(strings.Join(parts, ", \\\n     "))
+		sb.WriteByte('\n')
+	}
+	if len(panels) > 1 {
+		sb.WriteString("unset multiplot\n")
+	}
+
+	scriptPath := filepath.Join(dir, "plot.gp")
+	po.writeDataFile(scriptPath, sb.String())
+	if !gnuplotOK(outPath, scriptPath) {
+		po.warnf("[warning] failed to build plot %s "+
+			"(script: %s)\n", outPath, scriptPath)
+		return false
+	}
+	files = append(files, scriptPath)
+	cleanupPlot(dir, files...)
 	return true
 }

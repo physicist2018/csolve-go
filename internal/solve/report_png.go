@@ -14,10 +14,10 @@ const internalPNGDpi = 150
 
 // internalResults — основной график одиночного режима (3 панели) в PDF.
 func internalResults(po *plotOpts, outPath string, rGrid []float64,
-	nTrue, nAvg, nAvgRaw, vCum []float64, nBest [][]float64, nBestCount int,
-	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64) bool {
-	drawFn, ok := internalResultsDraw(po, rGrid, nTrue, nAvg, nAvgRaw, vCum, nBest,
-		nBestCount, ch, g1, gFit, mAvgRe, mAvgIm)
+	nTrue, nAvg, nAvgRaw, nLow, nHigh, vCum []float64, nBest [][]float64,
+	nBestCount int, ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64) bool {
+	drawFn, ok := internalResultsDraw(po, rGrid, nTrue, nAvg, nAvgRaw, nLow,
+		nHigh, vCum, nBest, nBestCount, ch, g1, gFit, mAvgRe, mAvgIm)
 	if !ok {
 		return false
 	}
@@ -26,10 +26,10 @@ func internalResults(po *plotOpts, outPath string, rGrid []float64,
 
 // internalResultsPNG — тот же график в PNG (для встраивания в отчёт).
 func internalResultsPNG(po *plotOpts, rGrid []float64, nTrue, nAvg,
-	nAvgRaw, vCum []float64, nBest [][]float64, nBestCount int, ch []channel,
-	g1, gFit []float64, mAvgRe, mAvgIm float64) ([]byte, bool) {
-	drawFn, ok := internalResultsDraw(po, rGrid, nTrue, nAvg, nAvgRaw, vCum, nBest,
-		nBestCount, ch, g1, gFit, mAvgRe, mAvgIm)
+	nAvgRaw, nLow, nHigh, vCum []float64, nBest [][]float64, nBestCount int,
+	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64) ([]byte, bool) {
+	drawFn, ok := internalResultsDraw(po, rGrid, nTrue, nAvg, nAvgRaw, nLow,
+		nHigh, vCum, nBest, nBestCount, ch, g1, gFit, mAvgRe, mAvgIm)
 	if !ok {
 		return nil, false
 	}

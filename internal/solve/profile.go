@@ -10,6 +10,8 @@ type profile struct {
 	rGrid      []float64
 	nAvg       []float64
 	nAvgRaw    []float64
+	nLow       []float64 // нижняя огибающая по лучшим решениям
+	nHigh      []float64 // верхняя огибающая по лучшим решениям
 	vCum       []float64 // кумулятивный объём V(r) = ∫ n dln r, µm³/cm³
 	nBest      [][]float64
 	nBestCount int
@@ -20,6 +22,7 @@ type profile struct {
 	count      []float64
 	deltaL     []float64 // δ_l = (S11-S22)/(S11+S22)*100, %
 	deltaLwl   []float64 // длины волн δ_l, µm
+	spectra    *spectra  // α(λ), β(λ), δ_l(λ) по решениям ансамбля
 }
 
 // mEps — допуск сравнения m: значения приходят из имён каталогов таблиц,
@@ -37,9 +40,12 @@ func mIndex(mre, mim []float64, re, im float64) int {
 }
 
 // profileFinalize — итоговый профиль одной высоты (общий код одиночного и
-// пакетного режимов). ds — ядра S11/S22 для δ_l (nil — не считаются).
+// пакетного режимов). ds — ядра S11/S22 для δ_l (nil — не считаются);
+// src — источник таблиц для спектров α(λ)/β(λ); g1 — измеренные
+// коэффициенты каналов ch; depWl/depVal — измеренная δ_l для маркеров.
 func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
-	sols *solutions, geom []*geom, rMin, rMax float64, ds *depolSet) (*profile, error) {
+	sols *solutions, geom []*geom, rMin, rMax float64, ds *depolSet,
+	src *tableSource, g1, depWl, depVal []float64) (*profile, error) {
 	_ = ch
 	p := &profile{}
 	nr := a.NrOut
@@ -52,12 +58,16 @@ func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
 	// в dV/dln r до всякой обработки (сглаживание, моменты, графики).
 	ko := normalizeKernelOrder(a.KernelOrder)
 	applyKernelToVolume(ko, p.rGrid, ens.avg)
+	applyKernelToVolume(ko, p.rGrid, ens.low)
+	applyKernelToVolume(ko, p.rGrid, ens.high)
 	for t := range ens.mat {
 		applyKernelToVolume(ko, p.rGrid, ens.mat[t])
 	}
 	p.nBest = ens.mat
 	p.nAvgRaw = ens.avg
 	p.nAvg = append([]float64(nil), ens.avg...)
+	p.nLow = ens.low
+	p.nHigh = ens.high
 	p.mRe = ens.mRe
 	p.mIm = ens.mIm
 	if !a.NoSmooth {
@@ -67,6 +77,12 @@ func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
 		if sols.method == methodMonotone {
 			clampNonNegative(p.nAvg)
 		}
+	}
+	// огибающие не сглаживаются, но для монотонного метода отрицательные
+	// значения — только ошибка округления NNLS
+	if sols.method == methodMonotone {
+		clampNonNegative(p.nLow)
+		clampNonNegative(p.nHigh)
 	}
 	// кумулятивный объём строится по итоговому среднему n ≥ 0, поэтому V(r)
 	// монотонна и V(r_end) совпадает с C_v
@@ -118,6 +134,10 @@ func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
 		p.deltaLwl = append([]float64(nil), ds.wl...)
 		_, _, p.deltaL = depolFromProfile(ds, bestIdx, rq, wq, nqVals)
 	}
+
+	// спектры α(λ), β(λ), δ_l(λ) по каждому решению ансамбля
+	p.spectra = buildSpectra(a, sols, geom, rq, wq, ds, src, ch, g1, depWl,
+		depVal)
 
 	p.moments = sizeMoments(p.nAvg, p.rGrid)
 	p.count = make([]float64, nr)

@@ -452,12 +452,15 @@ func TestWriteProfileDepolColumns(t *testing.T) {
 			continue
 		}
 		f := strings.Fields(ln)
-		if len(f) != 5 {
-			t.Fatalf("expected 5 columns, got %d: %q", len(f), ln)
+		if len(f) != 7 {
+			t.Fatalf("expected 7 columns, got %d: %q", len(f), ln)
 		}
 		checkClose(t, "dist V", mustFloat(t, f[2]), float64(rows)*5e-7, 1e-18)
 		checkClose(t, "dist depol_calc", mustFloat(t, f[3]), 6.25, 1e-12)
 		checkClose(t, "dist depol_meas", mustFloat(t, f[4]), 7.5, 1e-12)
+		if !math.IsNaN(mustFloat(t, f[5])) || !math.IsNaN(mustFloat(t, f[6])) {
+			t.Errorf("envelope columns must be nan without n_low/n_high: %q", ln)
+		}
 		rows++
 	}
 	if rows != 2 {
@@ -486,8 +489,8 @@ func TestWriteProfileDepolColumns(t *testing.T) {
 			continue
 		}
 		f := strings.Fields(ln)
-		if len(f) != 4 || f[3] != "nan" {
-			t.Errorf("expected 4 columns with nan depol, got %q", ln)
+		if len(f) != 6 || f[3] != "nan" {
+			t.Errorf("expected 6 columns with nan depol, got %q", ln)
 		}
 		if _, err := strconv.ParseFloat(f[2], 64); err != nil {
 			t.Errorf("V column must be numeric, got %q", f[2])
@@ -1046,14 +1049,41 @@ func TestInternalPlotSmoke(t *testing.T) {
 	nTrue := []float64{0, 1, 2, 1, 0}
 	nAvg := []float64{0, 1.1, 2.1, 0.9, 0.1}
 	nRaw := []float64{0, 1.2, 2.0, 1.0, 0.2}
+	nLow := []float64{0, 1.0, 2.0, 0.8, 0.0}
+	nHigh := []float64{0.1, 1.3, 2.2, 1.1, 0.3}
 	vCum := []float64{0, 0.08, 0.29, 0.5, 0.62}
 	nBest := [][]float64{nAvg, nAvg}
 	ch := []channel{{kind: chBeta, wlUm: 0.355}, {kind: chBeta, wlUm: 0.532},
 		{kind: chAlpha, wlUm: 0.532}}
 	p = filepath.Join(dir, "results.pdf")
-	if !plotResults(po, p, rGrid, nTrue, nAvg, nRaw, vCum, nBest, len(nBest), ch,
-		[]float64{0.9, 0.8, 0.7}, []float64{0.85, 0.82, 0.72}, 1.45, -0.005) {
+	if !plotResults(po, p, rGrid, nTrue, nAvg, nRaw, nLow, nHigh, vCum,
+		nBest, len(nBest), ch, []float64{0.9, 0.8, 0.7},
+		[]float64{0.85, 0.82, 0.72}, 1.45, -0.005) {
 		t.Fatalf("internal results plot failed")
+	}
+	checkPDF(t, p)
+
+	sp := &spectra{
+		wlNm: []float64{355, 450, 532, 700, 1064},
+		alpha: &spectrumSet{
+			curves:   [][]float64{{1e-4, 9e-5, 7e-5, 5e-5, 3e-5}},
+			mean:     []float64{1e-4, 9e-5, 7e-5, 5e-5, 3e-5},
+			low:      []float64{9e-5, 8e-5, 6e-5, 4e-5, 2e-5},
+			high:     []float64{1.1e-4, 1e-4, 8e-5, 6e-5, 4e-5},
+			meas:     []wlPoint{{wlNm: 355, value: 1.05e-4}},
+			measName: "measured α",
+		},
+	}
+	for _, np := range sp.namedPanels() {
+		p = filepath.Join(dir, "spectrum_"+np.suffix+".pdf")
+		if !plotSpectrum(po, p, np.panel) {
+			t.Fatalf("internal spectrum plot %s failed", np.suffix)
+		}
+		checkPDF(t, p)
+	}
+	p = filepath.Join(dir, "spectra.pdf")
+	if !plotSpectraPanels(po, p, sp, 500) {
+		t.Fatalf("internal spectra panels plot failed")
 	}
 	checkPDF(t, p)
 

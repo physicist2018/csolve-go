@@ -229,10 +229,35 @@ func internalAddSeries(p *plot.Plot, xs, ys []float64, clr color.Color,
 	}
 }
 
+// internalAddPoints рисует только маркеры (без соединяющей линии) —
+// измеренные точки на графиках спектров.
+func internalAddPoints(p *plot.Plot, xs, ys []float64, clr color.Color,
+	glyph draw.GlyphDrawer, name string) {
+	var thumb plot.Thumbnailer
+	for i := 0; i < len(xs) && i < len(ys); i++ {
+		if !isFinite(xs[i]) || !isFinite(ys[i]) {
+			continue
+		}
+		sc, err := plotter.NewScatter(plotter.XYs{{X: xs[i], Y: ys[i]}})
+		if err != nil {
+			continue
+		}
+		sc.GlyphStyle = draw.GlyphStyle{Color: clr, Radius: vg.Points(3),
+			Shape: glyph}
+		p.Add(sc)
+		if thumb == nil {
+			thumb = sc
+		}
+	}
+	if thumb != nil && name != "" {
+		p.Legend.Add(name, thumb)
+	}
+}
+
 // internalAddBars рисует сгруппированные столбцы с подписями по каналам.
-// dataW — оценка ширины области данных панели (vg.Length): по ней
-// подбираются ширина столбца и поля, чтобы крайние группы не обрезались
-// (gonum/plot не учитывает Offset в DataRange).
+// dataW — оценка ширины области данных панели: по ней подбираются ширина
+// столбца и поля, чтобы крайние группы не обрезались (gonum/plot не
+// учитывает Offset в DataRange).
 func internalAddBars(p *plot.Plot, labels []string, cols [][]float64,
 	names []string, colors []color.Color, dataW vg.Length) {
 	n := len(labels)
@@ -549,8 +574,9 @@ func internalRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []flo
 
 // internalResultsDraw — основной график одиночного режима (3 панели).
 func internalResultsDraw(po *plotOpts, rGrid []float64,
-	nTrue, nAvg, nAvgRaw, vCum []float64, nBest [][]float64, nBestCount int,
-	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64) (func(draw.Canvas), bool) {
+	nTrue, nAvg, nAvgRaw, nLow, nHigh, vCum []float64, nBest [][]float64,
+	nBestCount int, ch []channel, g1, gFit []float64, mAvgRe,
+	mAvgIm float64) (func(draw.Canvas), bool) {
 	if len(rGrid) == 0 {
 		return nil, false
 	}
@@ -566,6 +592,8 @@ func internalResultsDraw(po *plotOpts, rGrid []float64,
 	}
 	mean := scale(nAvg)
 	raw := scale(nAvgRaw)
+	low := scale(nLow)
+	high := scale(nHigh)
 	cum := scale(vCum)
 	var tru []float64
 	if nTrue != nil {
@@ -583,8 +611,8 @@ func internalResultsDraw(po *plotOpts, rGrid []float64,
 		sols[t] = scale(nBest[t])
 	}
 
-	all := make([][]float64, 0, len(sols)+3)
-	all = append(all, raw, mean)
+	all := make([][]float64, 0, len(sols)+5)
+	all = append(all, raw, mean, low, high)
 	if tru != nil {
 		all = append(all, tru)
 	}
@@ -609,6 +637,11 @@ func internalResultsDraw(po *plotOpts, rGrid []float64,
 			internalAddSeries(p1, rGrid, sols[t], gray, vg.Points(1), false,
 				nil, false, "", false)
 		}
+		envCol := internalColor(1)
+		internalAddSeries(p1, rGrid, low, envCol, vg.Points(1.6), false,
+			nil, true, "lower envelope", true)
+		internalAddSeries(p1, rGrid, high, envCol, vg.Points(1.6), false,
+			nil, true, "upper envelope", true)
 		if tru != nil {
 			internalAddSeries(p1, rGrid, tru, color.Black, vg.Points(1.6),
 				false, nil, true, "true n(r)", true)
@@ -642,4 +675,78 @@ func internalResultsDraw(po *plotOpts, rGrid []float64,
 			false, nil, false, "V(r)", true)
 		p3.Draw(tiles.At(c, 2, 0))
 	}, true
+}
+
+// internalSpectrumPlot — панель «величина vs длина волны»: тонкие серые
+// кривые индивидуальных решений, огибающие (штриховые), среднее и измеренные
+// точки.
+func internalSpectrumPlot(po *plotOpts, pn spectrumPanel) *plot.Plot {
+	p := internalNewPlot(po)
+	p.Title.Text = internalLabel(pn.title)
+	p.X.Label.Text = internalLabel("λ, nm")
+	p.Y.Label.Text = internalLabel(pn.ylabel)
+
+	all := make([][]float64, 0, 4+len(pn.set.curves))
+	all = append(all, pn.set.mean, pn.set.low, pn.set.high)
+	all = append(all, pn.set.curves...)
+	if len(pn.set.meas) > 0 {
+		ys := make([]float64, len(pn.set.meas))
+		for i, m := range pn.set.meas {
+			ys[i] = m.value
+		}
+		all = append(all, ys)
+	}
+	if xLo, xHi, yLo, yHi, ok := internalRanges(pn.wl, false, all...); ok {
+		p.X.Min, p.X.Max = xLo, xHi
+		p.Y.Min, p.Y.Max = yLo, yHi
+	}
+
+	gray := color.Gray{Y: 0xbb}
+	for _, cur := range pn.set.curves {
+		internalAddSeries(p, pn.wl, cur, gray, vg.Points(0.8), false, nil,
+			false, "", false)
+	}
+	envCol := internalColor(1)
+	internalAddSeries(p, pn.wl, pn.set.low, envCol, vg.Points(1.6), false,
+		nil, true, "lower envelope", true)
+	internalAddSeries(p, pn.wl, pn.set.high, envCol, vg.Points(1.6), false,
+		nil, true, "upper envelope", true)
+	internalAddSeries(p, pn.wl, pn.set.mean, internalColor(0), vg.Points(2.6),
+		false, nil, false, "mean of best solutions", true)
+
+	if len(pn.set.meas) > 0 {
+		xs := make([]float64, len(pn.set.meas))
+		ys := make([]float64, len(pn.set.meas))
+		for i, m := range pn.set.meas {
+			xs[i], ys[i] = m.wlNm, m.value
+		}
+		internalAddPoints(p, xs, ys, color.Black, draw.RingGlyph{},
+			pn.set.measName)
+	}
+	return p
+}
+
+// internalSpectrumFigure — одна или несколько панелей «величина vs λ» в PDF.
+func internalSpectrumFigure(po *plotOpts, outPath string, panels []spectrumPanel,
+	wIn, hIn float64) bool {
+	if len(panels) == 0 {
+		return false
+	}
+	w := vg.Length(wIn * float64(vg.Inch))
+	h := vg.Length(hIn * float64(vg.Inch))
+	return internalRender(po, outPath, w, h, func(c draw.Canvas) {
+		tiles := internalTiles(len(panels))
+		for i := range panels {
+			internalSpectrumPlot(po, panels[i]).Draw(tiles.At(c, i, 0))
+		}
+	})
+}
+
+// internalSpectrumPNG — та же панель в PNG (для встраивания в отчёт).
+func internalSpectrumPNG(po *plotOpts, pn spectrumPanel) (out []byte, ok bool) {
+	w := vg.Length(6.0 * float64(vg.Inch))
+	h := vg.Length(4.0 * float64(vg.Inch))
+	return internalDrawToPNG(po, w, h, func(c draw.Canvas) {
+		internalSpectrumPlot(po, pn).Draw(c)
+	})
 }

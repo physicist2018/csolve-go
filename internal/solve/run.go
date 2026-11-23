@@ -261,15 +261,15 @@ func run(a *Args) error {
 
 	tPhase = nowSec()
 	prof, err := profileFinalize(a, baseCh, kts, mre, mim, sols, design.geom,
-		a.R0Min, r1MaxEff, ds)
+		a.R0Min, r1MaxEff, ds, st.src, g1, depWl, depVal)
 	if err != nil {
 		return err
 	}
 	c.phase("output", tPhase)
 
-	reportSummary(a, sols, g1, baseCh, prof.nAvg, prof.vCum, prof.gFit,
-		prof.rGrid, prof.mRe, prof.mIm, depWl, depVal, prof.deltaLwl,
-		prof.deltaL, c)
+	reportSummary(a, sols, g1, baseCh, prof.nAvg, prof.nLow, prof.nHigh,
+		prof.vCum, prof.gFit, prof.rGrid, prof.mRe, prof.mIm, depWl, depVal,
+		prof.deltaLwl, prof.deltaL, c)
 	reportMoments(prof.moments, c)
 	reportDepolarization(prof, c)
 

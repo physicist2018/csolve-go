@@ -55,7 +55,7 @@ func writeReportDoc(a *Args, c *console, rep *reportCapture, prof *profile,
 		}
 	}
 
-	var img []byte
+	var imgs [][]byte
 	if !a.NoPlot {
 		po := plotOpts{format: plotFmtPng, dpi: a.PlotDpi, fontSize: a.PlotFontSize,
 			backend: plottingInternal, con: c}
@@ -67,9 +67,14 @@ func writeReportDoc(a *Args, c *console, rep *reportCapture, prof *profile,
 			}
 		}
 		if b, ok := internalResultsPNG(&po, prof.rGrid, nTrue, prof.nAvg,
-			prof.nAvgRaw, prof.vCum, prof.nBest, prof.nBestCount, ch, g1,
-			prof.gFit, prof.mRe, prof.mIm); ok {
-			img = b
+			prof.nAvgRaw, prof.nLow, prof.nHigh, prof.vCum, prof.nBest,
+			prof.nBestCount, ch, g1, prof.gFit, prof.mRe, prof.mIm); ok {
+			imgs = append(imgs, b)
+		}
+		for _, np := range prof.spectra.namedPanels() {
+			if b, ok := internalSpectrumPNG(&po, np.panel); ok {
+				imgs = append(imgs, b)
+			}
 		}
 	}
 
@@ -83,9 +88,9 @@ func writeReportDoc(a *Args, c *console, rep *reportCapture, prof *profile,
 
 	var err error
 	if strings.EqualFold(filepath.Ext(path), ".odt") {
-		err = writeOdt(path, title, meta, rep.text(), rep.warnings(), img)
+		err = writeOdt(path, title, meta, rep.text(), rep.warnings(), imgs)
 	} else {
-		err = writeDocx(path, title, meta, rep.text(), rep.warnings(), img)
+		err = writeDocx(path, title, meta, rep.text(), rep.warnings(), imgs)
 	}
 	if err != nil {
 		return err
@@ -117,7 +122,7 @@ func imageSizeCM(img []byte, widthCM float64) (w, h float64) {
 
 // ---------------- DOCX ----------------
 
-func writeDocx(path, title, meta, text, warnings string, img []byte) error {
+func writeDocx(path, title, meta, text, warnings string, imgs [][]byte) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("failed to create report: %w", err)
@@ -140,12 +145,12 @@ func writeDocx(path, title, meta, text, warnings string, img []byte) error {
 	for _, ln := range splitLines(text) {
 		body.WriteString(docxPara(ln, false, true, 16))
 	}
-	if len(img) > 0 {
+	for i, img := range imgs {
 		wcm, hcm := imageSizeCM(img, 17.0)
 		if wcm > 0 {
 			cx := int(wcm / 2.54 * 914400)
 			cy := int(hcm / 2.54 * 914400)
-			body.WriteString(docxImage(cx, cy))
+			body.WriteString(docxImage(cx, cy, i+1))
 		}
 	}
 	if warnings != "" {
@@ -186,20 +191,25 @@ func writeDocx(path, title, meta, text, warnings string, img []byte) error {
 	if err := writeStr("_rels/.rels", rootRels); err != nil {
 		return err
 	}
-	if len(img) > 0 {
-		docRels := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-			`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
-			`<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>` +
-			`</Relationships>`
-		if err := writeStr("word/_rels/document.xml.rels", docRels); err != nil {
+	if len(imgs) > 0 {
+		var rels strings.Builder
+		rels.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+			`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`)
+		for i := range imgs {
+			fmt.Fprintf(&rels, `<Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image%d.png"/>`, i+1, i+1)
+		}
+		rels.WriteString(`</Relationships>`)
+		if err := writeStr("word/_rels/document.xml.rels", rels.String()); err != nil {
 			return err
 		}
-		w, err := add("word/media/image1.png")
-		if err != nil {
-			return err
-		}
-		if _, err := w.Write(img); err != nil {
-			return err
+		for i, img := range imgs {
+			w, err := add(fmt.Sprintf("word/media/image%d.png", i+1))
+			if err != nil {
+				return err
+			}
+			if _, err := w.Write(img); err != nil {
+				return err
+			}
 		}
 	}
 	if err := writeStr("word/document.xml", document); err != nil {
@@ -228,25 +238,26 @@ func docxPara(text string, bold, mono bool, sizeHalf int) string {
 		xmlEscape(text) + `</w:t></w:r></w:p>`
 }
 
-// docxImage — параграф с inline-картинкой размером cx × cy (EMU).
-func docxImage(cx, cy int) string {
+// docxImage — параграф с inline-картинкой размером cx × cy (EMU); idx —
+// номер изображения (1..N), связывается с rId<idx>.
+func docxImage(cx, cy, idx int) string {
 	return fmt.Sprintf(`<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing>`+
 		`<wp:inline distT="0" distB="0" distL="0" distR="0">`+
-		`<wp:extent cx="%d" cy="%d"/><wp:docPr id="1" name="Picture 1"/>`+
+		`<wp:extent cx="%d" cy="%d"/><wp:docPr id="%d" name="Picture %d"/>`+
 		`<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">`+
-		`<pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="image1.png"/><pic:cNvPicPr/></pic:nvPicPr>`+
-		`<pic:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>`+
+		`<pic:pic><pic:nvPicPr><pic:cNvPr id="%d" name="image%d.png"/><pic:cNvPicPr/></pic:nvPicPr>`+
+		`<pic:blipFill><a:blip r:embed="rId%d"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>`+
 		`<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="%d" cy="%d"/></a:xfrm>`+
 		`<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>`+
 		`</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`,
-		cx, cy, cx, cy)
+		cx, cy, idx, idx, idx, idx, idx, cx, cy)
 }
 
 // ---------------- ODT ----------------
 
 const odtMime = "application/vnd.oasis.opendocument.text"
 
-func writeOdt(path, title, meta, text, warnings string, img []byte) error {
+func writeOdt(path, title, meta, text, warnings string, imgs [][]byte) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("failed to create report: %w", err)
@@ -269,10 +280,10 @@ func writeOdt(path, title, meta, text, warnings string, img []byte) error {
 	for _, ln := range splitLines(text) {
 		body.WriteString(odtPara(ln, "Preformatted_20_Text"))
 	}
-	if len(img) > 0 {
+	for i, img := range imgs {
 		wcm, hcm := imageSizeCM(img, 17.0)
 		if wcm > 0 {
-			body.WriteString(odtImage(wcm, hcm))
+			body.WriteString(odtImage(wcm, hcm, i+1))
 		}
 	}
 	if warnings != "" {
@@ -316,8 +327,8 @@ func writeOdt(path, title, meta, text, warnings string, img []byte) error {
 		`<manifest:file-entry manifest:full-path="/" manifest:media-type="` + odtMime + `"/>` +
 		`<manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>` +
 		`<manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/>`
-	if len(img) > 0 {
-		manifest += `<manifest:file-entry manifest:full-path="Pictures/image1.png" manifest:media-type="image/png"/>`
+	for i := range imgs {
+		manifest += fmt.Sprintf(`<manifest:file-entry manifest:full-path="Pictures/image%d.png" manifest:media-type="image/png"/>`, i+1)
 	}
 	manifest += `</manifest:manifest>`
 
@@ -330,8 +341,8 @@ func writeOdt(path, title, meta, text, warnings string, img []byte) error {
 	if err := zipWriteStr(zw, "META-INF/manifest.xml", manifest); err != nil {
 		return err
 	}
-	if len(img) > 0 {
-		w, err := zw.Create("Pictures/image1.png")
+	for i, img := range imgs {
+		w, err := zw.Create(fmt.Sprintf("Pictures/image%d.png", i+1))
 		if err != nil {
 			return err
 		}
@@ -368,11 +379,12 @@ func odtText(s string) string {
 	return s
 }
 
-// odtImage — параграф с картинкой заданного размера (см).
-func odtImage(wcm, hcm float64) string {
-	return fmt.Sprintf(`<text:p><draw:frame draw:name="image1" text:anchor-type="as-char"`+
+// odtImage — параграф с картинкой заданного размера (см); idx — номер
+// изображения, ссылка на Pictures/image<idx>.png.
+func odtImage(wcm, hcm float64, idx int) string {
+	return fmt.Sprintf(`<text:p><draw:frame draw:name="image%d" text:anchor-type="as-char"`+
 		` svg:width="%.2fcm" svg:height="%.2fcm">`+
-		`<draw:image xlink:href="Pictures/image1.png" xlink:type="simple"`+
+		`<draw:image xlink:href="Pictures/image%d.png" xlink:type="simple"`+
 		` xlink:show="embed" xlink:actuate="onLoad"/></draw:frame></text:p>`,
-		wcm, hcm)
+		idx, wcm, hcm, idx)
 }

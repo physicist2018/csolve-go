@@ -98,6 +98,36 @@ type outDepol struct {
 	DeltaL []jfloat `json:"delta_l_percent"`
 }
 
+// outSpectrumCurves — среднее и огибающие одной спектральной величины.
+type outSpectrumCurves struct {
+	Mean []jfloat `json:"mean"`
+	Low  []jfloat `json:"low"`
+	High []jfloat `json:"high"`
+}
+
+// outSpectrumPoint — измеренная точка спектральной зависимости.
+type outSpectrumPoint struct {
+	WlNm  jfloat `json:"wl_nm"`
+	Value jfloat `json:"value"`
+}
+
+// outSpectraMeasured — измеренные входные данные для маркеров на спектрах.
+type outSpectraMeasured struct {
+	Alpha          []outSpectrumPoint `json:"alpha"`
+	Beta           []outSpectrumPoint `json:"beta"`
+	Depolarization []outSpectrumPoint `json:"depolarization"`
+}
+
+// outSpectra — α(λ), β(λ) и δ_l(λ): среднее и огибающие по ансамблю.
+// Единицы: α — 1/m, β — 1/(m·sr), δ_l — %.
+type outSpectra struct {
+	WlNm           []jfloat           `json:"wl_nm"`
+	Alpha          outSpectrumCurves  `json:"alpha"`
+	Beta           outSpectrumCurves  `json:"beta"`
+	Depolarization outSpectrumCurves  `json:"depolarization"`
+	Measured       outSpectraMeasured `json:"measured"`
+}
+
 type outFile struct {
 	Model          outModel      `json:"model"`
 	MAvg           outMAvg       `json:"m_avg"`
@@ -106,11 +136,14 @@ type outFile struct {
 	Channels       []outChannel  `json:"channels"`
 	RUm            []jfloat      `json:"r_um"`
 	NAvg           []jfloat      `json:"n_avg"`
+	NLow           []jfloat      `json:"n_low"`
+	NHigh          []jfloat      `json:"n_high"`
 	VCum           []jfloat      `json:"v_cum_um3_per_cm3"`
 	BestSolutions  []outSolution `json:"best_solutions"`
 	NAvgRaw        []jfloat      `json:"n_avg_raw"`
 	Modes          outModes      `json:"modes"`
 	Depolarization outDepol      `json:"depolarization"`
+	Spectra        *outSpectra   `json:"spectra,omitempty"`
 }
 
 func toJ(vals []float64) []jfloat {
@@ -144,9 +177,9 @@ func outModeFrom(m csMode) outMode {
 }
 
 // writeJSON — запись результатов (структура как в Python-версии).
-func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw, vCum []float64,
-	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64,
-	mom moments, md modes, deltaWlUm, deltaL []float64) error {
+func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw, nLow,
+	nHigh, vCum []float64, ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64,
+	mom moments, md modes, deltaWlUm, deltaL []float64, sp *spectra) error {
 
 	out := outFile{
 		MAvg: outMAvg{Real: jfloat(mAvgRe), Imag: jfloat(mAvgIm)},
@@ -162,6 +195,8 @@ func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw, vCum []float6
 		UnitsInput: outUnits{Beta: "1/(m·sr)", Alpha: "1/m"},
 		RUm:        toJ(rGrid),
 		NAvg:       toJPerCm3(nAvg),
+		NLow:       toJPerCm3(nLow),
+		NHigh:      toJPerCm3(nHigh),
 		VCum:       toJPerCm3(vCum),
 		NAvgRaw:    toJPerCm3(nAvgRaw),
 		Modes: outModes{
@@ -169,6 +204,7 @@ func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw, vCum []float6
 			Coarse:  outModeFrom(md.Coarse),
 			Overall: outModeFrom(md.Overall),
 		},
+		Spectra: outSpectraFrom(sp),
 	}
 	out.Channels = make([]outChannel, len(ch))
 	for j := range ch {
@@ -239,4 +275,45 @@ func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw, vCum []float6
 		return fmt.Errorf("failed to open file for writing: %w", err)
 	}
 	return nil
+}
+
+// outSpectraFrom — преобразование спектров в JSON-представление (nil, если
+// спектры не считались).
+func outSpectraFrom(sp *spectra) *outSpectra {
+	if sp == nil {
+		return nil
+	}
+	curves := func(s *spectrumSet) outSpectrumCurves {
+		if s == nil {
+			return outSpectrumCurves{Mean: []jfloat{}, Low: []jfloat{},
+				High: []jfloat{}}
+		}
+		return outSpectrumCurves{Mean: toJ(s.mean), Low: toJ(s.low),
+			High: toJ(s.high)}
+	}
+	points := func(pts []wlPoint) []outSpectrumPoint {
+		out := make([]outSpectrumPoint, 0, len(pts))
+		for _, p := range pts {
+			out = append(out, outSpectrumPoint{WlNm: jfloat(p.wlNm),
+				Value: jfloat(p.value)})
+		}
+		return out
+	}
+	meas := func(s *spectrumSet) []outSpectrumPoint {
+		if s == nil {
+			return []outSpectrumPoint{}
+		}
+		return points(s.meas)
+	}
+	return &outSpectra{
+		WlNm:           toJ(sp.wlNm),
+		Alpha:          curves(sp.alpha),
+		Beta:           curves(sp.beta),
+		Depolarization: curves(sp.delta),
+		Measured: outSpectraMeasured{
+			Alpha:          meas(sp.alpha),
+			Beta:           meas(sp.beta),
+			Depolarization: meas(sp.delta),
+		},
+	}
 }

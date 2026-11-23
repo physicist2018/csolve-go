@@ -31,6 +31,7 @@ type table struct {
 	xMin, xMax        float64
 	extrapolate       bool
 	sClampWarned      bool
+	specClampWarned   bool
 	path              string
 }
 

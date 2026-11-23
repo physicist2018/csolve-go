@@ -313,8 +313,9 @@ func writeRunOutputs(a *Args, c *console, baseCh []channel, g1 []float64,
 
 	if a.JSON != "" {
 		if err := writeJSON(jsonPath, sols, prof.rGrid, prof.nAvg, prof.nAvgRaw,
-			prof.vCum, baseCh, g1, prof.gFit, prof.mRe, prof.mIm, prof.moments,
-			prof.modes, prof.deltaLwl, prof.deltaL); err != nil {
+			prof.nLow, prof.nHigh, prof.vCum, baseCh, g1, prof.gFit, prof.mRe,
+			prof.mIm, prof.moments, prof.modes, prof.deltaLwl, prof.deltaL,
+			prof.spectra); err != nil {
 			return err
 		}
 		c.printf("results saved: %s\n", jsonPath)
@@ -331,8 +332,13 @@ func writeRunOutputs(a *Args, c *console, baseCh []channel, g1 []float64,
 		po := plotOpts{format: a.PlotFormat, dpi: a.PlotDpi,
 			fontSize: a.PlotFontSize, backend: a.Plotting, con: c}
 		plotResults(&po, plotPath, prof.rGrid, nTrueVals, prof.nAvg,
-			prof.nAvgRaw, prof.vCum, prof.nBest, prof.nBestCount, baseCh, g1,
-			prof.gFit, prof.mRe, prof.mIm)
+			prof.nAvgRaw, prof.nLow, prof.nHigh, prof.vCum, prof.nBest,
+			prof.nBestCount, baseCh, g1, prof.gFit, prof.mRe, prof.mIm)
+		// отдельные графики спектров α(λ), β(λ) и δ_l(λ) рядом с основным
+		for _, np := range prof.spectra.namedPanels() {
+			sp := spectrumPlotPath(plotPath, np.suffix, a.PlotFormat)
+			plotSpectrum(&po, sp, np.panel)
+		}
 	}
 	return nil
 }

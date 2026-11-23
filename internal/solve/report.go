@@ -1,6 +1,7 @@
 package solve
 
 import (
+	"math"
 	"strconv"
 )
 
@@ -18,7 +19,7 @@ func reportEnsembleSize(a *Args, nTot int, c *console) {
 // reportSummary — сводка по ансамблю решений и согласию по каналам и по
 // деполяризации (измеренной δ_l против рассчитанной).
 func reportSummary(a *Args, sols *solutions, g1 []float64, ch []channel,
-	nAvg, vCum, gFit, rGrid []float64, mAvgRe, mAvgIm float64,
+	nAvg, nLow, nHigh, vCum, gFit, rGrid []float64, mAvgRe, mAvgIm float64,
 	depWl, depVal, calcWl, calcDelta []float64, c *console) {
 	nch := len(ch)
 	G := a.bestCount(sols.n)
@@ -50,8 +51,10 @@ func reportSummary(a *Args, sols *solutions, g1 []float64, ch []channel,
 	c.printf("\nmean refractive index (over %d best): m = %.3f%+.3fj\n",
 		G, mAvgRe, mAvgIm)
 
-	c.printf("\n=== Mean distribution function (dV/dln r) ===\n")
+	c.printf("\n=== Distribution function (dV/dln r) over the best solutions ===\n")
 	c.printf("key points (full grid — in --json, if requested):\n")
+	c.printf("  %9s %12s %12s %12s  µm³/cm³\n", "r, µm", "mean", "lower",
+		"upper")
 	nr := len(nAvg)
 	npts := nr
 	if npts > 7 {
@@ -71,9 +74,18 @@ func reportSummary(a *Args, sols *solutions, g1 []float64, ch []channel,
 				"(outside the windows of the best solutions)\n", r)
 			continue
 		}
-		c.printf("  r = %9.4g µm,  dV/dln r = %.4g µm³/cm³\n", r,
-			nAvg[i]/cm3PerM3)
+		lo, hi := math.NaN(), math.NaN()
+		if i < len(nLow) {
+			lo = nLow[i]
+		}
+		if i < len(nHigh) {
+			hi = nHigh[i]
+		}
+		c.printf("  %9.4g %12.4g %12.4g %12.4g\n", r, nAvg[i]/cm3PerM3,
+			lo/cm3PerM3, hi/cm3PerM3)
 	}
+	c.printf("  (lower/upper — min/max over the best solutions covering r, " +
+		"before smoothing)\n")
 
 	reportCumulativeVolume(vCum, rGrid, sols.method == methodMonotone, c)
 

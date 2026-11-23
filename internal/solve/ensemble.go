@@ -119,15 +119,17 @@ func smoothDistribution(rGrid, nAvg, w []float64, lamRel float64) {
 	}
 }
 
-// ensembleResult — результат усреднения по лучшим решениям.
+// ensembleResult — результат усреднения по лучшим решениям. low/high —
+// огибающие: минимум и максимум по решениям, чьё окно покрывает точку r.
 type ensembleResult struct {
-	avg, count []float64
-	mat        [][]float64 // G x nr, если запрошено
-	mRe, mIm   float64
+	avg, low, high, count []float64
+	mat                   [][]float64 // G x nr, если запрошено
+	mRe, mIm              float64
 }
 
 // ensembleAverage — среднее только по решениям, чьё окно покрывает r;
-// точки без покрытия — NaN.
+// точки без покрытия — NaN. Огибающие low/high считаются по тем же
+// решениям и по несглаженным значениям.
 func ensembleAverage(sols *solutions, nBest int, geom []*geom,
 	rGrid []float64, wantMat bool) ensembleResult {
 	G := nBest
@@ -140,6 +142,12 @@ func ensembleAverage(sols *solutions, nBest int, geom []*geom,
 	nr := len(rGrid)
 	total := make([]float64, nr)
 	count := make([]float64, nr)
+	low := make([]float64, nr)
+	high := make([]float64, nr)
+	for i := 0; i < nr; i++ {
+		low[i] = math.Inf(1)
+		high[i] = math.Inf(-1)
+	}
 
 	var mat [][]float64
 	if wantMat {
@@ -161,6 +169,12 @@ func ensembleAverage(sols *solutions, nBest int, geom []*geom,
 			if rGrid[i] >= s.r0 && rGrid[i] <= s.r1 {
 				total[i] += v
 				count[i] += 1.0
+				if v < low[i] {
+					low[i] = v
+				}
+				if v > high[i] {
+					high[i] = v
+				}
 			}
 		}
 		mre += s.mRe
@@ -176,7 +190,10 @@ func ensembleAverage(sols *solutions, nBest int, geom []*geom,
 			avg[i] = total[i] / count[i]
 		} else {
 			avg[i] = math.NaN()
+			low[i] = math.NaN()
+			high[i] = math.NaN()
 		}
 	}
-	return ensembleResult{avg: avg, count: count, mat: mat, mRe: mre, mIm: mim}
+	return ensembleResult{avg: avg, low: low, high: high, count: count,
+		mat: mat, mRe: mre, mIm: mim}
 }

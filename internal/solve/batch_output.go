@@ -40,6 +40,66 @@ func closeFile(f *os.File) error {
 	return nil
 }
 
+// writeSpectrum — файл spectrum_<H>.txt: длины волн и mean/low/high для
+// α(λ), β(λ) и δ_l(λ). Отсутствующие величины пишутся как nan, чтобы набор
+// столбцов был стабильным.
+func writeSpectrum(outDir string, h float64, sp *spectra) error {
+	if sp == nil {
+		return nil
+	}
+	path := filepath.Join(outDir, fmt.Sprintf("spectrum_%s.txt", formatG6(h)))
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "# altitude H = %g m\n", h)
+	sb.WriteString("# alpha [1/m], beta [1/(m·sr)], delta_l [%]\n")
+	sb.WriteString("# measured:")
+	writeMeas := func(prefix string, pts []wlPoint) {
+		for _, p := range pts {
+			fmt.Fprintf(&sb, " %s%g=%s", prefix, p.wlNm, formatG6(p.value))
+		}
+	}
+	if sp.alpha != nil {
+		writeMeas("a", sp.alpha.meas)
+	}
+	if sp.beta != nil {
+		writeMeas("b", sp.beta.meas)
+	}
+	if sp.delta != nil {
+		writeMeas("dep", sp.delta.meas)
+	}
+	sb.WriteString("\n# lambda_nm alpha_mean alpha_low alpha_high beta_mean " +
+		"beta_low beta_high delta_mean delta_low delta_high\n")
+	val := func(set *spectrumSet, i int) float64 {
+		if set == nil || i >= len(set.mean) {
+			return math.NaN()
+		}
+		return set.mean[i]
+	}
+	valLo := func(set *spectrumSet, i int) float64 {
+		if set == nil || i >= len(set.low) {
+			return math.NaN()
+		}
+		return set.low[i]
+	}
+	valHi := func(set *spectrumSet, i int) float64 {
+		if set == nil || i >= len(set.high) {
+			return math.NaN()
+		}
+		return set.high[i]
+	}
+	for i, wl := range sp.wlNm {
+		fmt.Fprintf(&sb, "%s  %s  %s  %s  %s  %s  %s  %s  %s  %s\n",
+			formatG6(wl), formatG6(val(sp.alpha, i)),
+			formatG6(valLo(sp.alpha, i)), formatG6(valHi(sp.alpha, i)),
+			formatG6(val(sp.beta, i)), formatG6(valLo(sp.beta, i)),
+			formatG6(valHi(sp.beta, i)), formatG6(val(sp.delta, i)),
+			formatG6(valLo(sp.delta, i)), formatG6(valHi(sp.delta, i)))
+	}
+	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
+		return fmt.Errorf("failed to open file for writing: %w", err)
+	}
+	return nil
+}
+
 // writeProfile — запись dist_<H>.txt и накопление строк в сводных файлах.
 // calcWl/calcVals — расчётные δ_l по длинам волн, measVals — измеренные
 // значения, выровненные с b.depWl.
@@ -62,9 +122,12 @@ func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
 	for _, wl := range b.depWl {
 		fmt.Fprintf(&sb, "  depol_meas_%g", wl*1e3)
 	}
+	sb.WriteString("  n_low  n_high")
 	sb.WriteString("\n# V — кумулятивный объём ∫ dV/dln r′ dln r′ (монотонный)\n")
 	sb.WriteString("# depol — линейная деполяризация, % (nan если нет " +
 		"S11/S22 или измерения)\n")
+	sb.WriteString("# n_low/n_high — нижняя/верхняя огибающие по лучшим решениям " +
+		"(min/max, до сглаживания)\n")
 	for i := 0; i < p.nr; i++ {
 		nv := p.nAvg[i] / cm3PerM3
 		if !isFinite(nv) {
@@ -82,6 +145,15 @@ func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
 		for _, v := range measVals {
 			fmt.Fprintf(&sb, "  %s", formatG6(v))
 		}
+		lo := math.NaN()
+		if i < len(p.nLow) {
+			lo = p.nLow[i] / cm3PerM3
+		}
+		hi := math.NaN()
+		if i < len(p.nHigh) {
+			hi = p.nHigh[i] / cm3PerM3
+		}
+		fmt.Fprintf(&sb, "  %s  %s", formatG6(lo), formatG6(hi))
 		sb.WriteString("\n")
 	}
 	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
@@ -150,9 +222,14 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 	solveCh []channel, g1 []float64, sols *solutions, kts []*ktable,
 	mre, mim []float64, geom []*geom, r1Max float64, common []commonWl,
 	nl int, writeLidar bool, met *metrics, hi int, ds *depolSet,
-	c *console) error {
+	src *tableSource, c *console) error {
+	// измеренные δ_l по всем столбцам dep<nm> для текущей высоты
+	var measVals []float64
+	if b.ndep > 0 {
+		measVals = b.dep[hi*b.ndep : (hi+1)*b.ndep]
+	}
 	prof, err := profileFinalize(a, solveCh, kts, mre, mim, sols, geom, a.R0Min,
-		r1Max, ds)
+		r1Max, ds, src, g1, b.depWl, measVals)
 	if err != nil {
 		return err
 	}
@@ -167,11 +244,6 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 		if j := depolWlIndex(prof.deltaLwl, wl); j >= 0 && j < len(prof.deltaL) {
 			calcVals[i] = prof.deltaL[j]
 		}
-	}
-	// измеренные δ_l по всем столбцам dep<nm> для текущей высоты
-	var measVals []float64
-	if b.ndep > 0 {
-		measVals = b.dep[hi*b.ndep : (hi+1)*b.ndep]
 	}
 	errSum, err := writeProfile(outDir, h, b, g1, prof, calcWl, calcVals, measVals)
 	if err != nil {
@@ -251,6 +323,17 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 			fmt.Sprintf("plot_%s.%s", formatG6(h), plotFormatExt(a.PlotFormat)))
 		plotProfile(&po, pp, prof.rGrid, prof.nAvg, prof.vCum, solveCh, g1,
 			prof.gFit, h)
+		if prof.spectra != nil {
+			ps := filepath.Join(outDir, fmt.Sprintf("spectrum_%s.%s",
+				formatG6(h), plotFormatExt(a.PlotFormat)))
+			plotSpectraPanels(&po, ps, prof.spectra, h)
+		}
+	}
+
+	if prof.spectra != nil {
+		if err := writeSpectrum(outDir, h, prof.spectra); err != nil {
+			return err
+		}
 	}
 
 	sStr := ""

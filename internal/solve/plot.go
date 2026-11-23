@@ -339,16 +339,60 @@ func refractiveAxes(alt, mRe, mIm []float64) (reLo, reHi, imLo, imHi, hLo, hHi f
 
 // plotResults — основной график одиночного режима (3 панели).
 func plotResults(po *plotOpts, outPath string, rGrid []float64,
-	nTrue, nAvg, nAvgRaw, vCum []float64, nBest [][]float64, nBestCount int,
-	ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64) bool {
+	nTrue, nAvg, nAvgRaw, nLow, nHigh, vCum []float64, nBest [][]float64,
+	nBestCount int, ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64) bool {
 	if po != nil && po.backend == plottingInternal {
-		ok := internalResults(po, outPath, rGrid, nTrue, nAvg, nAvgRaw, vCum,
-			nBest, nBestCount, ch, g1, gFit, mAvgRe, mAvgIm)
+		ok := internalResults(po, outPath, rGrid, nTrue, nAvg, nAvgRaw, nLow,
+			nHigh, vCum, nBest, nBestCount, ch, g1, gFit, mAvgRe, mAvgIm)
 		if ok {
 			po.printf("plot saved: %s\n", outPath)
 		}
 		return ok
 	}
-	return gnuplotResults(po, outPath, rGrid, nTrue, nAvg, nAvgRaw, vCum, nBest,
-		nBestCount, ch, g1, gFit, mAvgRe, mAvgIm)
+	return gnuplotResults(po, outPath, rGrid, nTrue, nAvg, nAvgRaw, nLow, nHigh,
+		vCum, nBest, nBestCount, ch, g1, gFit, mAvgRe, mAvgIm)
+}
+
+// plotSpectrum — отдельный график спектральной зависимости одной величины
+// (α, β или δ_l) от длины волны.
+func plotSpectrum(po *plotOpts, outPath string, pn spectrumPanel) bool {
+	if pn.set == nil || len(pn.wl) == 0 {
+		return false
+	}
+	var ok bool
+	if po != nil && po.backend == plottingInternal {
+		ok = internalSpectrumFigure(po, outPath, []spectrumPanel{pn}, 6.0, 4.0)
+	} else {
+		ok = gnuplotSpectrumFigure(po, outPath, []spectrumPanel{pn}, 6.0, 4.0)
+	}
+	if ok && po != nil {
+		po.printf("plot saved: %s\n", outPath)
+	}
+	return ok
+}
+
+// plotSpectraPanels — пакетный график α(λ), β(λ), δ_l(λ) (до трёх панелей).
+func plotSpectraPanels(po *plotOpts, outPath string, sp *spectra, h float64) bool {
+	panels := sp.panels()
+	if len(panels) == 0 {
+		return false
+	}
+	for i := range panels {
+		panels[i].title = fmt.Sprintf("%s, H = %s m", panels[i].title, formatG6(h))
+	}
+	if po != nil && po.backend == plottingInternal {
+		return internalSpectrumFigure(po, outPath, panels, 10.0, 3.0667)
+	}
+	return gnuplotSpectrumFigure(po, outPath, panels, 10.0, 3.0667)
+}
+
+// spectrumPlotPath — имя графика спектра рядом с основным: result.pdf →
+// result_alpha.pdf (расширение основного файла сохраняется).
+func spectrumPlotPath(base, suffix string, f plotFormat) string {
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	if ext == "" {
+		ext = "." + plotFormatExt(f)
+	}
+	return stem + "_" + suffix + ext
 }
