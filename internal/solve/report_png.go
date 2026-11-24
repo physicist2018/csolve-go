@@ -37,7 +37,8 @@ func internalResultsPNG(po *plotOpts, rGrid []float64, nTrue, nAvg,
 }
 
 // internalDrawToPNG рисует в растр PNG (vgimg); паника не прерывает расчёт —
-// печатается предупреждение, как у PDF-ветки.
+// печатается предупреждение, как у PDF-ветки. Разрешение берётся из po.dpi
+// (если задано), иначе — internalPNGDpi.
 func internalDrawToPNG(po *plotOpts, w, h vg.Length,
 	drawFn func(draw.Canvas)) (out []byte, ok bool) {
 	defer func() {
@@ -46,7 +47,11 @@ func internalDrawToPNG(po *plotOpts, w, h vg.Length,
 			out, ok = nil, false
 		}
 	}()
-	c := vgimg.NewWith(vgimg.UseWH(w, h), vgimg.UseDPI(internalPNGDpi))
+	dpi := internalPNGDpi
+	if po != nil && po.dpi > 0 {
+		dpi = int(po.dpi + 0.5)
+	}
+	c := vgimg.NewWith(vgimg.UseWH(w, h), vgimg.UseDPI(dpi))
 	drawFn(draw.NewCanvas(c, w, h))
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, c.Image()); err != nil {

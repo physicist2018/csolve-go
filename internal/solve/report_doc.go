@@ -57,7 +57,7 @@ func writeReportDoc(a *Args, c *console, rep *reportCapture, prof *profile,
 
 	var imgs [][]byte
 	if !a.NoPlot {
-		po := plotOpts{format: plotFmtPng, dpi: a.PlotDpi, fontSize: a.PlotFontSize,
+		po := plotOpts{format: plotFmtPng, dpi: internalPNGDpi, fontSize: a.PlotFontSize,
 			backend: plottingInternal, con: c}
 		var nTrue []float64
 		if nTrueFn != nil {

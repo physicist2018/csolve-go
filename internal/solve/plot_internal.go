@@ -187,8 +187,9 @@ func internalNewPlot(po *plotOpts) *plot.Plot {
 	return p
 }
 
-// internalRender рисует PDF; паника внутри рендерера не прерывает расчёт —
-// печатается предупреждение, как у gnuplot-ветки.
+// internalRender рисует PDF (или PNG, если --plot-format png); паника внутри
+// рендерера не прерывает расчёт — печатается предупреждение, как у
+// gnuplot-ветки.
 func internalRender(po *plotOpts, outPath string, w, h vg.Length, drawFn func(draw.Canvas)) (ok bool) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -197,6 +198,19 @@ func internalRender(po *plotOpts, outPath string, w, h vg.Length, drawFn func(dr
 			ok = false
 		}
 	}()
+
+	if po != nil && po.format == plotFmtPng {
+		data, ok := internalDrawToPNG(po, w, h, drawFn)
+		if !ok {
+			return false
+		}
+		if err := os.WriteFile(outPath, data, 0644); err != nil {
+			po.warnf("[warning] failed to build plot %s: %v\n",
+				outPath, err)
+			return false
+		}
+		return true
+	}
 
 	canvas := newPDFCanvas(w, h)
 	drawFn(draw.NewCanvas(canvas, w, h))

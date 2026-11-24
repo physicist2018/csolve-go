@@ -1089,9 +1089,13 @@ func TestArgsPlotting(t *testing.T) {
 		}
 	}
 	{
-		if _, err := ParseArgs([]string{"--tables", "dir",
-			"--plot-format", "png"}); err == nil {
-			t.Errorf("--plot-format png with internal backend must fail")
+		// встроенный backend поддерживает pdf и png (svg — только gnuplot)
+		a, err := ParseArgs([]string{"--tables", "dir",
+			"--plot-format", "png"})
+		if err != nil {
+			t.Errorf("--plot-format png with internal backend must be allowed: %v", err)
+		} else if a.PlotFormat != plotFmtPng {
+			t.Errorf("--plot-format png not parsed with internal backend")
 		}
 		if _, err := ParseArgs([]string{"--tables", "dir",
 			"--plot-format", "svg"}); err == nil {

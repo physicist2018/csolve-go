@@ -175,11 +175,16 @@ coefficients using external cross-section tables
 Usage:
   csolve [OPTIONS]
   csolve --tui
+  csolve --gui [--port N] [--no-open]
 
 Options:
   -h, --help                     show this help and exit
   --tui                          interactive terminal UI (huh); accepts no
                                  other options
+  --gui                          web GUI in the default browser (standalone;
+                                 must be the first argument). Flags:
+                                 --port N (0 = random), --no-open
+                                 (print the URL only)
 
   --data <JSON>                  measured coefficients; demo data if omitted
   --type {sphere|spheroid|agglomerate|agglomerate-cs}
@@ -256,9 +261,10 @@ Options:
                                  (.docx or .odt; single mode only)
   --plotting {internal|gnuplot}
                                  plotting backend [internal]; internal
-                                 renders PDF only, without gnuplot
-  --plot-format {png|pdf|svg}    plot format (gnuplot backend) [pdf];
-                                 internal backend requires pdf
+                                 renders without gnuplot (PDF or PNG)
+  --plot-format {png|pdf|svg}    plot format [pdf]; internal backend
+                                 supports pdf and png, external gnuplot
+                                 adds svg
   --plot-dpi <N>                 resolution for png/svg, dpi, > 0 [150]
   --plot-font-size <pt>          base font size for all plot text, pt
                                  (0 or 4..72) [12]
@@ -544,20 +550,22 @@ func checkArgs(a *Args, seen map[string]bool) error {
 		}
 	}
 	if a.Plotting == plottingInternal {
-		if seen["plot-format"] && a.PlotFormat != plotFmtPdf && !a.NoPlot {
+		if seen["plot-format"] && a.PlotFormat != plotFmtPdf && a.PlotFormat != plotFmtPng && !a.NoPlot {
 			return fmt.Errorf("option --plot-format=%s is not "+
-				"supported with --plotting=internal (only pdf)", a.PlotFormat)
+				"supported with --plotting=internal (only pdf or png)", a.PlotFormat)
 		}
-		a.PlotFormat = plotFmtPdf
-		if seen["plot-dpi"] && !a.NoPlot {
+		if !seen["plot-format"] {
+			a.PlotFormat = plotFmtPdf
+		}
+		if seen["plot-dpi"] && !a.NoPlot && a.PlotFormat == plotFmtPdf {
 			fmt.Fprintf(os.Stderr, "[warning] --plot-dpi has no effect with "+
 				"--plotting=internal (vector PDF)\n")
 		}
 		if seen["out"] && !a.NoPlot {
-			if ext := strings.ToLower(filepath.Ext(a.Out)); ext != "" &&
-				ext != ".pdf" {
-				return fmt.Errorf("option --out must have a .pdf "+
-					"extension with --plotting=internal, got %q", a.Out)
+			want := "." + plotFormatExt(a.PlotFormat)
+			if ext := strings.ToLower(filepath.Ext(a.Out)); ext != "" && ext != want {
+				return fmt.Errorf("option --out must have a %s extension "+
+					"with --plotting=internal, got %q", want, a.Out)
 			}
 		}
 	}

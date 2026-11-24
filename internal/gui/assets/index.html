@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csolve-token" content="__CSOLVE_TOKEN__">
+<title>csolve GUI</title>
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">csolve <span class="brand-sub">GUI</span></div>
+    <div class="topbar-right">
+      <button id="lang-btn" class="btn ghost" title="Язык / Language">RU / EN</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="side">
+      <section class="card">
+        <h2 id="side-preset-title">Presets</h2>
+        <div id="presets"></div>
+      </section>
+      <section class="card">
+        <h2 id="side-input-title">Input</h2>
+        <div id="input-mode"></div>
+        <div id="input-file"></div>
+        <div id="input-tables"></div>
+      </section>
+      <section class="card">
+        <h2 id="side-output-title">Output</h2>
+        <div id="output-opts"></div>
+      </section>
+    </aside>
+
+    <main class="content">
+      <section class="card">
+        <div class="card-head">
+          <h2 id="params-title">Parameters</h2>
+          <label class="chk"><input type="checkbox" id="show-advanced"><span id="adv-label">Show advanced</span></label>
+        </div>
+        <div id="command-preview" class="preview hidden"></div>
+        <div id="groups"></div>
+        <div class="actions">
+          <button id="run-btn" class="btn primary" disabled>Run</button>
+          <button id="validate-btn" class="btn">Check</button>
+          <button id="copy-cmd" class="btn ghost">Copy command</button>
+        </div>
+      </section>
+
+      <section class="card hidden" id="run-card">
+        <div class="card-head"><h2 id="run-title">Run</h2>
+          <button id="cancel-btn" class="btn danger hidden">Cancel</button>
+        </div>
+        <div id="log"></div>
+      </section>
+
+      <section class="card hidden" id="result-card">
+        <div class="card-head"><h2 id="result-title">Results</h2></div>
+        <div id="result"></div>
+      </section>
+    </main>
+  </div>
+</div>
+<script src="/assets/app.js"></script>
+</body>
+</html>
