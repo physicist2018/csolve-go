@@ -257,8 +257,8 @@ Options:
                                  --batch-out-dir is given [current dir]
   --out <FILE>                   plot output file [result.<fmt>]
   --json <JSON>                  save results to JSON
-  --report <FILE>                save console report and plot to a document
-                                 (.docx or .odt; single mode only)
+  --report <FILE>                save console report and plots to a document
+                                 (.docx or .odt; single and batch modes)
   --plotting {internal|gnuplot}
                                  plotting backend [internal]; internal
                                  renders without gnuplot (PDF or PNG)
@@ -539,9 +539,6 @@ func ParseArgs(argv []string) (*Args, error) {
 // нецелый --best округляется) и проверка диапазонов числовых опций.
 func checkArgs(a *Args, seen map[string]bool) error {
 	if a.Report != "" {
-		if a.Batch != "" {
-			return fmt.Errorf("option --report is only supported in single mode")
-		}
 		switch strings.ToLower(filepath.Ext(a.Report)) {
 		case ".docx", ".odt":
 		default:

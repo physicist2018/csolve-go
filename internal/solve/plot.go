@@ -39,6 +39,7 @@ type plotOpts struct {
 	fontSize float64
 	backend  plotBackend
 	con      *console
+	quiet    bool // не печатать «plot saved» (временные графики отчёта)
 }
 
 // warnf — предупреждение о графике; без консоли пишет в os.Stderr.
@@ -52,6 +53,9 @@ func (po *plotOpts) warnf(format string, a ...any) {
 
 // printf — сообщение о готовом графике; без консоли пишет в os.Stdout.
 func (po *plotOpts) printf(format string, a ...any) {
+	if po != nil && po.quiet {
+		return
+	}
 	if po != nil && po.con != nil {
 		po.con.printf(format, a...)
 		return
@@ -223,18 +227,8 @@ func anyFiniteSeries(vals [][]float64) bool {
 	return false
 }
 
-// plotProfiles — сводный вертикальный профиль нескольких серий с
-// автоматическим выбором логарифмической шкалы x. Для величин вроде
-// деполяризации в процентах логарифмическая шкала нежелательна, поэтому там
-// используется plotProfilesStyled с logAuto=false.
-func plotProfiles(po *plotOpts, outPath, title, xlabel string, nSeries int,
-	alt []float64, vals [][]float64, names []string) {
-	plotProfilesStyled(po, outPath, title, xlabel, nSeries, alt, vals,
-		names, nil, true)
-}
-
-// plotProfilesStyled — то же, что plotProfiles, но с пометкой штриховых
-// серий: dashed[s] рисует серию штриховой линией (измеренные величины).
+// plotProfilesStyled — вертикальный профиль с пометкой штриховых серий:
+// dashed[s] рисует серию штриховой линией (измеренные величины).
 func plotProfilesStyled(po *plotOpts, outPath, title, xlabel string,
 	nSeries int, alt []float64, vals [][]float64, names []string,
 	dashed []bool, logAuto bool) bool {
@@ -408,14 +402,20 @@ func plotSpectrum(po *plotOpts, outPath string, pn spectrumPanel) bool {
 	return ok
 }
 
-// plotSpectraPanels — пакетный график α(λ), β(λ), δ_l(λ) (до трёх панелей).
-func plotSpectraPanels(po *plotOpts, outPath string, sp *spectra, h float64) bool {
+// spectraPanelsForHeight — панели спектров с высотой в заголовке.
+func spectraPanelsForHeight(sp *spectra, h float64) []spectrumPanel {
 	panels := sp.panels()
-	if len(panels) == 0 {
-		return false
-	}
 	for i := range panels {
 		panels[i].title = fmt.Sprintf("%s, H = %s m", panels[i].title, formatG6(h))
+	}
+	return panels
+}
+
+// plotSpectraPanels — пакетный график α(λ), β(λ), δ_l(λ) (до трёх панелей).
+func plotSpectraPanels(po *plotOpts, outPath string, sp *spectra, h float64) bool {
+	panels := spectraPanelsForHeight(sp, h)
+	if len(panels) == 0 {
+		return false
 	}
 	if po != nil && po.backend == plottingInternal {
 		return internalSpectrumFigure(po, outPath, panels, 10.0, 3.0667)

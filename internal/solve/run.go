@@ -146,7 +146,7 @@ func run(a *Args) error {
 	}
 
 	if a.Batch != "" {
-		err := runBatch(a, c)
+		err := runBatch(a, c, rep)
 		c.phase("total", tAll)
 		return err
 	}

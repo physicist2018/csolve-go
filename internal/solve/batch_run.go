@@ -295,6 +295,7 @@ func newBatchMetrics(b *batchInput, ds *depolSet, nl int) *metrics {
 	met.Vf = make([]float64, b.nAlt)
 	met.rmf = make([]float64, b.nAlt)
 	met.rmc = make([]float64, b.nAlt)
+	met.rmo = make([]float64, b.nAlt)
 	met.reff = make([]float64, b.nAlt)
 	met.Nc = make([]float64, b.nAlt)
 	met.sgf = make([]float64, b.nAlt)
@@ -406,7 +407,8 @@ func (d *batchDepol) rank(sols *solutions, h int) []float64 {
 // --lidar-ratio-cons решения всех высот удерживаются в памяти, чтобы
 // наложить ограничение на гладкость S = α/β.
 func solveBatchAltitudes(a *Args, c *console, st *batchSetup, outDir string,
-	common []commonWl, nl int, writeLidar bool, met *metrics, bd *batchDepol) error {
+	common []commonWl, nl int, writeLidar bool, met *metrics, bd *batchDepol,
+	rimg *batchReportImages) error {
 	b := st.b
 	retain := a.LidarRatioCons && b.nAlt >= 2 && nl > 0
 	if retain {
@@ -456,7 +458,7 @@ func solveBatchAltitudes(a *Args, c *console, st *batchSetup, outDir string,
 			g1 := b.data[h*b.nch:]
 			if err := emitProfile(a, outDir, b.alt[h], b, st.solveCh, g1, per[h],
 				st.kts, st.mre, st.mim, st.design.geom, st.r1MaxEff, common, nl,
-				writeLidar, met, h, st.ds, st.src, c); err != nil {
+				writeLidar, met, h, st.ds, st.src, rimg, c); err != nil {
 				return err
 			}
 		}
@@ -488,73 +490,74 @@ func solveBatchAltitudes(a *Args, c *console, st *batchSetup, outDir string,
 		bd.rank(sols, h)
 		if err := emitProfile(a, outDir, b.alt[h], b, st.solveCh, g1, sols,
 			st.kts, st.mre, st.mim, st.design.geom, st.r1MaxEff, common, nl,
-			writeLidar, met, h, st.ds, st.src, c); err != nil {
+			writeLidar, met, h, st.ds, st.src, rimg, c); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// batchPlots — сводные графики по пакету.
-func batchPlots(a *Args, c *console, outDir string, b *batchInput,
-	met *metrics, common []commonWl, nl int) {
-	po := plotOpts{format: a.PlotFormat, dpi: a.PlotDpi,
-		fontSize: a.PlotFontSize, backend: a.Plotting, con: c}
-	ext := plotFormatExt(a.PlotFormat)
+// batchPlotSpec — описание сводного профиля пакета: одинаково используется
+// для файлов графиков и для PNG-картинок отчёта.
+type batchPlotSpec struct {
+	name    string
+	title   string
+	xlabel  string
+	caption string
+	vals    [][]float64
+	names   []string
+	dashed  []bool
+	logAuto bool
+}
 
-	pp := filepath.Join(outDir, "refractive."+ext)
-	plotRefractiveProfile(&po, pp, b.alt, met.mRe, met.mIm)
-
+// batchProfilePlotSpecs — серии сводных профилей (кроме refractive).
+func batchProfilePlotSpecs(b *batchInput, met *metrics, common []commonWl,
+	nl int) []batchPlotSpec {
 	errPct := make([]float64, b.nAlt)
 	for i := 0; i < b.nAlt; i++ {
 		errPct[i] = met.err[i] * 100.0
 	}
-	pp = filepath.Join(outDir, "error."+ext)
-	plotProfiles(&po, pp, "Mean relative retrieval error, %",
-		"Err, %", 1, b.alt, [][]float64{errPct}, []string{"Err"})
-
-	pp = filepath.Join(outDir, "volumes."+ext)
-	plotProfiles(&po, pp, "Volume concentration of modes",
-		"V, µm³/cm³", 3, b.alt,
-		[][]float64{met.V, met.Vc, met.Vf},
-		[]string{"V", "Vc", "Vf"})
-
-	pp = filepath.Join(outDir, "radii."+ext)
-	plotProfiles(&po, pp, "Mode radii", "r, µm", 3, b.alt,
-		[][]float64{met.rmf, met.rmc, met.reff},
-		[]string{"rmf", "rmc", "reff"})
-
-	pp = filepath.Join(outDir, "concentration."+ext)
-	plotProfiles(&po, pp, "Number concentration", "N, cm⁻³", 1, b.alt,
-		[][]float64{met.Nc}, []string{"N"})
-
-	pp = filepath.Join(outDir, "sigma."+ext)
-	plotProfiles(&po, pp, "Lognormal mode widths", "sigma", 3, b.alt,
-		[][]float64{met.sgf, met.sgc, met.sgo},
-		[]string{"sigma_f", "sigma_c", "sigma"})
-
+	specs := []batchPlotSpec{
+		{name: "error", title: "Mean relative retrieval error, %",
+			xlabel: "Err, %", caption: "Средняя относительная ошибка восстановления",
+			vals: [][]float64{errPct}, names: []string{"Err"}, logAuto: true},
+		{name: "volumes", title: "Volume concentration of modes",
+			xlabel: "V, µm³/cm³", caption: "Объёмная концентрация мод",
+			vals:  [][]float64{met.V, met.Vc, met.Vf},
+			names: []string{"V", "Vc", "Vf"}, logAuto: true},
+		{name: "radii", title: "Mode radii", xlabel: "r, µm",
+			caption: "Радиусы мод",
+			vals:    [][]float64{met.rmf, met.rmc, met.reff},
+			names:   []string{"rmf", "rmc", "reff"}, logAuto: true},
+		{name: "concentration", title: "Number concentration",
+			xlabel: "N, cm⁻³", caption: "Счётная концентрация",
+			vals: [][]float64{met.Nc}, names: []string{"N"}, logAuto: true},
+		{name: "sigma", title: "Lognormal mode widths", xlabel: "sigma",
+			caption: "Ширины логнормальных мод",
+			vals:    [][]float64{met.sgf, met.sgc, met.sgo},
+			names:   []string{"sigma_f", "sigma_c", "sigma"}, logAuto: true},
+	}
 	if nl > 0 {
 		nSer := nl
 		if nSer > 32 {
 			nSer = 32
 		}
-		pp = filepath.Join(outDir, "lidar_ratios."+ext)
 		svals := make([][]float64, nSer)
 		snames := make([]string, nSer)
 		for k := 0; k < nSer; k++ {
 			svals[k] = met.S[k*b.nAlt:]
 			snames[k] = fmt.Sprintf("S_{%g}", common[k].wl*1e3)
 		}
-		plotProfiles(&po, pp, "Lidar ratio S = α/β", "S = α/β", nSer,
-			b.alt, svals, snames)
+		specs = append(specs, batchPlotSpec{
+			name: "lidar_ratios", title: "Lidar ratio S = α/β",
+			xlabel: "S = α/β", caption: "Лидарное отношение S = α/β",
+			vals: svals, names: snames, logAuto: true})
 	}
-
 	if len(met.dpol) > 0 || len(met.dpolMeas) > 0 {
 		series := make([][]float64, 0, len(met.dpol)+len(met.dpolMeas))
 		series = append(series, met.dpol...)
 		series = append(series, met.dpolMeas...)
 		if anyFiniteSeries(series) {
-			pp = filepath.Join(outDir, "delpol."+ext)
 			dnames := make([]string, 0, len(series))
 			dashed := make([]bool, 0, len(series))
 			for k := range met.dpol {
@@ -567,13 +570,33 @@ func batchPlots(a *Args, c *console, outDir string, b *batchInput,
 					met.dpolMeasWl[k]*1e3))
 				dashed = append(dashed, true)
 			}
-			plotProfilesStyled(&po, pp, "Linear depolarization ratio",
-				"δ_l, %", len(series), b.alt, series, dnames, dashed, false)
+			specs = append(specs, batchPlotSpec{
+				name: "delpol", title: "Linear depolarization ratio",
+				xlabel: "δ_l, %", caption: "Линейная деполяризация δ_l",
+				vals: series, names: dnames, dashed: dashed, logAuto: false})
 		}
+	}
+	return specs
+}
+
+// batchPlots — сводные графики по пакету.
+func batchPlots(a *Args, c *console, outDir string, b *batchInput,
+	met *metrics, common []commonWl, nl int) {
+	po := plotOpts{format: a.PlotFormat, dpi: a.PlotDpi,
+		fontSize: a.PlotFontSize, backend: a.Plotting, con: c}
+	ext := plotFormatExt(a.PlotFormat)
+
+	pp := filepath.Join(outDir, "refractive."+ext)
+	plotRefractiveProfile(&po, pp, b.alt, met.mRe, met.mIm)
+
+	for _, sp := range batchProfilePlotSpecs(b, met, common, nl) {
+		pp = filepath.Join(outDir, sp.name+"."+ext)
+		plotProfilesStyled(&po, pp, sp.title, sp.xlabel, len(sp.vals), b.alt,
+			sp.vals, sp.names, sp.dashed, sp.logAuto)
 	}
 }
 
-func runBatch(a *Args, c *console) error {
+func runBatch(a *Args, c *console, rep *reportCapture) error {
 	st, err := prepareBatch(a, c)
 	if err != nil {
 		return err
@@ -595,9 +618,13 @@ func runBatch(a *Args, c *console) error {
 		return err
 	}
 	met := newBatchMetrics(st.b, st.ds, nl)
+	var rimg *batchReportImages
+	if rep != nil && !a.NoPlot {
+		rimg = &batchReportImages{}
+	}
 
 	if err := solveBatchAltitudes(a, c, st, outDir, common, nl, writeLidar,
-		met, bd); err != nil {
+		met, bd, rimg); err != nil {
 		return err
 	}
 	if !a.NoPlot {
@@ -605,5 +632,11 @@ func runBatch(a *Args, c *console) error {
 	}
 
 	c.printf("batch processing finished; results: %s\n", outDir)
+	if rep != nil {
+		if err := writeBatchReportDoc(a, c, rep, outDir, st, met, common, nl,
+			rimg); err != nil {
+			return err
+		}
+	}
 	return nil
 }

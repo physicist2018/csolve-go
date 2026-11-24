@@ -44,6 +44,25 @@ func filterWarnings(s string) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// docTable — таблица отчёта: заголовок, шапка и строки.
+type docTable struct {
+	Title   string
+	Headers []string
+	Rows    [][]string
+}
+
+// docImage — PNG-картинка и её подпись.
+type docImage struct {
+	Data    []byte
+	Caption string
+}
+
+// docImageSection — группа картинок с общим заголовком.
+type docImageSection struct {
+	Title  string
+	Images []docImage
+}
+
 // writeReportDoc — сохранение консольного отчёта и (если график включён)
 // картинки в документ .docx или .odt (формат по расширению).
 func writeReportDoc(a *Args, c *console, rep *reportCapture, prof *profile,
@@ -55,10 +74,8 @@ func writeReportDoc(a *Args, c *console, rep *reportCapture, prof *profile,
 		}
 	}
 
-	var imgs [][]byte
+	var figures []docImage
 	if !a.NoPlot {
-		po := plotOpts{format: plotFmtPng, dpi: internalPNGDpi, fontSize: a.PlotFontSize,
-			backend: plottingInternal, con: c}
 		var nTrue []float64
 		if nTrueFn != nil {
 			nTrue = make([]float64, prof.nr)
@@ -66,14 +83,40 @@ func writeReportDoc(a *Args, c *console, rep *reportCapture, prof *profile,
 				nTrue[i] = nTrueFn(prof.rGrid[i])
 			}
 		}
-		if b, ok := internalResultsPNG(&po, prof.rGrid, nTrue, prof.nAvg,
-			prof.nAvgRaw, prof.nLow, prof.nHigh, prof.vCum, prof.nBest,
-			prof.nBestCount, ch, g1, prof.gFit, prof.mRe, prof.mIm); ok {
-			imgs = append(imgs, b)
+		plotName := a.Out
+		if plotName == "" {
+			plotName = "result." + plotFormatExt(a.PlotFormat)
+		}
+		plotPath, _ := resolveOutPath(a.OutDir, plotName)
+		if bts, ok := reportPNG(a, c, plotPath,
+			func(po *plotOpts) ([]byte, bool) {
+				return internalResultsPNG(po, prof.rGrid, nTrue, prof.nAvg,
+					prof.nAvgRaw, prof.nLow, prof.nHigh, prof.vCum,
+					prof.nBest, prof.nBestCount, ch, g1, prof.gFit,
+					prof.mRe, prof.mIm)
+			},
+			func(po *plotOpts, path string) bool {
+				return plotResults(po, path, prof.rGrid, nTrue, prof.nAvg,
+					prof.nAvgRaw, prof.nLow, prof.nHigh, prof.vCum,
+					prof.nBest, prof.nBestCount, ch, g1, prof.gFit,
+					prof.mRe, prof.mIm)
+			}); ok {
+			figures = append(figures, docImage{Data: bts,
+				Caption: "Результат восстановления: dV/dln r, V(r) и " +
+					"сравнение коэффициентов"})
 		}
 		for _, np := range prof.spectra.namedPanels() {
-			if b, ok := internalSpectrumPNG(&po, np.panel); ok {
-				imgs = append(imgs, b)
+			pn := np.panel
+			existing := spectrumPlotPath(plotPath, np.suffix, a.PlotFormat)
+			if bts, ok := reportPNG(a, c, existing,
+				func(po *plotOpts) ([]byte, bool) {
+					return internalSpectrumPNG(po, pn)
+				},
+				func(po *plotOpts, path string) bool {
+					return plotSpectrum(po, path, pn)
+				}); ok {
+				figures = append(figures, docImage{Data: bts,
+					Caption: pn.title})
 			}
 		}
 	}
@@ -87,16 +130,59 @@ func writeReportDoc(a *Args, c *console, rep *reportCapture, prof *profile,
 		time.Now().Format("2006-01-02 15:04:05"), src)
 
 	var err error
+	sections := []docImageSection{{Images: figures}}
 	if strings.EqualFold(filepath.Ext(path), ".odt") {
-		err = writeOdt(path, title, meta, rep.text(), rep.warnings(), imgs)
+		err = writeOdt(path, title, meta, rep.text(), nil, sections, rep.warnings())
 	} else {
-		err = writeDocx(path, title, meta, rep.text(), rep.warnings(), imgs)
+		err = writeDocx(path, title, meta, rep.text(), nil, sections, rep.warnings())
 	}
 	if err != nil {
 		return err
 	}
 	c.printf("report saved: %s\n", path)
 	return nil
+}
+
+// reportPlotOpts — параметры встроенного рендера картинок отчёта.
+func reportPlotOpts(a *Args, c *console) plotOpts {
+	return plotOpts{format: plotFmtPng, dpi: internalPNGDpi,
+		fontSize: a.PlotFontSize, backend: plottingInternal, con: c}
+}
+
+// reportPNG — PNG-байты графика выбранным backend'ом. Для internal используется
+// рендер в память; для gnuplot — готовый PNG-файл (при --plot-format png) или
+// перерисовка того же графика в PNG во временный файл.
+func reportPNG(a *Args, c *console, existing string,
+	internal func(*plotOpts) ([]byte, bool),
+	renderFile func(*plotOpts, string) bool) ([]byte, bool) {
+	if a.Plotting != plottingGnuplot {
+		po := reportPlotOpts(a, c)
+		return internal(&po)
+	}
+	if a.PlotFormat == plotFmtPng && existing != "" {
+		if b, err := os.ReadFile(existing); err == nil && len(b) > 0 {
+			return b, true
+		}
+	}
+	dir, err := os.MkdirTemp("", "csolve_report_")
+	if err != nil {
+		c.warnf("[warning] failed to create temporary directory for " +
+			"report plots\n")
+		return nil, false
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "plot.png")
+	po := plotOpts{format: plotFmtPng, dpi: a.PlotDpi,
+		fontSize: a.PlotFontSize, backend: plottingGnuplot, con: c,
+		quiet: true}
+	if !renderFile(&po, path) {
+		return nil, false
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	return b, true
 }
 
 // splitLines — строки без завершающего пустого элемента.
@@ -122,12 +208,14 @@ func imageSizeCM(img []byte, widthCM float64) (w, h float64) {
 
 // ---------------- DOCX ----------------
 
-func writeDocx(path, title, meta, text, warnings string, imgs [][]byte) error {
+func writeDocx(path, title, meta, text string, tables []docTable,
+	sections []docImageSection, warnings string) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("failed to create report: %w", err)
 	}
 	zw := zip.NewWriter(f)
+	imgs := sectionImages(sections)
 
 	add := func(name string) (io.Writer, error) { return zw.Create(name) }
 	writeStr := func(name, content string) error {
@@ -145,12 +233,17 @@ func writeDocx(path, title, meta, text, warnings string, imgs [][]byte) error {
 	for _, ln := range splitLines(text) {
 		body.WriteString(docxPara(ln, false, true, 16))
 	}
-	for i, img := range imgs {
-		wcm, hcm := imageSizeCM(img, 17.0)
-		if wcm > 0 {
-			cx := int(wcm / 2.54 * 914400)
-			cy := int(hcm / 2.54 * 914400)
-			body.WriteString(docxImage(cx, cy, i+1))
+	for _, t := range tables {
+		body.WriteString(docxTable(t))
+	}
+	imgIdx := 0
+	for _, s := range sections {
+		if s.Title != "" {
+			body.WriteString(docxPara(s.Title, true, false, 22))
+		}
+		for _, img := range s.Images {
+			imgIdx++
+			body.WriteString(docxFigure(img, imgIdx))
 		}
 	}
 	if warnings != "" {
@@ -160,13 +253,18 @@ func writeDocx(path, title, meta, text, warnings string, imgs [][]byte) error {
 		}
 	}
 
+	bodyText := body.String()
+	if warnings == "" {
+		bodyText = strings.TrimSuffix(bodyText, docxPageBreak())
+	}
+
 	document := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
 		`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"` +
 		` xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"` +
 		` xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"` +
 		` xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"` +
 		` xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>` +
-		body.String() +
+		bodyText +
 		`<w:sectPr><w:pgSz w:w="11906" w:h="16838"/>` +
 		`<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"` +
 		` w:header="708" w:footer="708" w:gutter="0"/></w:sectPr>` +
@@ -207,7 +305,7 @@ func writeDocx(path, title, meta, text, warnings string, imgs [][]byte) error {
 			if err != nil {
 				return err
 			}
-			if _, err := w.Write(img); err != nil {
+			if _, err := w.Write(img.Data); err != nil {
 				return err
 			}
 		}
@@ -253,16 +351,120 @@ func docxImage(cx, cy, idx int) string {
 		cx, cy, idx, idx, idx, idx, idx, cx, cy)
 }
 
+// sectionImages — плоский список картинок из секций (для media/rels).
+func sectionImages(sections []docImageSection) []docImage {
+	var out []docImage
+	for _, s := range sections {
+		out = append(out, s.Images...)
+	}
+	return out
+}
+
+// docxFigure — картинка, подпись на новой строке и разрыв страницы.
+func docxFigure(img docImage, idx int) string {
+	wcm, hcm := imageSizeCM(img.Data, 17.0)
+	if wcm <= 0 {
+		return ""
+	}
+	var b strings.Builder
+	cx := int(wcm / 2.54 * 914400)
+	cy := int(hcm / 2.54 * 914400)
+	b.WriteString(docxImage(cx, cy, idx))
+	if img.Caption != "" {
+		b.WriteString(docxCaption(img.Caption))
+	}
+	b.WriteString(docxPageBreak())
+	return b.String()
+}
+
+// docxPageBreak — жёсткий разрыв страницы.
+func docxPageBreak() string {
+	return `<w:p><w:r><w:br w:type="page"/></w:r></w:p>`
+}
+
+// docxCaption — подпись под/над картинкой (курсив, 8 pt).
+func docxCaption(text string) string {
+	return `<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="240"` +
+		` w:lineRule="auto"/></w:pPr><w:r><w:rPr><w:i/><w:sz w:val="16"/>` +
+		`<w:szCs w:val="16"/></w:rPr><w:t xml:space="preserve">` +
+		xmlEscape(text) + `</w:t></w:r></w:p>`
+}
+
+// docxTable — таблица, подпись на новой строке и разрыв страницы.
+func docxTable(t docTable) string {
+	if len(t.Headers) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	const totalW = 9638 // ширина текста A4 в twips при полях 2 см
+	colW := totalW / len(t.Headers)
+	fmt.Fprintf(&b, `<w:tbl><w:tblPr><w:tblW w:w="%d" w:type="dxa"/>`,
+		totalW)
+	b.WriteString(`<w:tblBorders>`)
+	for _, side := range []string{"top", "left", "bottom", "right",
+		"insideH", "insideV"} {
+		fmt.Fprintf(&b, `<w:%s w:val="single" w:sz="4" w:space="0"`+
+			` w:color="000000"/>`, side)
+	}
+	b.WriteString(`</w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr>` +
+		`<w:tblGrid>`)
+	for range t.Headers {
+		fmt.Fprintf(&b, `<w:gridCol w:w="%d"/>`, colW)
+	}
+	b.WriteString(`</w:tblGrid><w:tr><w:trPr><w:tblHeader/>` +
+		`</w:trPr>`)
+	for _, h := range t.Headers {
+		b.WriteString(docxCell(h, true, colW))
+	}
+	b.WriteString(`</w:tr>`)
+	for _, row := range t.Rows {
+		b.WriteString(`<w:tr>`)
+		for i := range t.Headers {
+			v := ""
+			if i < len(row) {
+				v = row[i]
+			}
+			b.WriteString(docxCell(v, false, colW))
+		}
+		b.WriteString(`</w:tr>`)
+	}
+	b.WriteString(`</w:tbl>`)
+	if t.Title != "" {
+		b.WriteString(docxCaption(t.Title))
+	}
+	b.WriteString(docxPageBreak())
+	return b.String()
+}
+
+// docxCell — ячейка таблицы (Courier 7 pt), width в twips.
+func docxCell(text string, bold bool, width int) string {
+	var rpr strings.Builder
+	rpr.WriteString(`<w:rPr><w:rFonts w:ascii="Courier New"` +
+		` w:hAnsi="Courier New" w:cs="Courier New"/>`)
+	if bold {
+		rpr.WriteString(`<w:b/>`)
+	}
+	rpr.WriteString(`<w:sz w:val="14"/><w:szCs w:val="14"/></w:rPr>`)
+	return fmt.Sprintf(`<w:tc><w:tcPr><w:tcW w:w="%d" w:type="dxa"/>`+
+		`</w:tcPr>`, width) +
+		`<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="200"` +
+		` w:lineRule="auto"/></w:pPr><w:r>` + rpr.String() +
+		`<w:t xml:space="preserve">` + xmlEscape(text) +
+		`</w:t></w:r></w:p></w:tc>`
+}
+
 // ---------------- ODT ----------------
 
 const odtMime = "application/vnd.oasis.opendocument.text"
 
-func writeOdt(path, title, meta, text, warnings string, imgs [][]byte) error {
+func writeOdt(path, title, meta, text string, tables []docTable,
+	sections []docImageSection, warnings string) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("failed to create report: %w", err)
 	}
 	zw := zip.NewWriter(f)
+	imgs := sectionImages(sections)
 
 	// mimetype — первым, без сжатия (требование ODF).
 	hdr := &zip.FileHeader{Name: "mimetype", Method: zip.Store}
@@ -280,10 +482,25 @@ func writeOdt(path, title, meta, text, warnings string, imgs [][]byte) error {
 	for _, ln := range splitLines(text) {
 		body.WriteString(odtPara(ln, "Preformatted_20_Text"))
 	}
-	for i, img := range imgs {
-		wcm, hcm := imageSizeCM(img, 17.0)
-		if wcm > 0 {
-			body.WriteString(odtImage(wcm, hcm, i+1))
+	for _, t := range tables {
+		body.WriteString(odtTable(t))
+	}
+	imgIdx := 0
+	for _, s := range sections {
+		if s.Title != "" {
+			body.WriteString(odtPara(s.Title, "ReportHeading"))
+		}
+		for _, img := range s.Images {
+			imgIdx++
+			wcm, hcm := imageSizeCM(img.Data, 17.0)
+			if wcm <= 0 {
+				continue
+			}
+			body.WriteString(odtImage(wcm, hcm, imgIdx))
+			if img.Caption != "" {
+				body.WriteString(odtPara(img.Caption, "ReportCaption"))
+			}
+			body.WriteString(odtPageBreak())
 		}
 	}
 	if warnings != "" {
@@ -293,15 +510,21 @@ func writeOdt(path, title, meta, text, warnings string, imgs [][]byte) error {
 		}
 	}
 
+	bodyText := body.String()
+	if warnings == "" {
+		bodyText = strings.TrimSuffix(bodyText, odtPageBreak())
+	}
+
 	content := `<?xml version="1.0" encoding="UTF-8"?>` +
 		`<office:document-content` +
 		` xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"` +
 		` xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"` +
 		` xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"` +
+		` xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"` +
 		` xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0"` +
 		` xmlns:xlink="http://www.w3.org/1999/xlink"` +
 		` office:version="1.2"><office:body><office:text>` +
-		body.String() + `</office:text></office:body></office:document-content>`
+		bodyText + `</office:text></office:body></office:document-content>`
 
 	styles := `<?xml version="1.0" encoding="UTF-8"?>` +
 		`<office:document-styles` +
@@ -317,6 +540,18 @@ func writeOdt(path, title, meta, text, warnings string, imgs [][]byte) error {
 		`<style:text-properties fo:font-size="9pt"/></style:style>` +
 		`<style:style style:name="ReportHeading" style:family="paragraph" style:parent-style-name="Standard">` +
 		`<style:text-properties fo:font-size="11pt" fo:font-weight="bold"/></style:style>` +
+		`<style:style style:name="ReportCaption" style:family="paragraph" style:parent-style-name="Standard">` +
+		`<style:text-properties fo:font-size="8pt" fo:font-style="italic"/></style:style>` +
+		`<style:style style:name="PageBreak" style:family="paragraph" style:parent-style-name="Standard">` +
+		`<style:paragraph-properties fo:break-before="page"/></style:style>` +
+		`<style:style style:name="ReportTable" style:family="table">` +
+		`<style:table-properties style:width="17cm"/></style:style>` +
+		`<style:style style:name="TableCells" style:family="table-cell">` +
+		`<style:table-cell-properties fo:padding="0.02in" fo:border="0.5pt solid #000000"/></style:style>` +
+		`<style:style style:name="TableHeader" style:family="paragraph" style:parent-style-name="Standard">` +
+		`<style:text-properties fo:font-family="monospace" fo:font-size="7pt" fo:font-weight="bold"/></style:style>` +
+		`<style:style style:name="TableText" style:family="paragraph" style:parent-style-name="Standard">` +
+		`<style:text-properties fo:font-family="monospace" fo:font-size="7pt"/></style:style>` +
 		`<style:style style:name="Preformatted_20_Text" style:family="paragraph" style:parent-style-name="Standard">` +
 		`<style:text-properties fo:font-family="monospace" fo:font-size="8pt"/></style:style>` +
 		`</office:styles></office:document-styles>`
@@ -346,7 +581,7 @@ func writeOdt(path, title, meta, text, warnings string, imgs [][]byte) error {
 		if err != nil {
 			return err
 		}
-		if _, err := w.Write(img); err != nil {
+		if _, err := w.Write(img.Data); err != nil {
 			return err
 		}
 	}
@@ -387,4 +622,50 @@ func odtImage(wcm, hcm float64, idx int) string {
 		`<draw:image xlink:href="Pictures/image%d.png" xlink:type="simple"`+
 		` xlink:show="embed" xlink:actuate="onLoad"/></draw:frame></text:p>`,
 		idx, wcm, hcm, idx)
+}
+
+// odtTable — таблица, подпись на новой строке и разрыв страницы.
+func odtTable(t docTable) string {
+	if len(t.Headers) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<table:table table:name="ReportTable"` +
+		` table:style-name="ReportTable">`)
+	fmt.Fprintf(&b, `<table:table-column table:number-columns-repeated="%d"/>`,
+		len(t.Headers))
+	b.WriteString(`<table:table-header-rows><table:table-row>`)
+	for _, h := range t.Headers {
+		b.WriteString(odtCell(h, "TableHeader"))
+	}
+	b.WriteString(`</table:table-row></table:table-header-rows>`)
+	for _, row := range t.Rows {
+		b.WriteString(`<table:table-row>`)
+		for i := range t.Headers {
+			v := ""
+			if i < len(row) {
+				v = row[i]
+			}
+			b.WriteString(odtCell(v, "TableText"))
+		}
+		b.WriteString(`</table:table-row>`)
+	}
+	b.WriteString(`</table:table>`)
+	if t.Title != "" {
+		b.WriteString(odtPara(t.Title, "ReportCaption"))
+	}
+	b.WriteString(odtPageBreak())
+	return b.String()
+}
+
+// odtPageBreak — разрыв страницы перед пустым абзацем (стиль PageBreak).
+func odtPageBreak() string {
+	return odtPara("", "PageBreak")
+}
+
+// odtCell — ячейка таблицы с общим стилем границ.
+func odtCell(text, style string) string {
+	return `<table:table-cell table:style-name="TableCells"` +
+		` office:value-type="string"><text:p text:style-name="` + style +
+		`">` + odtText(text) + `</text:p></table:table-cell>`
 }

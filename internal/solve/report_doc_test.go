@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"image/png"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -70,8 +71,12 @@ func TestWriteDocx(t *testing.T) {
 	path := filepath.Join(dir, "report.docx")
 	text := "=== Channel agreement ===\n  beta(355 nm)  g = 1 < 2 & 3\n"
 	warn := "[warning] something happened"
-	imgs := [][]byte{testPNG(t, 8, 4), testPNG(t, 6, 4)}
-	if err := writeDocx(path, "Title", "meta", text, warn, imgs); err != nil {
+	imgs := []docImage{
+		{Data: testPNG(t, 8, 4)},
+		{Data: testPNG(t, 6, 4)},
+	}
+	sections := []docImageSection{{Images: imgs}}
+	if err := writeDocx(path, "Title", "meta", text, nil, sections, warn); err != nil {
 		t.Fatalf("writeDocx: %v", err)
 	}
 
@@ -110,8 +115,12 @@ func TestWriteOdt(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "report.odt")
 	text := "line one\n  indented text"
-	imgs := [][]byte{testPNG(t, 8, 4), testPNG(t, 6, 4)}
-	if err := writeOdt(path, "Title", "meta", text, "", imgs); err != nil {
+	imgs := []docImage{
+		{Data: testPNG(t, 8, 4)},
+		{Data: testPNG(t, 6, 4)},
+	}
+	sections := []docImageSection{{Images: imgs}}
+	if err := writeOdt(path, "Title", "meta", text, nil, sections, ""); err != nil {
 		t.Fatalf("writeOdt: %v", err)
 	}
 
@@ -142,6 +151,148 @@ func TestWriteOdt(t *testing.T) {
 	if !strings.Contains(content, "indented<text:s/>text") {
 		t.Errorf("spaces must be preserved via text:s:\n%s", content)
 	}
+}
+
+func TestWriteDocxTable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.docx")
+	tables := []docTable{{
+		Title:   "Microphysics",
+		Headers: []string{"H, m", "V", "N & reff"},
+		Rows: [][]string{
+			{"100", "1.5", "nan"},
+			{"200", "2.5", "3"},
+		},
+	}}
+	sections := []docImageSection{{
+		Title:  "Plots",
+		Images: []docImage{{Data: testPNG(t, 8, 4), Caption: "caption"}},
+	}}
+	if err := writeDocx(path, "Title", "meta", "log", tables, sections, ""); err != nil {
+		t.Fatalf("writeDocx: %v", err)
+	}
+	z, read := readZip(t, path)
+	defer z.Close()
+	doc := read("word/document.xml")
+	if err := xmlValid(doc); err != nil {
+		t.Fatalf("invalid document.xml: %v", err)
+	}
+	for _, want := range []string{"<w:tbl>", "H, m", "N &amp; reff",
+		"caption", "Plots", "<w:tblHeader/>",
+		`w:br w:type="page"`} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("document must contain %q", want)
+		}
+	}
+	if strings.Index(doc, "<w:tbl>") > strings.Index(doc, "Microphysics") {
+		t.Errorf("table caption must follow the table")
+	}
+	if got := strings.Count(doc, docxPageBreak()); got != 1 {
+		t.Errorf("page breaks = %d, want 1 (last object does not break)", got)
+	}
+}
+
+func TestWriteOdtTable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.odt")
+	tables := []docTable{{
+		Title:   "Microphysics",
+		Headers: []string{"H, m", "V"},
+		Rows:    [][]string{{"100", "1.5"}},
+	}}
+	sections := []docImageSection{{
+		Title:  "Plots",
+		Images: []docImage{{Data: testPNG(t, 8, 4), Caption: "caption"}},
+	}}
+	if err := writeOdt(path, "Title", "meta", "log", tables, sections, ""); err != nil {
+		t.Fatalf("writeOdt: %v", err)
+	}
+	z, read := readZip(t, path)
+	defer z.Close()
+	content := read("content.xml")
+	if err := xmlValid(content); err != nil {
+		t.Fatalf("invalid content.xml: %v", err)
+	}
+	for _, want := range []string{"table:table", "table:table-header-rows",
+		"Microphysics", "caption", "H,<text:s/>m",
+		`text:style-name="PageBreak"`} {
+		if !strings.Contains(content, want) {
+			t.Errorf("content must contain %q", want)
+		}
+	}
+	if strings.Index(content, "<table:table") > strings.Index(content, "Microphysics") {
+		t.Errorf("table caption must follow the table")
+	}
+	if got := strings.Count(content, odtPageBreak()); got != 1 {
+		t.Errorf("page breaks = %d, want 1 (last object does not break)", got)
+	}
+}
+
+func TestReportPNG(t *testing.T) {
+	c := newConsole(io.Discard, io.Discard, false)
+	dir := t.TempDir()
+	existingPNG := testPNG(t, 4, 3)
+	existing := filepath.Join(dir, "plot.png")
+	if err := os.WriteFile(existing, existingPNG, 0644); err != nil {
+		t.Fatalf("write existing png: %v", err)
+	}
+
+	t.Run("gnuplot png reuses file", func(t *testing.T) {
+		a := &Args{Plotting: plottingGnuplot, PlotFormat: plotFmtPng}
+		got, ok := reportPNG(a, c, existing,
+			func(*plotOpts) ([]byte, bool) {
+				t.Fatal("internal renderer must not be used")
+				return nil, false
+			},
+			func(*plotOpts, string) bool {
+				t.Fatal("gnuplot render must not be used")
+				return false
+			})
+		if !ok || !bytes.Equal(got, existingPNG) {
+			t.Fatalf("reportPNG must return the existing PNG")
+		}
+	})
+
+	t.Run("gnuplot pdf renders temp png", func(t *testing.T) {
+		a := &Args{Plotting: plottingGnuplot, PlotFormat: plotFmtPdf}
+		tmpPNG := testPNG(t, 5, 3)
+		got, ok := reportPNG(a, c, "",
+			func(*plotOpts) ([]byte, bool) {
+				t.Fatal("internal renderer must not be used")
+				return nil, false
+			},
+			func(po *plotOpts, path string) bool {
+				if po.format != plotFmtPng || po.backend != plottingGnuplot {
+					t.Errorf("unexpected temp plot opts: %+v", po)
+				}
+				if !po.quiet {
+					t.Errorf("temporary report plot must be quiet")
+				}
+				return os.WriteFile(path, tmpPNG, 0644) == nil
+			})
+		if !ok || !bytes.Equal(got, tmpPNG) {
+			t.Fatalf("reportPNG must return the temporary PNG")
+		}
+	})
+
+	t.Run("internal uses in-memory renderer", func(t *testing.T) {
+		a := &Args{Plotting: plottingInternal, PlotFormat: plotFmtPdf}
+		inMem := testPNG(t, 6, 3)
+		got, ok := reportPNG(a, c, existing,
+			func(po *plotOpts) ([]byte, bool) {
+				if po.backend != plottingInternal {
+					t.Errorf("unexpected backend: %q", po.backend)
+				}
+				return inMem, true
+			},
+			func(*plotOpts, string) bool {
+				t.Fatal("gnuplot render must not be used")
+				return false
+			})
+		if !ok || !bytes.Equal(got, inMem) {
+			t.Fatalf("reportPNG must return internal bytes")
+		}
+	})
 }
 
 func TestFilterWarnings(t *testing.T) {

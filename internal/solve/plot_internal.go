@@ -508,12 +508,13 @@ func internalPanelDataWidth(w vg.Length, cols int) vg.Length {
 	return w/vg.Length(cols) - vg.Points(70)
 }
 
-// internalProfile — компактный график одной высоты пакетного режима.
-func internalProfile(po *plotOpts, outPath string, rGrid, nAvg, nLow, nHigh,
+// internalProfileDraw — отрисовка компактного графика одной высоты
+// пакетного режима (общая для файла и PNG-байтов отчёта).
+func internalProfileDraw(po *plotOpts, rGrid, nAvg, nLow, nHigh,
 	vCum []float64, ch []channel, g1, gFit []float64, h float64,
-	gBest int) bool {
+	gBest int) (func(draw.Canvas), bool) {
 	if len(rGrid) == 0 || len(nAvg) == 0 {
-		return false
+		return nil, false
 	}
 	dv := make([]float64, len(rGrid))
 	for i := range rGrid {
@@ -551,7 +552,7 @@ func internalProfile(po *plotOpts, outPath string, rGrid, nAvg, nLow, nHigh,
 		cum[i] = v
 	}
 
-	return internalRender(po, outPath, 10.0*vg.Inch, 3.0667*vg.Inch, func(c draw.Canvas) {
+	drawFn := func(c draw.Canvas) {
 		tiles := internalTiles(3)
 
 		p1 := internalNewPlot(po)
@@ -593,19 +594,44 @@ func internalProfile(po *plotOpts, outPath string, rGrid, nAvg, nLow, nHigh,
 		internalAddSeries(p3, rGrid, cum, internalColor(2), vg.Points(2), false,
 			nil, false, "", false)
 		p3.Draw(tiles.At(c, 2, 0))
-	})
+	}
+	return drawFn, true
 }
 
-// internalProfiles — сводный вертикальный профиль нескольких серий.
-func internalProfiles(po *plotOpts, outPath, title, xlabel string, nSeries int,
-	alt []float64, vals [][]float64, names []string, dashed []bool,
-	logAuto bool) bool {
-	if len(alt) == 0 || nSeries <= 0 {
+// internalProfile — компактный график одной высоты пакетного режима.
+func internalProfile(po *plotOpts, outPath string, rGrid, nAvg, nLow, nHigh,
+	vCum []float64, ch []channel, g1, gFit []float64, h float64,
+	gBest int) bool {
+	drawFn, ok := internalProfileDraw(po, rGrid, nAvg, nLow, nHigh, vCum, ch,
+		g1, gFit, h, gBest)
+	if !ok {
 		return false
+	}
+	return internalRender(po, outPath, 10.0*vg.Inch, 3.0667*vg.Inch, drawFn)
+}
+
+// internalProfilePNG — тот же график в PNG (для встраивания в отчёт).
+func internalProfilePNG(po *plotOpts, rGrid, nAvg, nLow, nHigh, vCum []float64,
+	ch []channel, g1, gFit []float64, h float64, gBest int) ([]byte, bool) {
+	drawFn, ok := internalProfileDraw(po, rGrid, nAvg, nLow, nHigh, vCum, ch,
+		g1, gFit, h, gBest)
+	if !ok {
+		return nil, false
+	}
+	return internalDrawToPNG(po, 10.0*vg.Inch, 3.0667*vg.Inch, drawFn)
+}
+
+// internalProfilesDraw — отрисовка сводного вертикального профиля
+// (общая для файла и PNG-байтов отчёта).
+func internalProfilesDraw(po *plotOpts, title, xlabel string, nSeries int,
+	alt []float64, vals [][]float64, names []string, dashed []bool,
+	logAuto bool) (func(draw.Canvas), bool) {
+	if len(alt) == 0 || nSeries <= 0 {
+		return nil, false
 	}
 	lo, hi, hLo, hHi, useLog := profileAxes(alt, vals, nSeries, logAuto)
 
-	return internalRender(po, outPath, 6.0*vg.Inch, 4.8*vg.Inch, func(c draw.Canvas) {
+	drawFn := func(c draw.Canvas) {
 		p := internalNewPlot(po)
 		p.Title.Text = internalLabel(title)
 		p.X.Label.Text = internalLabel(xlabel)
@@ -626,15 +652,40 @@ func internalProfiles(po *plotOpts, outPath, title, xlabel string, nSeries int,
 				true, internalGlyph(s), d, name, true)
 		}
 		p.Draw(c)
-	})
+	}
+	return drawFn, true
 }
 
-// internalRefractiveProfile — профиль Re(m)/Im(m) по высотам: две панели
-// (gnuplot-версия использует две оси X, здесь — две панели).
-func internalRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []float64) bool {
+// internalProfiles — сводный вертикальный профиль нескольких серий.
+func internalProfiles(po *plotOpts, outPath, title, xlabel string, nSeries int,
+	alt []float64, vals [][]float64, names []string, dashed []bool,
+	logAuto bool) bool {
+	drawFn, ok := internalProfilesDraw(po, title, xlabel, nSeries, alt, vals,
+		names, dashed, logAuto)
+	if !ok {
+		return false
+	}
+	return internalRender(po, outPath, 6.0*vg.Inch, 4.8*vg.Inch, drawFn)
+}
+
+// internalProfilesPNG — тот же профиль в PNG (для встраивания в отчёт).
+func internalProfilesPNG(po *plotOpts, title, xlabel string, nSeries int,
+	alt []float64, vals [][]float64, names []string, dashed []bool,
+	logAuto bool) ([]byte, bool) {
+	drawFn, ok := internalProfilesDraw(po, title, xlabel, nSeries, alt, vals,
+		names, dashed, logAuto)
+	if !ok {
+		return nil, false
+	}
+	return internalDrawToPNG(po, 6.0*vg.Inch, 4.8*vg.Inch, drawFn)
+}
+
+// internalRefractiveProfileDraw — отрисовка профиля Re(m)/Im(m) по высотам:
+// две панели (gnuplot-версия использует две оси X, здесь — две панели).
+func internalRefractiveProfileDraw(po *plotOpts, alt, mRe, mIm []float64) (func(draw.Canvas), bool) {
 	n := len(alt)
 	if n <= 0 {
-		return false
+		return nil, false
 	}
 	idx := altitudeOrder(alt)
 	ys := make([]float64, n)
@@ -648,7 +699,7 @@ func internalRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []flo
 	reLo, reHi, imLo, imHi, hLo, hHi := refractiveAxes(alt, mRe, mIm)
 
 	const titleBand = 8 * vg.Millimeter
-	return internalRender(po, outPath, 6.0*vg.Inch, 4.8*vg.Inch, func(c draw.Canvas) {
+	drawFn := func(c draw.Canvas) {
 		body := c
 		body.Max.Y -= titleBand
 		tiles := draw.Tiles{
@@ -677,7 +728,26 @@ func internalRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []flo
 		pIm.Draw(tiles.At(body, 1, 0))
 
 		internalDrawTitle(c, internalLabel("Refractive index vs altitude"), po)
-	})
+	}
+	return drawFn, true
+}
+
+// internalRefractiveProfile — профиль Re(m)/Im(m) по высотам.
+func internalRefractiveProfile(po *plotOpts, outPath string, alt, mRe, mIm []float64) bool {
+	drawFn, ok := internalRefractiveProfileDraw(po, alt, mRe, mIm)
+	if !ok {
+		return false
+	}
+	return internalRender(po, outPath, 6.0*vg.Inch, 4.8*vg.Inch, drawFn)
+}
+
+// internalRefractiveProfilePNG — тот же профиль в PNG (для отчёта).
+func internalRefractiveProfilePNG(po *plotOpts, alt, mRe, mIm []float64) ([]byte, bool) {
+	drawFn, ok := internalRefractiveProfileDraw(po, alt, mRe, mIm)
+	if !ok {
+		return nil, false
+	}
+	return internalDrawToPNG(po, 6.0*vg.Inch, 4.8*vg.Inch, drawFn)
 }
 
 // internalResultsDraw — основной график одиночного режима (3 панели).
@@ -899,13 +969,13 @@ func internalDrawSpectrumLegend(c draw.Canvas, po *plotOpts, hasMeas bool) {
 	}
 }
 
-// internalSpectrumFigure — одна или несколько панелей «величина vs λ» в PDF.
-// Несколько панелей раскладываются в сетку 2×2 по полям slot; под ними
-// рисуется одна общая легенда.
-func internalSpectrumFigure(po *plotOpts, outPath string, panels []spectrumPanel,
-	wIn, hIn float64) bool {
+// internalSpectrumFigureDraw — отрисовка одной или нескольких панелей
+// «величина vs λ» (общая для файла и PNG-байтов отчёта). Несколько панелей
+// раскладываются в сетку 2×2 по полям slot; под ними рисуется общая легенда.
+func internalSpectrumFigureDraw(po *plotOpts, panels []spectrumPanel,
+	wIn, hIn float64) (func(draw.Canvas), vg.Length, vg.Length, bool) {
 	if len(panels) == 0 {
-		return false
+		return nil, 0, 0, false
 	}
 	multi := len(panels) > 1
 	rows, cols := 1, 1
@@ -931,7 +1001,7 @@ func internalSpectrumFigure(po *plotOpts, outPath string, panels []spectrumPanel
 	}
 	w := vg.Length(wIn * float64(vg.Inch))
 	h := vg.Length(hIn*float64(vg.Inch)) + legendH
-	return internalRender(po, outPath, w, h, func(c draw.Canvas) {
+	drawFn := func(c draw.Canvas) {
 		panelRect, legendRect := c.Rectangle, c.Rectangle
 		if multi {
 			panelRect.Max.Y -= legendH
@@ -953,7 +1023,28 @@ func internalSpectrumFigure(po *plotOpts, outPath string, panels []spectrumPanel
 			internalDrawSpectrumLegend(draw.Canvas{Canvas: c.Canvas,
 				Rectangle: legendRect}, po, hasMeas)
 		}
-	})
+	}
+	return drawFn, w, h, true
+}
+
+// internalSpectrumFigure — одна или несколько панелей «величина vs λ» в файл.
+func internalSpectrumFigure(po *plotOpts, outPath string, panels []spectrumPanel,
+	wIn, hIn float64) bool {
+	drawFn, w, h, ok := internalSpectrumFigureDraw(po, panels, wIn, hIn)
+	if !ok {
+		return false
+	}
+	return internalRender(po, outPath, w, h, drawFn)
+}
+
+// internalSpectrumFigurePNG — та же сетка панелей в PNG (для отчёта).
+func internalSpectrumFigurePNG(po *plotOpts, panels []spectrumPanel,
+	wIn, hIn float64) ([]byte, bool) {
+	drawFn, w, h, ok := internalSpectrumFigureDraw(po, panels, wIn, hIn)
+	if !ok {
+		return nil, false
+	}
+	return internalDrawToPNG(po, w, h, drawFn)
 }
 
 // internalSpectrumPNG — та же панель в PNG (для встраивания в отчёт).

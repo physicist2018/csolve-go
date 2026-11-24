@@ -315,14 +315,12 @@ function renderOutput() {
   sp.appendChild(spectra);
   c.appendChild(sp);
 
-  if (state.mode !== 'batch') {
-    const rl = el('label', 'chk');
-    const rcb = el('input'); rcb.type = 'checkbox'; rcb.checked = o.report;
-    rcb.addEventListener('change', () => { o.report = rcb.checked; });
-    rl.appendChild(rcb);
-    rl.appendChild(document.createTextNode(' ' + 'Report'));
-    c.appendChild(rl);
-  }
+  const rl = el('label', 'chk');
+  const rcb = el('input'); rcb.type = 'checkbox'; rcb.checked = o.report;
+  rcb.addEventListener('change', () => { o.report = rcb.checked; });
+  rl.appendChild(rcb);
+  rl.appendChild(document.createTextNode(' ' + 'Report'));
+  c.appendChild(rl);
 }
 
 // ---------- options form ----------

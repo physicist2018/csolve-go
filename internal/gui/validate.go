@@ -255,8 +255,8 @@ func (b *argBuilder) output(req *Request, outDir string) error {
 	}
 	b.add(outDirFlag, outDir)
 
-	// отчёт (только одиночный режим)
-	if out.Report && req.Mode != "batch" {
+	// отчёт (одиночный и пакетный режимы)
+	if out.Report {
 		format := "docx"
 		if out.ReportFormat == "odt" {
 			format = "odt"

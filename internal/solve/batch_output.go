@@ -217,24 +217,24 @@ func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
 }
 
 type metrics struct {
-	err, V, Vc, Vf []float64
-	rmf, rmc, reff []float64
-	Nc             []float64
-	sgf, sgc, sgo  []float64
-	mRe, mIm       []float64
-	S              []float64   // nl × nAlt
-	dpol           [][]float64 // ndepol x nAlt, δ_l, %
-	dpolWl         []float64   // длины волн δ_l, µm
-	dpolMeas       [][]float64 // ndep x nAlt, измеренная δ_l, %
-	dpolMeasWl     []float64   // длины волн измеренной δ_l, µm
-	nAlt, nl       int
+	err, V, Vc, Vf      []float64
+	rmf, rmc, rmo, reff []float64
+	Nc                  []float64
+	sgf, sgc, sgo       []float64
+	mRe, mIm            []float64
+	S                   []float64   // nl × nAlt
+	dpol                [][]float64 // ndepol x nAlt, δ_l, %
+	dpolWl              []float64   // длины волн δ_l, µm
+	dpolMeas            [][]float64 // ndep x nAlt, измеренная δ_l, %
+	dpolMeasWl          []float64   // длины волн измеренной δ_l, µm
+	nAlt, nl            int
 }
 
 func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 	solveCh []channel, g1 []float64, sols *solutions, kts []*ktable,
 	mre, mim []float64, geom []*geom, r1Max float64, common []commonWl,
 	nl int, writeLidar bool, met *metrics, hi int, ds *depolSet,
-	src *tableSource, c *console) error {
+	src *tableSource, rimg *batchReportImages, c *console) error {
 	// измеренные δ_l по всем столбцам dep<nm> для текущей высоты
 	var measVals []float64
 	if b.ndep > 0 {
@@ -322,6 +322,7 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 		met.Vf[hi] = prof.modes.Fine.V / cm3PerM3
 		met.rmf[hi] = prof.modes.Fine.Rm
 		met.rmc[hi] = prof.modes.Coarse.Rm
+		met.rmo[hi] = prof.modes.Overall.Rm
 		met.reff[hi] = prof.moments.REffUm
 		met.Nc[hi] = prof.moments.NCm3
 		met.sgf[hi] = prof.modes.Fine.Sigma
@@ -334,18 +335,50 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 		}
 	}
 
+	plotExt := plotFormatExt(a.PlotFormat)
+	profilePath := filepath.Join(outDir,
+		fmt.Sprintf("plot_%s.%s", formatG6(h), plotExt))
+	spectrumPath := filepath.Join(outDir,
+		fmt.Sprintf("spectrum_%s.%s", formatG6(h), plotExt))
+
 	if !a.NoPlot {
 		po := plotOpts{format: a.PlotFormat, dpi: a.PlotDpi,
 			fontSize: a.PlotFontSize, backend: a.Plotting, con: c}
-		pp := filepath.Join(outDir,
-			fmt.Sprintf("plot_%s.%s", formatG6(h), plotFormatExt(a.PlotFormat)))
-		plotProfile(&po, pp, prof.rGrid, prof.nAvg, prof.nLow, prof.nHigh,
+		plotProfile(&po, profilePath, prof.rGrid, prof.nAvg, prof.nLow, prof.nHigh,
 			prof.vCum, solveCh, g1, prof.gFit, h, prof.nBestCount)
 		if prof.spectra != nil {
-			ps := filepath.Join(outDir, fmt.Sprintf("spectrum_%s.%s",
-				formatG6(h), plotFormatExt(a.PlotFormat)))
-			plotSpectraPanels(&po, ps, prof.spectra, h)
+			plotSpectraPanels(&po, spectrumPath, prof.spectra, h)
 		}
+	}
+
+	if rimg != nil {
+		var profPNG, specPNG []byte
+		if bts, ok := reportPNG(a, c, profilePath,
+			func(po *plotOpts) ([]byte, bool) {
+				return internalProfilePNG(po, prof.rGrid, prof.nAvg,
+					prof.nLow, prof.nHigh, prof.vCum, solveCh, g1,
+					prof.gFit, h, prof.nBestCount)
+			},
+			func(po *plotOpts, path string) bool {
+				return plotProfile(po, path, prof.rGrid, prof.nAvg,
+					prof.nLow, prof.nHigh, prof.vCum, solveCh, g1,
+					prof.gFit, h, prof.nBestCount)
+			}); ok {
+			profPNG = bts
+		}
+		if prof.spectra != nil {
+			if bts, ok := reportPNG(a, c, spectrumPath,
+				func(po *plotOpts) ([]byte, bool) {
+					panels := spectraPanelsForHeight(prof.spectra, h)
+					return internalSpectrumFigurePNG(po, panels, 10.0, 3.0667)
+				},
+				func(po *plotOpts, path string) bool {
+					return plotSpectraPanels(po, path, prof.spectra, h)
+				}); ok {
+				specPNG = bts
+			}
+		}
+		rimg.add(h, profPNG, specPNG)
 	}
 
 	if prof.spectra != nil {
