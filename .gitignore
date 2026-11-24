@@ -12,10 +12,15 @@
 .vscode/
 *.swp
 
-#
+# Temporary output files
 /2020-08-12
 /ex
 /out_batch/
+/out
+/out1
+/out_vesel
+/out_aggl
+/vesel
 /bases/*.zip
 
 # Локальные инсталляторы gnuplot (ссылки на скачивание — в README)
