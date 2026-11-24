@@ -147,7 +147,8 @@ func jsonFileGroup(s *state) *huh.Group {
 
 func batchFileGroup(s *state) *huh.Group {
 	return page("Input data — batch profile",
-		"Coefficients by altitude for a vertical profile.",
+		"Coefficients by altitude for a vertical profile. Optional altitude averaging "+
+			"replaces rows within each W-metre window with their mean.",
 		huh.NewFilePicker().
 			Title("Batch profile TXT").
 			Description("Header row: Altitude b<nm>... a<nm>... and optional dep<nm> columns.").
@@ -163,6 +164,13 @@ func batchFileGroup(s *state) *huh.Group {
 				}
 				return nil
 			}),
+		huh.NewInput().
+			Title("Altitude averaging window, m").
+			Description("Rows within W-metre windows are averaged before retrieval; "+
+				"0 = off (--batch-thin).").
+			Placeholder("0").
+			Value(&s.batchThin).
+			Validate(vFloatNonNeg()),
 	).WithHideFunc(func() bool { return s.mode != modeBatch })
 }
 

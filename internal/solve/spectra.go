@@ -9,6 +9,9 @@ import (
 // спектра. Огибающие и среднее всегда считаются по всему ансамблю.
 const maxSpectrumCurves = 64
 
+// spectrumLegendHIn — высота полосы общей легенды под сеткой спектров, дюймы.
+const spectrumLegendHIn = 1.0
+
 // wlPoint — измеренная точка спектральной зависимости.
 type wlPoint struct {
 	wlNm  float64
@@ -38,12 +41,13 @@ func (s *spectrumSet) usable() bool {
 	return false
 }
 
-// spectra — спектральные зависимости α(λ), β(λ), δ_l(λ), посчитанные по
-// каждому решению ансамбля на общей сетке длин волн.
+// spectra — спектральные зависимости α(λ), β(λ), S(λ) = α/β и δ_l(λ),
+// посчитанные по каждому решению ансамбля на общей сетке длин волн.
 type spectra struct {
 	wlNm  []float64
 	alpha *spectrumSet
 	beta  *spectrumSet
+	lidar *spectrumSet
 	delta *spectrumSet
 	g     int // число решений в ансамбле
 }
@@ -51,9 +55,19 @@ type spectra struct {
 // spectrumPanel — одна панель графика спектра.
 type spectrumPanel struct {
 	title, ylabel string
+	sciY          bool // научные подписи по оси ординат (α, β)
+	slot          int  // фиксированная ячейка сетки 2×2
 	wl            []float64
 	set           *spectrumSet
 }
+
+// Ячейки сетки 2×2: первый ряд — α и β, второй — S и δ_l.
+const (
+	spectrumSlotAlpha = iota
+	spectrumSlotBeta
+	spectrumSlotLidar
+	spectrumSlotDepol
+)
 
 // namedPanel — панель спектра вместе с суффиксом имени файла.
 type namedPanel struct {
@@ -61,21 +75,27 @@ type namedPanel struct {
 	panel  spectrumPanel
 }
 
-// namedPanels — доступные панели с суффиксами alpha/beta/depol.
+// namedPanels — доступные панели с суффиксами alpha/beta/lidar/depol.
 func (sp *spectra) namedPanels() []namedPanel {
 	if sp == nil {
 		return nil
 	}
 	var out []namedPanel
-	add := func(suffix, title, ylabel string, set *spectrumSet) {
+	add := func(slot int, suffix, title, ylabel string, sciY bool, set *spectrumSet) {
 		if set != nil && set.usable() {
 			out = append(out, namedPanel{suffix: suffix, panel: spectrumPanel{
-				title: title, ylabel: ylabel, wl: sp.wlNm, set: set}})
+				title: title, ylabel: ylabel, sciY: sciY, slot: slot,
+				wl: sp.wlNm, set: set}})
 		}
 	}
-	add("alpha", "Extinction coefficient α(λ)", "α, 1/m", sp.alpha)
-	add("beta", "Backscatter coefficient β(λ)", "β, 1/(m·sr)", sp.beta)
-	add("depol", "Linear depolarization δ_l(λ)", "δ_l, %", sp.delta)
+	add(spectrumSlotAlpha, "alpha", "Extinction coefficient α(λ)", "α, 1/m", true,
+		sp.alpha)
+	add(spectrumSlotBeta, "beta", "Backscatter coefficient β(λ)", "β, 1/(m·sr)",
+		true, sp.beta)
+	add(spectrumSlotLidar, "lidar", "Lidar ratio S(λ)", "S = α/β, sr", false,
+		sp.lidar)
+	add(spectrumSlotDepol, "depol", "Linear depolarization δ_l(λ)", "δ_l, %",
+		false, sp.delta)
 	return out
 }
 
@@ -97,12 +117,14 @@ func newMatrix(rows, cols int) [][]float64 {
 	return m
 }
 
-// buildSpectra — спектры α(λ), β(λ), δ_l(λ) по первым G решениям ансамбля.
+// buildSpectra — спектры α(λ), β(λ), S(λ) = α/β и δ_l(λ) по первым G
+// решениям ансамбля.
 //
 // Для каждого решения t и каждой длины волны λ:
 //
 //	α_t(λ) = Σ_q w_q K_ext(λ, r_q) q(r_q) n_t(r_q),   q(r) = 3/(4πr⁴)
 //	β_t(λ) = то же с Cback (с учётом --table-cback)
+//	S_t(λ) = α_t(λ)/β_t(λ) (только где β > 0)
 //	δ_t(λ) = (D11-D22)/(D11+D22)·100,  D = Σ_q w_q S11/22(λ, r_q) q n_t
 //
 // где n_t — dV/dln r решения t (ровно, без интерполяции по выходной сетке),
@@ -175,6 +197,7 @@ func buildSpectra(a *Args, sols *solutions, geom []*geom,
 	nw := len(wlNm)
 	alphaV := newMatrix(G, nw)
 	betaV := newMatrix(G, nw)
+	lidarV := newMatrix(G, nw)
 	deltaV := newMatrix(G, nw)
 	useDepol := depolSetAvailable(ds)
 	refWl := a.TableRefWl
@@ -234,14 +257,31 @@ func buildSpectra(a *Args, sols *solutions, geom []*geom,
 
 	alpha := aggregateSpectrum(alphaV, wlNm, maxSpectrumCurves)
 	beta := aggregateSpectrum(betaV, wlNm, maxSpectrumCurves)
+	for t := 0; t < G; t++ {
+		for iw := 0; iw < nw; iw++ {
+			a, b := alphaV[t][iw], betaV[t][iw]
+			if isFinite(a) && isFinite(b) && b > 0 {
+				v := a / b
+				if isFinite(v) {
+					lidarV[t][iw] = v
+					continue
+				}
+			}
+			lidarV[t][iw] = math.NaN()
+		}
+	}
+	lidar := aggregateSpectrum(lidarV, wlNm, maxSpectrumCurves)
 	delta := aggregateSpectrum(deltaV, wlNm, maxSpectrumCurves)
 	alpha.meas, beta.meas, delta.meas = measuredSpectrumPoints(ch, g1, depWl,
 		depVal)
 	alpha.measName = "measured α"
 	beta.measName = "measured β"
+	lidar.meas = measuredLidarPoints(alpha.meas, beta.meas)
+	lidar.measName = "measured S"
 	delta.measName = "measured δ_l"
 
-	return &spectra{wlNm: wlNm, alpha: alpha, beta: beta, delta: delta, g: G}
+	return &spectra{wlNm: wlNm, alpha: alpha, beta: beta, lidar: lidar,
+		delta: delta, g: G}
 }
 
 // spectrumColumn — значение табличного столбца в точке x. В отличие от ядер
@@ -381,6 +421,50 @@ func aggregateSpectrum(vals [][]float64, wlNm []float64, maxCurves int) *spectru
 		s.low[i], s.high[i] = mn, mx
 	}
 	return s
+}
+
+// measuredLidarPoints — измеренное S = α/β на общих длинах волн, где есть
+// обе измеренные величины и β > 0. Значения отсортированы по λ.
+func measuredLidarPoints(alpha, beta []wlPoint) []wlPoint {
+	var out []wlPoint
+	for _, pa := range alpha {
+		if !isFinite(pa.value) {
+			continue
+		}
+		var pb wlPoint
+		found := false
+		for _, b := range beta {
+			if isFinite(b.value) && b.value > 0 &&
+				sameWavelength(pa.wlNm, b.wlNm) {
+				pb, found = b, true
+				break
+			}
+		}
+		if !found {
+			continue
+		}
+		dup := false
+		for _, p := range out {
+			if sameWavelength(p.wlNm, pa.wlNm) {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			v := pa.value / pb.value
+			if isFinite(v) {
+				out = append(out, wlPoint{wlNm: pa.wlNm, value: v})
+			}
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].wlNm < out[j].wlNm })
+	return out
+}
+
+// sameWavelength — совпадение длин волн с относительным допуском (как в
+// сетке спектров).
+func sameWavelength(a, b float64) bool {
+	return math.Abs(a-b) <= 1e-6*math.Max(1.0, math.Max(math.Abs(a), math.Abs(b)))
 }
 
 // measuredSpectrumPoints — измеренные точки входных данных по каналам и

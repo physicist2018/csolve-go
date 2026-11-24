@@ -41,8 +41,9 @@ func closeFile(f *os.File) error {
 }
 
 // writeSpectrum — файл spectrum_<H>.txt: длины волн и mean/low/high для
-// α(λ), β(λ) и δ_l(λ). Отсутствующие величины пишутся как nan, чтобы набор
-// столбцов был стабильным.
+// α(λ), β(λ), S(λ) = α/β и δ_l(λ). Новые колонки S добавлены в конец,
+// чтобы не сдвигать существующие. Отсутствующие величины пишутся как nan,
+// чтобы набор столбцов был стабильным.
 func writeSpectrum(outDir string, h float64, sp *spectra) error {
 	if sp == nil {
 		return nil
@@ -50,7 +51,8 @@ func writeSpectrum(outDir string, h float64, sp *spectra) error {
 	path := filepath.Join(outDir, fmt.Sprintf("spectrum_%s.txt", formatG6(h)))
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# altitude H = %g m\n", h)
-	sb.WriteString("# alpha [1/m], beta [1/(m·sr)], delta_l [%]\n")
+	sb.WriteString("# alpha [1/m], beta [1/(m·sr)], lidar_ratio [sr], " +
+		"delta_l [%]\n")
 	sb.WriteString("# measured:")
 	writeMeas := func(prefix string, pts []wlPoint) {
 		for _, p := range pts {
@@ -63,11 +65,15 @@ func writeSpectrum(outDir string, h float64, sp *spectra) error {
 	if sp.beta != nil {
 		writeMeas("b", sp.beta.meas)
 	}
+	if sp.lidar != nil {
+		writeMeas("S", sp.lidar.meas)
+	}
 	if sp.delta != nil {
 		writeMeas("dep", sp.delta.meas)
 	}
 	sb.WriteString("\n# lambda_nm alpha_mean alpha_low alpha_high beta_mean " +
-		"beta_low beta_high delta_mean delta_low delta_high\n")
+		"beta_low beta_high delta_mean delta_low delta_high " +
+		"lidar_mean lidar_low lidar_high\n")
 	val := func(set *spectrumSet, i int) float64 {
 		if set == nil || i >= len(set.mean) {
 			return math.NaN()
@@ -87,12 +93,14 @@ func writeSpectrum(outDir string, h float64, sp *spectra) error {
 		return set.high[i]
 	}
 	for i, wl := range sp.wlNm {
-		fmt.Fprintf(&sb, "%s  %s  %s  %s  %s  %s  %s  %s  %s  %s\n",
+		fmt.Fprintf(&sb, "%s  %s  %s  %s  %s  %s  %s  %s  %s  %s  %s  %s  %s\n",
 			formatG6(wl), formatG6(val(sp.alpha, i)),
 			formatG6(valLo(sp.alpha, i)), formatG6(valHi(sp.alpha, i)),
 			formatG6(val(sp.beta, i)), formatG6(valLo(sp.beta, i)),
 			formatG6(valHi(sp.beta, i)), formatG6(val(sp.delta, i)),
-			formatG6(valLo(sp.delta, i)), formatG6(valHi(sp.delta, i)))
+			formatG6(valLo(sp.delta, i)), formatG6(valHi(sp.delta, i)),
+			formatG6(val(sp.lidar, i)), formatG6(valLo(sp.lidar, i)),
+			formatG6(valHi(sp.lidar, i)))
 	}
 	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
 		return fmt.Errorf("failed to open file for writing: %w", err)
@@ -104,10 +112,14 @@ func writeSpectrum(outDir string, h float64, sp *spectra) error {
 // calcWl/calcVals — расчётные δ_l по длинам волн, measVals — измеренные
 // значения, выровненные с b.depWl.
 func writeProfile(outDir string, h float64, b *batchInput, g1 []float64,
-	p *profile, calcWl, calcVals, measVals []float64) (float64, error) {
+	rawCount int, p *profile, calcWl, calcVals, measVals []float64) (float64, error) {
 	path := filepath.Join(outDir, fmt.Sprintf("dist_%s.txt", formatG6(h)))
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# altitude H = %g m\n", h)
+	if b.thinWindow > 0 {
+		fmt.Fprintf(&sb, "# altitude averaging: window %g m, %d input rows\n",
+			b.thinWindow, rawCount)
+	}
 	sb.WriteString("# input data (β [1/(m·sr)], α [1/m]): ")
 	for j := 0; j < b.nch; j++ {
 		if j > 0 {
@@ -245,7 +257,13 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 			calcVals[i] = prof.deltaL[j]
 		}
 	}
-	errSum, err := writeProfile(outDir, h, b, g1, prof, calcWl, calcVals, measVals)
+	// число исходных строк, усреднённых в этот профиль (0 — без прореживания)
+	rawCount := 0
+	if b.thinWindow > 0 && hi < len(b.thinCounts) {
+		rawCount = b.thinCounts[hi]
+	}
+	errSum, err := writeProfile(outDir, h, b, g1, rawCount, prof, calcWl,
+		calcVals, measVals)
 	if err != nil {
 		return err
 	}

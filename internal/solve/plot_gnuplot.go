@@ -436,19 +436,61 @@ func gnuplotSpectrumFigure(po *plotOpts, outPath string, panels []spectrumPanel,
 	if !ok {
 		return false
 	}
+	multi := len(panels) > 1
+	rows := 1
+	scale := plotFontScale(po)
+	legendH := 0.0
+	if multi {
+		for _, pn := range panels {
+			if pn.slot >= 2 {
+				rows = 2
+				break
+			}
+		}
+		hIn *= float64(rows)
+		legendH = spectrumLegendHIn * scale
+		hIn += legendH
+	}
+	keySlot := -1
+	if multi {
+		for _, pn := range panels {
+			if len(pn.set.meas) > 0 &&
+				(keySlot < 0 || pn.slot < keySlot) {
+				keySlot = pn.slot
+			}
+		}
+		if keySlot < 0 {
+			for _, pn := range panels {
+				if keySlot < 0 || pn.slot < keySlot {
+					keySlot = pn.slot
+				}
+			}
+		}
+	}
 	fa := plotFontAttr(po)
 	var sb strings.Builder
 	sb.WriteString("set encoding utf8\n")
 	setTerminal(&sb, po, wIn, hIn)
 	fmt.Fprintf(&sb, "set output %q\n", gpPath(outPath))
 	sb.WriteString("set datafile missing 'NaN'\n")
-	if len(panels) > 1 {
-		fmt.Fprintf(&sb, "set multiplot layout 1,%d\n", len(panels))
+	strip, keyY := 0.0, 0.0
+	if multi {
+		strip = legendH / hIn
+		if strip < 0.06 {
+			strip = 0.06
+		}
+		keyY = 0.99
+		left := 0.09 * scale
+		right := 1 - 0.04*scale
+		bottom := 0.05 * scale
+		sx, sy := 0.09*scale, 0.10*scale
+		fmt.Fprintf(&sb, "set multiplot layout %d,2 margins %.4f,%.4f,%.4f,%.3f "+
+			"spacing %.4f,%.4f\n", rows, left, right, bottom, 1-strip, sx, sy)
 	}
 
 	files := make([]string, 0, 2*len(panels)+1)
-	for i, pn := range panels {
-		dataPath := filepath.Join(dir, fmt.Sprintf("spec_%d.dat", i))
+	writePanel := func(idx int, pn spectrumPanel) {
+		dataPath := filepath.Join(dir, fmt.Sprintf("spec_%d.dat", idx))
 		files = append(files, dataPath)
 		nc := len(pn.set.curves)
 		var data strings.Builder
@@ -485,7 +527,7 @@ func gnuplotSpectrumFigure(po *plotOpts, outPath string, panels []spectrumPanel,
 
 		measPath := ""
 		if len(pn.set.meas) > 0 {
-			measPath = filepath.Join(dir, fmt.Sprintf("meas_%d.dat", i))
+			measPath = filepath.Join(dir, fmt.Sprintf("meas_%d.dat", idx))
 			files = append(files, measPath)
 			var mb strings.Builder
 			for _, m := range pn.set.meas {
@@ -499,13 +541,31 @@ func gnuplotSpectrumFigure(po *plotOpts, outPath string, panels []spectrumPanel,
 		fmt.Fprintf(&sb, "set xlabel 'λ, nm'%s\n", fa)
 		fmt.Fprintf(&sb, "set ylabel '%s'%s\n", pn.ylabel, fa)
 		sb.WriteString("set grid\n")
-		fmt.Fprintf(&sb, "set key top right%s\n", fa)
+		if multi {
+			if idx == keySlot {
+				fmt.Fprintf(&sb, "set key at screen 0.5,%.3f center top "+
+					"horizontal%s\n", keyY, fa)
+			} else {
+				sb.WriteString("unset key\n")
+			}
+		} else {
+			fmt.Fprintf(&sb, "set key top right%s\n", fa)
+		}
 		sb.WriteString("unset logscale y\n")
+		if pn.sciY {
+			sb.WriteString("set format y '%.1t×10^{%T}'\n")
+		} else {
+			sb.WriteString("unset format y\n")
+		}
 
 		parts := make([]string, 0, nc+4)
 		for c := 0; c < nc; c++ {
+			title := "notitle"
+			if multi && idx == keySlot && c == 0 {
+				title = "title 'individual solutions'"
+			}
 			parts = append(parts, fmt.Sprintf("%q using 1:%d with lines "+
-				"lw 0.8 lc rgb '#bbbbbb' notitle", gpPath(dataPath), 5+c))
+				"lw 0.8 lc rgb '#bbbbbb' %s", gpPath(dataPath), 5+c, title))
 		}
 		parts = append(parts,
 			fmt.Sprintf("%q using 1:3 with lines dt 2 lw 1.6 "+
@@ -516,16 +576,39 @@ func gnuplotSpectrumFigure(po *plotOpts, outPath string, panels []spectrumPanel,
 				"lc rgb '#1f77b4' title 'mean of best solutions'",
 				gpPath(dataPath)))
 		if measPath != "" {
+			measName := pn.set.measName
+			if multi && idx == keySlot {
+				measName = "measured"
+			}
 			parts = append(parts, fmt.Sprintf("%q using 1:2 with points "+
 				"pt 7 ps 1.1 lc rgb 'black' title '%s'", gpPath(measPath),
-				pn.set.measName))
+				measName))
 		}
 		sb.WriteString("plot ")
 		sb.WriteString(strings.Join(parts, ", \\\n     "))
 		sb.WriteByte('\n')
 	}
-	if len(panels) > 1 {
+
+	if multi {
+		bySlot := make(map[int]spectrumPanel, len(panels))
+		last := 0
+		for _, pn := range panels {
+			bySlot[pn.slot] = pn
+			if pn.slot > last {
+				last = pn.slot
+			}
+		}
+		for slot := 0; slot <= last; slot++ {
+			pn, present := bySlot[slot]
+			if !present {
+				sb.WriteString("set multiplot next\n")
+				continue
+			}
+			writePanel(slot, pn)
+		}
 		sb.WriteString("unset multiplot\n")
+	} else {
+		writePanel(0, panels[0])
 	}
 
 	scriptPath := filepath.Join(dir, "plot.gp")

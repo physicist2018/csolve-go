@@ -71,6 +71,7 @@ type Args struct {
 
 	Batch          string
 	BatchOutDir    string
+	BatchThin      float64
 	LidarRatioCons bool
 	LidarRatioW    float64
 	LidarRatioIter int
@@ -259,12 +260,13 @@ Options:
   --plot-format {png|pdf|svg}    plot format (gnuplot backend) [pdf];
                                  internal backend requires pdf
   --plot-dpi <N>                 resolution for png/svg, dpi, > 0 [150]
-  --plot-font-size <pt>          axis/series label size, pt (0 or 4..72) [12]
+  --plot-font-size <pt>          base font size for all plot text, pt
+                                 (0 or 4..72) [12]
   	--no-plot                      do not build plots
 
-    --no-spectra                   do not compute the α(λ)/β(λ)/δ_l(λ) spectra
-                                   (no spectral plots, JSON section or batch
-                                   files)
+    --no-spectra                   do not compute the α(λ)/β(λ)/S(λ)/δ_l(λ)
+                                   spectra (no spectral plots, JSON section or
+                                   batch files)
     --spectrum-points <N>          wavelengths in the spectra grid, 2..512 [40]
     --spectrum-wl-min <nm>         lower wavelength of the spectra grid; 0 =
                                    from the input data [0]
@@ -275,6 +277,8 @@ Options:
                                  (Altitude b<nm>... a<nm>...)
   --batch-out-dir <DIR>          batch output directory [next to TXT];
                                  mutually exclusive with --out-dir
+  --batch-thin <W>               average input rows within W-metre altitude
+                                 windows before retrieval; 0 = off [0]
   --lidar-ratio-cons             constrain smoothness of S = alpha/beta
   --lidar-ratio-w <X>            weight of S deviation penalty, >= 0 [1]
   --lidar-ratio-iter <N>         iterations to refine reference S, >= 1 [5]
@@ -432,6 +436,7 @@ func ParseArgs(argv []string) (*Args, error) {
 
 	fs.StringVar(&a.Batch, "batch", "", "")
 	fs.StringVar(&a.BatchOutDir, "batch-out-dir", "", "")
+	fs.Float64Var(&a.BatchThin, "batch-thin", a.BatchThin, "")
 	fs.BoolVar(&a.LidarRatioCons, "lidar-ratio-cons", false, "")
 	fs.Float64Var(&a.LidarRatioW, "lidar-ratio-w", a.LidarRatioW, "")
 	fs.IntVar(&a.LidarRatioIter, "lidar-ratio-iter", a.LidarRatioIter, "")
@@ -579,6 +584,11 @@ func checkArgs(a *Args, seen map[string]bool) error {
 	}
 	if a.LidarRatioIter < 1 {
 		return fmt.Errorf("option --lidar-ratio-iter must be >= 1")
+	}
+	if math.IsNaN(a.BatchThin) || math.IsInf(a.BatchThin, 0) ||
+		a.BatchThin < 0 {
+		return fmt.Errorf("option --batch-thin must be a finite number >= 0 " +
+			"(0 = off)")
 	}
 	if !(a.R0Min > 0) {
 		return fmt.Errorf("option --r0-min must be > 0")

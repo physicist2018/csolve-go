@@ -140,6 +140,10 @@ func run(a *Args) error {
 		c.printf("[warning] --lidar-ratio-cons only has an effect in batch " +
 			"mode (--batch); ignored\n")
 	}
+	if a.BatchThin > 0 && a.Batch == "" {
+		c.printf("[warning] --batch-thin only has an effect in batch " +
+			"mode (--batch); ignored\n")
+	}
 
 	if a.Batch != "" {
 		err := runBatch(a, c)

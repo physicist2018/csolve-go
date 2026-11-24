@@ -32,6 +32,7 @@ func buildArgv(s *state) ([]string, *solve.Args, error) {
 	b.regularization(s, d)
 	b.depolarization(s, d)
 	b.lidarRatio(s, d)
+	b.batchThinning(s, d)
 	b.demo(s, d)
 	b.discretization(s, d)
 	b.output(s, d)
@@ -217,6 +218,16 @@ func (b *argvBuilder) lidarRatio(s *state, d *solve.Args) {
 	}
 	if changedInt(s.lidarIter, d.LidarRatioIter) {
 		b.add("--lidar-ratio-iter", s.lidarIter)
+	}
+}
+
+// batchThinning — окно усреднения по высоте (только пакетный режим).
+func (b *argvBuilder) batchThinning(s *state, d *solve.Args) {
+	if s.mode != modeBatch {
+		return
+	}
+	if changedFloat(s.batchThin, d.BatchThin) {
+		b.add("--batch-thin", s.batchThin)
 	}
 }
 

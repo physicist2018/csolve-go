@@ -9,6 +9,7 @@ import (
 	"image/color"
 	"math"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -18,6 +19,7 @@ import (
 	"gonum.org/v1/plot"
 	plotfont "gonum.org/v1/plot/font"
 	"gonum.org/v1/plot/plotter"
+	plottext "gonum.org/v1/plot/text"
 	"gonum.org/v1/plot/vg"
 	"gonum.org/v1/plot/vg/draw"
 )
@@ -101,6 +103,63 @@ func internalLabel(s string) string {
 		b.WriteByte(c)
 	}
 	return b.String()
+}
+
+// sciParts разбирает число на мантиссу (один знак после точки) и
+// десятичный порядок; ok = false для нуля и нечисловых значений.
+func sciParts(v float64) (string, int, bool) {
+	if !isFinite(v) || v == 0 {
+		return "", 0, false
+	}
+	exp := int(math.Floor(math.Log10(math.Abs(v))))
+	mant := v / math.Pow(10, float64(exp))
+	if math.Abs(mant) >= 9.95 {
+		mant /= 10
+		exp++
+	}
+	return strconv.FormatFloat(mant, 'f', 1, 64), exp, true
+}
+
+var superscriptDigits = []rune("⁰¹²³⁴⁵⁶⁷⁸⁹")
+
+func superscriptInt(n int) string {
+	s := strconv.Itoa(n)
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r == '-' {
+			b.WriteRune('⁻')
+			continue
+		}
+		b.WriteRune(superscriptDigits[int(r-'0')])
+	}
+	return b.String()
+}
+
+// sciTickLabelInternal — подпись тика вида 4.5×10⁻⁵.
+func sciTickLabelInternal(v float64) string {
+	mant, exp, ok := sciParts(v)
+	if !ok {
+		return "0"
+	}
+	if internalNoGlyphs {
+		return mant + "×10^" + strconv.Itoa(exp)
+	}
+	return mant + "×10" + superscriptInt(exp)
+}
+
+// sciTicks — тики линейной оси с научными подписями (для α и β).
+type sciTicks struct{}
+
+func (sciTicks) Ticks(min, max float64) []plot.Tick {
+	ticks := plot.DefaultTicks{}.Ticks(min, max)
+	for i := range ticks {
+		if ticks[i].Label == "" {
+			continue
+		}
+		ticks[i].Label = sciTickLabelInternal(ticks[i].Value)
+	}
+	return ticks
 }
 
 func internalColor(i int) color.Color { return internalPalette[i%len(internalPalette)] }
@@ -391,11 +450,28 @@ func internalRanges(xs []float64, logX bool, yss ...[]float64) (xLo, xHi,
 }
 
 func internalTiles(cols int) draw.Tiles {
+	return internalTilesGrid(1, cols)
+}
+
+func internalTilesGrid(rows, cols int) draw.Tiles {
 	return draw.Tiles{
-		Rows: 1, Cols: cols,
+		Rows: rows, Cols: cols,
 		PadX: 10 * vg.Millimeter, PadY: 2 * vg.Millimeter,
 		PadLeft: 3 * vg.Millimeter, PadRight: 3 * vg.Millimeter,
 		PadTop: 2 * vg.Millimeter, PadBottom: 2 * vg.Millimeter,
+	}
+}
+
+// internalSpectrumTiles — увеличенные отступы для сетки спектров 2×2:
+// место под научные подписи оси Y, межколоночный зазор и заголовки нижнего
+// ряда, которые иначе налезают на подписи оси X верхнего ряда.
+func internalSpectrumTiles(rows, cols int, scale float64) draw.Tiles {
+	k := vg.Length(scale)
+	return draw.Tiles{
+		Rows: rows, Cols: cols,
+		PadX: 24 * vg.Millimeter * k, PadY: 20 * vg.Millimeter * k,
+		PadLeft: 23 * vg.Millimeter * k, PadRight: 10 * vg.Millimeter * k,
+		PadTop: 2 * vg.Millimeter * k, PadBottom: 3 * vg.Millimeter * k,
 	}
 }
 
@@ -698,12 +774,15 @@ func internalResultsDraw(po *plotOpts, rGrid []float64,
 
 // internalSpectrumPlot — панель «величина vs длина волны»: тонкие серые
 // кривые индивидуальных решений, огибающие (штриховые), среднее и измеренные
-// точки.
-func internalSpectrumPlot(po *plotOpts, pn spectrumPanel) *plot.Plot {
+// точки. withLegend управляет повтором легенды внутри панели.
+func internalSpectrumPlot(po *plotOpts, pn spectrumPanel, withLegend bool) *plot.Plot {
 	p := internalNewPlot(po)
 	p.Title.Text = internalLabel(pn.title)
 	p.X.Label.Text = internalLabel("λ, nm")
 	p.Y.Label.Text = internalLabel(pn.ylabel)
+	if pn.sciY {
+		p.Y.Tick.Marker = sciTicks{}
+	}
 
 	all := make([][]float64, 0, 4+len(pn.set.curves))
 	all = append(all, pn.set.mean, pn.set.low, pn.set.high)
@@ -727,11 +806,11 @@ func internalSpectrumPlot(po *plotOpts, pn spectrumPanel) *plot.Plot {
 	}
 	envCol := internalColor(1)
 	internalAddSeries(p, pn.wl, pn.set.low, envCol, vg.Points(1.6), false,
-		nil, true, "lower envelope", true)
+		nil, true, "lower envelope", withLegend)
 	internalAddSeries(p, pn.wl, pn.set.high, envCol, vg.Points(1.6), false,
-		nil, true, "upper envelope", true)
+		nil, true, "upper envelope", withLegend)
 	internalAddSeries(p, pn.wl, pn.set.mean, internalColor(0), vg.Points(2.6),
-		false, nil, false, "mean of best solutions", true)
+		false, nil, false, "mean of best solutions", withLegend)
 
 	if len(pn.set.meas) > 0 {
 		xs := make([]float64, len(pn.set.meas))
@@ -739,24 +818,126 @@ func internalSpectrumPlot(po *plotOpts, pn spectrumPanel) *plot.Plot {
 		for i, m := range pn.set.meas {
 			xs[i], ys[i] = m.wlNm, m.value
 		}
-		internalAddPoints(p, xs, ys, color.Black, draw.RingGlyph{},
-			pn.set.measName)
+		measName := ""
+		if withLegend {
+			measName = pn.set.measName
+		}
+		internalAddPoints(p, xs, ys, color.Black, draw.RingGlyph{}, measName)
 	}
 	return p
 }
 
+// internalDrawSpectrumLegend — одна общая горизонтальная легенда для сетки
+// панелей. hasMeas управляет строкой «measured».
+func internalDrawSpectrumLegend(c draw.Canvas, po *plotOpts, hasMeas bool) {
+	fs := internalFontPt - 1
+	if po != nil && po.fontSize > 0 {
+		fs = math.Max(po.fontSize-1, 4)
+	}
+	sty := plottext.Style{
+		Color:   color.Black,
+		Font:    plotfont.From(plot.DefaultFont, vg.Points(fs)),
+		XAlign:  plottext.XLeft,
+		YAlign:  plottext.YCenter,
+		Handler: plot.DefaultTextHandler,
+	}
+	type entry struct {
+		label  string
+		clr    color.Color
+		width  vg.Length
+		dashed bool
+		glyph  bool
+	}
+	entries := []entry{
+		{"individual solutions", color.Gray{Y: 0xbb}, vg.Points(0.8), false, false},
+		{"lower envelope", internalColor(1), vg.Points(1.6), true, false},
+		{"upper envelope", internalColor(1), vg.Points(1.6), true, false},
+		{"mean of best solutions", internalColor(0), vg.Points(2.4), false, false},
+	}
+	if hasMeas {
+		entries = append(entries, entry{"measured", color.Black, 0, false, true})
+	}
+	sampleW, gap, space := vg.Points(18), vg.Points(4), vg.Points(10)
+	widths := make([]vg.Length, len(entries))
+	total := vg.Length(0)
+	for i, e := range entries {
+		widths[i] = sty.Width(e.label)
+		total += sampleW + gap + widths[i]
+		if i > 0 {
+			total += space
+		}
+	}
+	x := c.Min.X + (c.Max.X-c.Min.X-total)/2
+	y := (c.Min.Y + c.Max.Y) / 2
+	for i, e := range entries {
+		if e.glyph {
+			c.DrawGlyph(draw.GlyphStyle{Color: e.clr, Radius: vg.Points(3),
+				Shape: draw.RingGlyph{}}, vg.Point{X: x + sampleW/2, Y: y})
+		} else {
+			ls := draw.LineStyle{Color: e.clr, Width: e.width}
+			if e.dashed {
+				ls.Dashes = []vg.Length{vg.Points(4), vg.Points(3)}
+			}
+			c.StrokeLine2(ls, x, y, x+sampleW, y)
+		}
+		c.FillText(sty, vg.Point{X: x + sampleW + gap, Y: y}, e.label)
+		x += sampleW + gap + widths[i] + space
+	}
+}
+
 // internalSpectrumFigure — одна или несколько панелей «величина vs λ» в PDF.
+// Несколько панелей раскладываются в сетку 2×2 по полям slot; под ними
+// рисуется одна общая легенда.
 func internalSpectrumFigure(po *plotOpts, outPath string, panels []spectrumPanel,
 	wIn, hIn float64) bool {
 	if len(panels) == 0 {
 		return false
 	}
+	multi := len(panels) > 1
+	rows, cols := 1, 1
+	scale := plotFontScale(po)
+	legendH := vg.Length(0)
+	if multi {
+		cols = 2
+		for _, pn := range panels {
+			if pn.slot >= 2 {
+				rows = 2
+				break
+			}
+		}
+		hIn *= float64(rows)
+		legendH = vg.Inch * vg.Length(spectrumLegendHIn*scale)
+	}
+	hasMeas := false
+	for _, pn := range panels {
+		if len(pn.set.meas) > 0 {
+			hasMeas = true
+			break
+		}
+	}
 	w := vg.Length(wIn * float64(vg.Inch))
-	h := vg.Length(hIn * float64(vg.Inch))
+	h := vg.Length(hIn*float64(vg.Inch)) + legendH
 	return internalRender(po, outPath, w, h, func(c draw.Canvas) {
-		tiles := internalTiles(len(panels))
-		for i := range panels {
-			internalSpectrumPlot(po, panels[i]).Draw(tiles.At(c, i, 0))
+		panelRect, legendRect := c.Rectangle, c.Rectangle
+		if multi {
+			panelRect.Max.Y -= legendH
+			legendRect.Min.Y = legendRect.Max.Y - legendH
+		}
+		panelCanvas := draw.Canvas{Canvas: c.Canvas, Rectangle: panelRect}
+		tiles := internalTiles(1)
+		if multi {
+			tiles = internalSpectrumTiles(rows, cols, scale)
+		}
+		for _, pn := range panels {
+			col, row := 0, 0
+			if multi {
+				col, row = pn.slot%2, pn.slot/2
+			}
+			internalSpectrumPlot(po, pn, !multi).Draw(tiles.At(panelCanvas, col, row))
+		}
+		if multi {
+			internalDrawSpectrumLegend(draw.Canvas{Canvas: c.Canvas,
+				Rectangle: legendRect}, po, hasMeas)
 		}
 	})
 }
@@ -766,6 +947,6 @@ func internalSpectrumPNG(po *plotOpts, pn spectrumPanel) (out []byte, ok bool) {
 	w := vg.Length(6.0 * float64(vg.Inch))
 	h := vg.Length(4.0 * float64(vg.Inch))
 	return internalDrawToPNG(po, w, h, func(c draw.Canvas) {
-		internalSpectrumPlot(po, pn).Draw(c)
+		internalSpectrumPlot(po, pn, true).Draw(c)
 	})
 }

@@ -115,6 +115,7 @@ type outSpectrumPoint struct {
 type outSpectraMeasured struct {
 	Alpha          []outSpectrumPoint `json:"alpha"`
 	Beta           []outSpectrumPoint `json:"beta"`
+	LidarRatio     []outSpectrumPoint `json:"lidar_ratio"`
 	Depolarization []outSpectrumPoint `json:"depolarization"`
 }
 
@@ -124,6 +125,7 @@ type outSpectra struct {
 	WlNm           []jfloat           `json:"wl_nm"`
 	Alpha          outSpectrumCurves  `json:"alpha"`
 	Beta           outSpectrumCurves  `json:"beta"`
+	LidarRatio     outSpectrumCurves  `json:"lidar_ratio"`
 	Depolarization outSpectrumCurves  `json:"depolarization"`
 	Measured       outSpectraMeasured `json:"measured"`
 }
@@ -309,10 +311,12 @@ func outSpectraFrom(sp *spectra) *outSpectra {
 		WlNm:           toJ(sp.wlNm),
 		Alpha:          curves(sp.alpha),
 		Beta:           curves(sp.beta),
+		LidarRatio:     curves(sp.lidar),
 		Depolarization: curves(sp.delta),
 		Measured: outSpectraMeasured{
 			Alpha:          meas(sp.alpha),
 			Beta:           meas(sp.beta),
+			LidarRatio:     meas(sp.lidar),
 			Depolarization: meas(sp.delta),
 		},
 	}

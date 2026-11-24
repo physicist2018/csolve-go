@@ -432,7 +432,7 @@ func TestWriteProfileDepolColumns(t *testing.T) {
 	prof := &profile{nr: 2, rGrid: []float64{0.1, 0.2},
 		nAvg: []float64{1, 2}, vCum: []float64{0, 0.5},
 		gFit: append([]float64(nil), g1...)}
-	if _, err := writeProfile(dir, 500, b, g1, prof,
+	if _, err := writeProfile(dir, 500, b, g1, 0, prof,
 		[]float64{0.532}, []float64{6.25}, []float64{7.5}); err != nil {
 		t.Fatalf("writeProfile: %v", err)
 	}
@@ -470,7 +470,7 @@ func TestWriteProfileDepolColumns(t *testing.T) {
 	// без измерения — только колонка расчёта (nan при отсутствии S11/S22)
 	b2 := &batchInput{nch: 2, nAlt: 1,
 		ch: []batchChannel{{chBeta, 0.532, "b532"}, {chAlpha, 0.532, "a532"}}}
-	if _, err := writeProfile(dir, 700, b2, g1, prof,
+	if _, err := writeProfile(dir, 700, b2, g1, 0, prof,
 		[]float64{0.532}, []float64{math.NaN()}, nil); err != nil {
 		t.Fatalf("writeProfile: %v", err)
 	}
@@ -495,6 +495,29 @@ func TestWriteProfileDepolColumns(t *testing.T) {
 		if _, err := strconv.ParseFloat(f[2], 64); err != nil {
 			t.Errorf("V column must be numeric, got %q", f[2])
 		}
+	}
+}
+
+// TestWriteProfileAltitudeAveraging: при --batch-thin в шапку
+// dist_<H>.txt попадает окно усреднения и число исходных строк.
+func TestWriteProfileAltitudeAveraging(t *testing.T) {
+	dir := t.TempDir()
+	b := &batchInput{nch: 1, nAlt: 1,
+		ch:         []batchChannel{{chBeta, 0.532, "b532"}},
+		thinWindow: 100, thinCounts: []int{3}}
+	g1 := []float64{1e-4}
+	prof := &profile{nr: 1, rGrid: []float64{0.1}, nAvg: []float64{1},
+		vCum: []float64{0}, gFit: []float64{1e-4}}
+	if _, err := writeProfile(dir, 550, b, g1, 3, prof, nil, nil, nil); err != nil {
+		t.Fatalf("writeProfile: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "dist_550.txt"))
+	if err != nil {
+		t.Fatalf("read dist file: %v", err)
+	}
+	if !strings.Contains(string(data),
+		"# altitude averaging: window 100 m, 3 input rows") {
+		t.Errorf("dist header misses averaging provenance:\n%s", data)
 	}
 }
 
@@ -571,6 +594,114 @@ func TestBatchParseDepol(t *testing.T) {
 	checkClose(t, "b532 value", b.data[1], 1e-4, 0)
 	if b.ch[0].name != "a532" || b.ch[1].name != "b532" {
 		t.Errorf("channel order must follow the header: %+v", b.ch)
+	}
+}
+
+func TestThinBatchAltitudes(t *testing.T) {
+	b := &batchInput{
+		ch: []batchChannel{
+			{kind: chBeta, wlUm: 0.532, name: "b532"},
+			{kind: chAlpha, wlUm: 0.532, name: "a532"},
+		},
+		nch:   2,
+		alt:   []float64{500, 550, 600, 700},
+		nAlt:  4,
+		depWl: []float64{0.532},
+		ndep:  1,
+		data:  []float64{1e-4, 3e-4, 2e-4, 5e-4, 3e-4, 7e-4, 4e-4, 9e-4},
+		dep:   []float64{10, 20, math.NaN(), 40},
+	}
+	out, err := thinBatchAltitudes(b, 100, testConsole())
+	if err != nil {
+		t.Fatalf("thinBatchAltitudes: %v", err)
+	}
+	if out.nAlt != 2 {
+		t.Fatalf("nAlt = %d, want 2", out.nAlt)
+	}
+	checkClose(t, "alt[0]", out.alt[0], 550, 0)
+	checkClose(t, "alt[1]", out.alt[1], 650, 0)
+	checkClose(t, "b532[0]", out.data[0], 1.5e-4, 1e-12)
+	checkClose(t, "a532[0]", out.data[1], 4e-4, 1e-12)
+	checkClose(t, "b532[1]", out.data[2], 3.5e-4, 1e-12)
+	checkClose(t, "a532[1]", out.data[3], 8e-4, 1e-12)
+	checkClose(t, "dep[0]", out.dep[0], 15, 1e-12)
+	checkClose(t, "dep[1] (nan ignored)", out.dep[1], 40, 1e-12)
+	if out.thinCounts[0] != 2 || out.thinCounts[1] != 2 {
+		t.Errorf("thinCounts = %v, want [2 2]", out.thinCounts)
+	}
+	checkClose(t, "thinWindow", out.thinWindow, 100, 0)
+}
+
+func TestThinBatchAltitudesPartialAndSort(t *testing.T) {
+	b := &batchInput{
+		ch:   []batchChannel{{kind: chBeta, wlUm: 0.532, name: "b532"}},
+		nch:  1,
+		alt:  []float64{650, 500, 550, 600},
+		nAlt: 4,
+		data: []float64{4e-4, 1e-4, 2e-4, 3e-4},
+	}
+	out, err := thinBatchAltitudes(b, 100, testConsole())
+	if err != nil {
+		t.Fatalf("thinBatchAltitudes: %v", err)
+	}
+	if out.nAlt != 2 {
+		t.Fatalf("nAlt = %d, want 2", out.nAlt)
+	}
+	checkClose(t, "alt[0]", out.alt[0], 550, 0)
+	checkClose(t, "alt[1]", out.alt[1], 625, 0)
+	checkClose(t, "b532[0]", out.data[0], 1.5e-4, 1e-12)
+	checkClose(t, "b532[1]", out.data[1], 3.5e-4, 1e-12)
+}
+
+func TestThinBatchAltitudesSkipsEmpty(t *testing.T) {
+	b := &batchInput{
+		ch:   []batchChannel{{kind: chBeta, wlUm: 0.532, name: "b532"}},
+		nch:  1,
+		alt:  []float64{500, 800},
+		nAlt: 2,
+		data: []float64{1e-4, 2e-4},
+	}
+	out, err := thinBatchAltitudes(b, 100, testConsole())
+	if err != nil {
+		t.Fatalf("thinBatchAltitudes: %v", err)
+	}
+	if out.nAlt != 2 {
+		t.Fatalf("nAlt = %d, want 2 (empty window dropped)", out.nAlt)
+	}
+	checkClose(t, "alt[0]", out.alt[0], 550, 0)
+	checkClose(t, "alt[1]", out.alt[1], 750, 0)
+}
+
+func TestThinBatchAltitudesNoValidWindows(t *testing.T) {
+	b := &batchInput{
+		ch:   []batchChannel{{kind: chBeta, wlUm: 0.532, name: "b532"}},
+		nch:  1,
+		alt:  []float64{500, 600},
+		nAlt: 2,
+		data: []float64{math.NaN(), math.NaN()},
+	}
+	if _, err := thinBatchAltitudes(b, 100, testConsole()); err == nil {
+		t.Fatal("expected an error when all windows are invalid")
+	}
+}
+
+func TestParseArgsBatchThin(t *testing.T) {
+	a, err := ParseArgs([]string{"--batch", "measurements.txt", "--batch-thin", "100"})
+	if err != nil {
+		t.Fatalf("ParseArgs: %v", err)
+	}
+	checkClose(t, "BatchThin", a.BatchThin, 100, 0)
+
+	if _, err := ParseArgs([]string{"--batch", "measurements.txt",
+		"--batch-thin", "0"}); err != nil {
+		t.Errorf("--batch-thin 0 must mean off: %v", err)
+	}
+
+	for _, v := range []string{"-5", "nan", "inf"} {
+		if _, err := ParseArgs([]string{"--batch", "measurements.txt",
+			"--batch-thin", v}); err == nil {
+			t.Errorf("--batch-thin %s must be rejected", v)
+		}
 	}
 }
 
@@ -1002,6 +1133,69 @@ func TestArgsPlotting(t *testing.T) {
 	}
 }
 
+// TestSetTerminalFontSize — --plot-font-size задаёт базовый размер шрифта
+// терминала gnuplot, поэтому масштабируются все надписи, не только оси/ключ.
+func TestSetTerminalFontSize(t *testing.T) {
+	cases := []struct {
+		size float64
+		want string
+	}{
+		{20, "font 'DejaVu Sans,20'"},
+		{0, "font 'DejaVu Sans,10'"},
+	}
+	for _, c := range cases {
+		var sb strings.Builder
+		setTerminal(&sb, &plotOpts{format: plotFmtSvg, dpi: 100,
+			fontSize: c.size}, 4, 3)
+		if !strings.Contains(sb.String(), c.want) {
+			t.Errorf("font size %g: terminal misses %q: %s", c.size, c.want,
+				sb.String())
+		}
+	}
+}
+
+func TestSciTickLabels(t *testing.T) {
+	cases := []struct {
+		v    float64
+		want string
+	}{
+		{4.5e-5, "4.5×10⁻⁵"},
+		{2e-5, "2.0×10⁻⁵"},
+		{1.25e-4, "1.2×10⁻⁴"},
+		{1, "1.0×10⁰"},
+		{0, "0"},
+	}
+	if internalNoGlyphs {
+		cases[0].want = "4.5×10^-5"
+		cases[1].want = "2.0×10^-5"
+		cases[2].want = "1.2×10^-4"
+		cases[3].want = "1.0×10^0"
+	}
+	for _, c := range cases {
+		if got := sciTickLabelInternal(c.v); got != c.want {
+			t.Errorf("sciTickLabelInternal(%g) = %q, want %q", c.v, got, c.want)
+		}
+	}
+
+	ticks := (sciTicks{}).Ticks(1e-5, 2e-5)
+	if len(ticks) == 0 {
+		t.Fatal("sciTicks returned no ticks")
+	}
+	labeled := 0
+	for _, tk := range ticks {
+		if tk.Label == "" {
+			continue
+		}
+		labeled++
+		if !strings.Contains(tk.Label, "×10") {
+			t.Errorf("tick label %q is not scientific", tk.Label)
+		}
+	}
+	if labeled == 0 {
+		t.Fatal("sciTicks returned no labeled ticks")
+	}
+}
+
 func TestInternalLabel(t *testing.T) {
 	cases := map[string]string{
 		"r, µm":               "r, µm",
@@ -1072,6 +1266,30 @@ func TestInternalPlotSmoke(t *testing.T) {
 			high:     []float64{1.1e-4, 1e-4, 8e-5, 6e-5, 4e-5},
 			meas:     []wlPoint{{wlNm: 355, value: 1.05e-4}},
 			measName: "measured α",
+		},
+		lidar: &spectrumSet{
+			curves:   [][]float64{{12, 13, 14, 15, 16}},
+			mean:     []float64{12, 13, 14, 15, 16},
+			low:      []float64{11, 12, 13, 14, 15},
+			high:     []float64{13, 14, 15, 16, 17},
+			meas:     []wlPoint{{wlNm: 355, value: 12.5}},
+			measName: "measured S",
+		},
+		beta: &spectrumSet{
+			curves:   [][]float64{{5e-5, 4e-5, 3e-5, 2e-5, 1e-5}},
+			mean:     []float64{5e-5, 4e-5, 3e-5, 2e-5, 1e-5},
+			low:      []float64{4e-5, 3e-5, 2e-5, 1e-5, 0.5e-5},
+			high:     []float64{6e-5, 5e-5, 4e-5, 3e-5, 1.5e-5},
+			meas:     []wlPoint{{wlNm: 355, value: 5.5e-5}},
+			measName: "measured β",
+		},
+		delta: &spectrumSet{
+			curves:   [][]float64{{10, 11, 12, 13, 14}},
+			mean:     []float64{10, 11, 12, 13, 14},
+			low:      []float64{9, 10, 11, 12, 13},
+			high:     []float64{11, 12, 13, 14, 15},
+			meas:     []wlPoint{{wlNm: 355, value: 10.5}},
+			measName: "measured δ_l",
 		},
 	}
 	for _, np := range sp.namedPanels() {

@@ -71,6 +71,7 @@ type state struct {
 	lidarCons bool
 	lidarW    string
 	lidarIter string
+	batchThin string
 
 	mReal string
 	mImag string
@@ -159,6 +160,7 @@ func (s *state) reset() {
 	s.lidarCons = d.LidarRatioCons
 	s.lidarW = formatFloat(d.LidarRatioW)
 	s.lidarIter = strconv.Itoa(d.LidarRatioIter)
+	s.batchThin = formatFloat(d.BatchThin)
 
 	s.mReal = "1.45"
 	s.mImag = "-0.005"
@@ -214,7 +216,7 @@ func (s *state) bindings() []any {
 		&s.nonneg, &s.noZeroBound, &s.noSmooth, &s.smoothLam, &s.rSplit,
 		&s.modes, &s.absolute,
 		&s.depolCons, &s.depolW, &s.depolMode,
-		&s.lidarCons, &s.lidarW, &s.lidarIter,
+		&s.lidarCons, &s.lidarW, &s.lidarIter, &s.batchThin,
 		&s.mReal, &s.mImag, &s.noise, &s.seed,
 		&s.dxMax, &s.nrOut, &s.quadOrder, &s.logSpan,
 		&s.outDir, &s.out, &s.jsonOut,

@@ -27,6 +27,11 @@ type batchInput struct {
 	depWl []float64 // длины волн измеренных δ_l, µm (столбцы dep<nm>)
 	dep   []float64 // nAlt x ndep, row-major; δ_l в процентах
 	ndep  int
+
+	// thinWindow — ширина окна усреднения по высоте, м (0 — без прореживания).
+	// thinCounts — число исходных строк в каждом усреднённом профиле.
+	thinWindow float64
+	thinCounts []int
 }
 
 // batchColSpec — описание одного столбца таблицы (кроме высоты).
@@ -125,6 +130,159 @@ func parseBatchTxt(path string) (*batchInput, error) {
 	}
 	b.nAlt = len(b.alt)
 	return b, nil
+}
+
+// thinBatchAltitudes — прореживание пакета по высоте: строки, попавшие в
+// окно ширины w, заменяются средними значениями. Высота результата — центр
+// фактического окна; окна без валидных β/α пропускаются с предупреждением.
+func thinBatchAltitudes(b *batchInput, w float64, c *console) (*batchInput, error) {
+	if !isFinite(w) || !(w > 0) {
+		return nil, fmt.Errorf("altitude thinning window must be a finite number > 0")
+	}
+	if b.nAlt == 0 {
+		return nil, errors.New("no altitude rows to thin")
+	}
+	hmin, hmax := b.alt[0], b.alt[0]
+	for _, h := range b.alt {
+		if !isFinite(h) {
+			return nil, errors.New("altitude values must be finite")
+		}
+		if h < hmin {
+			hmin = h
+		}
+		if h > hmax {
+			hmax = h
+		}
+	}
+	span := hmax - hmin
+	nWin := 1
+	if span > 0 {
+		nf := math.Ceil(span / w)
+		if nf > 1e7 {
+			return nil, fmt.Errorf("too many altitude windows (%g); "+
+				"increase --batch-thin", nf)
+		}
+		nWin = int(nf)
+	}
+
+	type acc struct {
+		rows   int
+		sum    []float64
+		cnt    []int
+		depSum []float64
+		depCnt []int
+	}
+	bins := make(map[int]*acc)
+	for i, h := range b.alt {
+		k := 0
+		if span > 0 {
+			k = int(math.Floor((h - hmin) / w))
+		}
+		if k < 0 {
+			k = 0
+		}
+		if k >= nWin {
+			k = nWin - 1
+		}
+		a := bins[k]
+		if a == nil {
+			a = &acc{
+				sum:    make([]float64, b.nch),
+				cnt:    make([]int, b.nch),
+				depSum: make([]float64, b.ndep),
+				depCnt: make([]int, b.ndep),
+			}
+			bins[k] = a
+		}
+		a.rows++
+		row := b.data[i*b.nch : (i+1)*b.nch]
+		for j, v := range row {
+			if isFinite(v) {
+				a.sum[j] += v
+				a.cnt[j]++
+			}
+		}
+		if b.ndep > 0 {
+			drow := b.dep[i*b.ndep : (i+1)*b.ndep]
+			for j, v := range drow {
+				if isFinite(v) {
+					a.depSum[j] += v
+					a.depCnt[j]++
+				}
+			}
+		}
+	}
+
+	keys := make([]int, 0, len(bins))
+	for k := range bins {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+
+	out := &batchInput{
+		ch:         append([]batchChannel(nil), b.ch...),
+		nch:        b.nch,
+		depWl:      append([]float64(nil), b.depWl...),
+		ndep:       b.ndep,
+		thinWindow: w,
+	}
+	var skipped [][2]float64
+	for _, k := range keys {
+		a := bins[k]
+		lo := hmin + float64(k)*w
+		hi := lo + w
+		if hi > hmax {
+			hi = hmax
+		}
+		if !(hi > lo) {
+			hi = hmax
+		}
+		vals := make([]float64, b.nch)
+		valid := true
+		for j := range vals {
+			if a.cnt[j] == 0 {
+				valid = false
+				break
+			}
+			vals[j] = a.sum[j] / float64(a.cnt[j])
+			if !(vals[j] > 0) {
+				valid = false
+				break
+			}
+		}
+		if !valid {
+			skipped = append(skipped, [2]float64{lo, hi})
+			continue
+		}
+		out.alt = append(out.alt, (lo+hi)/2)
+		out.data = append(out.data, vals...)
+		for j := 0; j < b.ndep; j++ {
+			v := math.NaN()
+			if a.depCnt[j] > 0 {
+				v = a.depSum[j] / float64(a.depCnt[j])
+			}
+			out.dep = append(out.dep, v)
+		}
+		out.thinCounts = append(out.thinCounts, a.rows)
+	}
+	if len(out.alt) == 0 {
+		return nil, errors.New("altitude thinning left no valid windows")
+	}
+	out.nAlt = len(out.alt)
+
+	c.printf("altitude thinning: window %g m, H = %g..%g m\n", w, hmin, hmax)
+	c.printf("  %d input rows -> %d averaged profiles; skipped %d "+
+		"empty/invalid windows\n", b.nAlt, out.nAlt, len(skipped))
+	for i, r := range skipped {
+		if i == 5 {
+			c.warnf("  [warning] altitude thinning: %d more windows skipped\n",
+				len(skipped)-i)
+			break
+		}
+		c.warnf("  [warning] altitude thinning: skipped window [%g, %g] m "+
+			"(no valid β/α values)\n", r[0], r[1])
+	}
+	return out, nil
 }
 
 // parseBatchColumnName — разбор имени столбца: b<nm> (β), a<nm> (α) или

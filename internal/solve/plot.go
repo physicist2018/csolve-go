@@ -118,6 +118,28 @@ func plotFontAttr(po *plotOpts) string {
 	return ""
 }
 
+// plotFontSize — действующий размер шрифта графиков (0 = 10 pt).
+func plotFontSize(po *plotOpts) float64 {
+	if po != nil && po.fontSize > 0 {
+		return po.fontSize
+	}
+	return 10.0
+}
+
+// plotFontScale — коэффициент увеличения отступов при росте шрифта.
+// За базовый принят 12 pt; выше 24 pt отступы не растут, чтобы панели
+// не вырождались в узкие полосы.
+func plotFontScale(po *plotOpts) float64 {
+	k := plotFontSize(po) / 12.0
+	if k < 1 {
+		k = 1
+	}
+	if k > 2 {
+		k = 2
+	}
+	return k
+}
+
 func setTerminal(sb *strings.Builder, po *plotOpts, wIn, hIn float64) {
 	dpi := 150.0
 	f := plotFmtPng
@@ -127,6 +149,8 @@ func setTerminal(sb *strings.Builder, po *plotOpts, wIn, hIn float64) {
 		}
 		f = po.format
 	}
+	fs := plotFontSize(po)
+	fontSpec := fmt.Sprintf("DejaVu Sans,%.10g", fs)
 	wp := int(wIn*dpi + 0.5)
 	hp := int(hIn*dpi + 0.5)
 	if wp < 1 {
@@ -138,13 +162,13 @@ func setTerminal(sb *strings.Builder, po *plotOpts, wIn, hIn float64) {
 	switch f {
 	case plotFmtPdf:
 		fmt.Fprintf(sb, "set terminal pdfcairo size %.3f,%.3f enhanced "+
-			"font 'DejaVu Sans,10'\n", wIn, hIn)
+			"font '%s'\n", wIn, hIn, fontSpec)
 	case plotFmtSvg:
 		fmt.Fprintf(sb, "set terminal svg size %d,%d enhanced "+
-			"font 'DejaVu Sans,10'\n", wp, hp)
+			"font '%s'\n", wp, hp, fontSpec)
 	default:
 		fmt.Fprintf(sb, "set terminal pngcairo size %d,%d enhanced "+
-			"font 'DejaVu Sans,10'\n", wp, hp)
+			"font '%s'\n", wp, hp, fontSpec)
 	}
 }
 

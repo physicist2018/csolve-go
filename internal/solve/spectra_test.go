@@ -126,6 +126,9 @@ func TestSpectraInvariants(t *testing.T) {
 	if !sp.alpha.usable() || !sp.beta.usable() {
 		t.Fatal("alpha and beta spectra must be available")
 	}
+	if !sp.lidar.usable() {
+		t.Fatal("lidar ratio spectrum must be available")
+	}
 	if sp.delta.usable() {
 		t.Error("delta_l must be unavailable without S11/S22 in the depol set")
 	}
@@ -143,11 +146,87 @@ func TestSpectraInvariants(t *testing.T) {
 			}
 		}
 	}
+	// Cext = Cback = x², поэтому S = α/β = 1 на всей сетке.
+	for i := range sp.wlNm {
+		checkClose(t, fmt.Sprintf("lidar ratio at λ = %g nm", sp.wlNm[i]),
+			sp.lidar.mean[i], 1.0, 1e-6)
+		if sp.lidar.low[i] > sp.lidar.mean[i]+1e-18 ||
+			sp.lidar.mean[i] > sp.lidar.high[i]+1e-18 {
+			t.Errorf("λ = %g nm: lidar ratio low <= mean <= high violated",
+				sp.wlNm[i])
+		}
+	}
 	if len(sp.alpha.meas) != 1 || sp.alpha.meas[0].wlNm != 532 {
 		t.Errorf("measured alpha marker must be at 532 nm: %+v", sp.alpha.meas)
 	}
 	if len(sp.beta.meas) != 1 || sp.beta.meas[0].wlNm != 355 {
 		t.Errorf("measured beta marker must be at 355 nm: %+v", sp.beta.meas)
+	}
+	if len(sp.lidar.meas) != 0 {
+		t.Errorf("no common measured wavelengths, got S markers: %+v",
+			sp.lidar.meas)
+	}
+}
+
+// TestSpectrumPanelSlots — панели привязаны к фиксированным ячейкам 2×2:
+// α (0,0), β (0,1), S (1,0), δ_l (1,1), даже если часть панелей отсутствует.
+func TestSpectrumPanelSlots(t *testing.T) {
+	set := func() *spectrumSet { return &spectrumSet{mean: []float64{1}} }
+	sp := &spectra{
+		wlNm: []float64{532}, alpha: set(), beta: set(), lidar: set(),
+		delta: set(),
+	}
+	want := []struct {
+		suffix string
+		slot   int
+	}{
+		{"alpha", spectrumSlotAlpha},
+		{"beta", spectrumSlotBeta},
+		{"lidar", spectrumSlotLidar},
+		{"depol", spectrumSlotDepol},
+	}
+	np := sp.namedPanels()
+	if len(np) != len(want) {
+		t.Fatalf("panels = %d, want %d", len(np), len(want))
+	}
+	for i := range want {
+		if np[i].suffix != want[i].suffix || np[i].panel.slot != want[i].slot {
+			t.Errorf("panel %d = %q slot %d, want %q slot %d", i,
+				np[i].suffix, np[i].panel.slot, want[i].suffix, want[i].slot)
+		}
+	}
+
+	sp.alpha = nil
+	np = sp.namedPanels()
+	if len(np) != 3 || np[0].suffix != "beta" || np[0].panel.slot != 1 ||
+		np[1].suffix != "lidar" || np[1].panel.slot != 2 ||
+		np[2].suffix != "depol" || np[2].panel.slot != 3 {
+		t.Errorf("sparse panels lost fixed slots: %+v", np)
+	}
+}
+
+// TestMeasuredLidarPoints — измеренное S считается только на общих длинах
+// волн, где есть и α, и β, причём β > 0.
+func TestMeasuredLidarPoints(t *testing.T) {
+	alpha := []wlPoint{{355, 4e-4}, {532, 3e-4}, {700, math.NaN()}}
+	beta := []wlPoint{{355, 1e-4}, {532, 2e-4}, {700, 1e-4}}
+	got := measuredLidarPoints(alpha, beta)
+	if len(got) != 2 {
+		t.Fatalf("measured S points = %+v, want 2", got)
+	}
+	checkClose(t, "S(355)", got[0].value, 4, 1e-12)
+	checkClose(t, "S(532)", got[1].value, 1.5, 1e-12)
+	if got[0].wlNm != 355 || got[1].wlNm != 532 {
+		t.Errorf("unexpected wavelengths: %+v", got)
+	}
+
+	// нет общих длин волн или β = 0 — точек нет
+	if pts := measuredLidarPoints(alpha, []wlPoint{{400, 1e-4}}); len(pts) != 0 {
+		t.Errorf("expected no common-wavelength points, got %+v", pts)
+	}
+	if pts := measuredLidarPoints([]wlPoint{{355, 1e-4}},
+		[]wlPoint{{355, 0}}); len(pts) != 0 {
+		t.Errorf("β = 0 must be skipped, got %+v", pts)
 	}
 }
 
@@ -356,8 +435,9 @@ func TestSpectraUseBestSolutions(t *testing.T) {
 	}
 }
 
-// TestWriteSpectrum — файл пакетного режима: 10 столбцов, измеренные значения
-// в комментарии, nan для отсутствующих величин.
+// TestWriteSpectrum — файл пакетного режима: 13 столбцов (alpha/beta/delta
+// и добавленные в конец lidar), измеренные значения в комментарии, nan для
+// отсутствующих величин.
 func TestWriteSpectrum(t *testing.T) {
 	dir := t.TempDir()
 	sp := &spectra{
@@ -367,6 +447,10 @@ func TestWriteSpectrum(t *testing.T) {
 			high:     []float64{1.1e-4, 8e-5},
 			meas:     []wlPoint{{wlNm: 355, value: 1.05e-4}},
 			measName: "measured α",
+		},
+		lidar: &spectrumSet{
+			mean: []float64{70, 60}, low: []float64{68, 58},
+			high: []float64{72, 62},
 		},
 	}
 	if err := writeSpectrum(dir, 500, sp); err != nil {
@@ -380,6 +464,9 @@ func TestWriteSpectrum(t *testing.T) {
 	if !strings.Contains(text, "lambda_nm alpha_mean") {
 		t.Errorf("header is missing:\n%s", text)
 	}
+	if !strings.Contains(text, "lidar_mean lidar_low lidar_high") {
+		t.Errorf("lidar columns are missing:\n%s", text)
+	}
 	if !strings.Contains(text, "a355=0.000105") {
 		t.Errorf("measured marker is missing:\n%s", text)
 	}
@@ -389,12 +476,17 @@ func TestWriteSpectrum(t *testing.T) {
 			continue
 		}
 		f := strings.Fields(ln)
-		if len(f) != 10 {
-			t.Fatalf("expected 10 columns, got %d: %q", len(f), ln)
+		if len(f) != 13 {
+			t.Fatalf("expected 13 columns, got %d: %q", len(f), ln)
 		}
-		for i := 4; i < len(f); i++ {
+		for i := 4; i < 10; i++ {
 			if f[i] != "nan" {
 				t.Errorf("missing beta/delta must be nan, got %q", f[i])
+			}
+		}
+		for i := 10; i < 13; i++ {
+			if f[i] == "nan" {
+				t.Errorf("lidar columns must be filled, got %q", f[i])
 			}
 		}
 		rows++
@@ -428,7 +520,8 @@ func TestOutSpectraJSON(t *testing.T) {
 	}
 	text := string(data)
 	for _, key := range []string{`"wl_nm"`, `"alpha"`, `"mean"`, `"low"`,
-		`"high"`, `"measured"`, `"beta"`, `"depolarization"`} {
+		`"high"`, `"measured"`, `"beta"`, `"lidar_ratio"`,
+		`"depolarization"`} {
 		if !strings.Contains(text, key) {
 			t.Errorf("JSON is missing %s: %s", key, text)
 		}

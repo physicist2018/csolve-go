@@ -174,6 +174,40 @@ func TestLidarConstraintOnlyInBatch(t *testing.T) {
 	}
 }
 
+func TestBatchThinning(t *testing.T) {
+	s := newTestState(t)
+	s.mode = modeBatch
+	s.batchPath = "measurements.txt"
+	s.batchThin = "100"
+
+	argv, a, err := buildArgv(s)
+	if err != nil {
+		t.Fatalf("batch: %v", err)
+	}
+	if a.BatchThin != 100 {
+		t.Errorf("batch thin = %g, want 100", a.BatchThin)
+	}
+	if !contains(argv, "--batch-thin") {
+		t.Errorf("argv misses --batch-thin: %v", argv)
+	}
+}
+
+func TestBatchThinningOnlyInBatch(t *testing.T) {
+	s := newTestState(t)
+	s.batchThin = "100"
+
+	argv, a, err := buildArgv(s)
+	if err != nil {
+		t.Fatalf("demo: %v", err)
+	}
+	if a.BatchThin != 0 {
+		t.Errorf("batch thin = %g outside batch mode, want 0", a.BatchThin)
+	}
+	if contains(argv, "--batch-thin") {
+		t.Errorf("altitude thinning must not be passed outside batch mode: %v", argv)
+	}
+}
+
 func TestExternalTablesRequireDirectory(t *testing.T) {
 	s := newTestState(t)
 	s.tablesKind = tablesExternal

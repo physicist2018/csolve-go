@@ -30,6 +30,13 @@ func prepareBatch(a *Args, c *console) (*batchSetup, error) {
 	if err != nil {
 		return nil, err
 	}
+	c.printf("batch processing: %s\n", a.Batch)
+	if a.BatchThin > 0 {
+		b, err = thinBatchAltitudes(b, a.BatchThin, c)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if a.DepolRatioCons && b.ndep == 0 && a.DepolRatioExplicit {
 		return nil, errors.New("option --depol-ratio-cons requires a dep<nm> column in the " +
 			"batch file (e.g. dep532), got none")
@@ -45,7 +52,6 @@ func prepareBatch(a *Args, c *console) (*batchSetup, error) {
 	st := &batchSetup{b: b, src: src, mre: mre, mim: mim}
 	nm := st.nm()
 
-	c.printf("batch processing: %s\n", a.Batch)
 	c.printf("  altitudes: %d; channels: %d\n", b.nAlt, b.nch)
 	for j := 0; j < b.nch; j++ {
 		kind := "alpha"
