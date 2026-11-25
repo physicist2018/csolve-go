@@ -168,6 +168,23 @@ legend { font-size: 12px; color: var(--muted); padding: 0 6px; }
   .help-modal { padding: 8px; }
   .help-box { width: 100%; height: 92vh; }
 }
+
+/* issue dialog */
+.issue-box { width: min(720px, 96vw); height: auto; max-height: min(88vh, 900px); }
+.issue-body { display: flex; flex-direction: column; gap: 10px; }
+.issue-intro { color: var(--muted); font-size: 13px; }
+.issue-field { display: flex; flex-direction: column; gap: 4px; }
+.issue-field span { font-size: 12px; color: var(--muted); }
+.issue-field input, .issue-field textarea {
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text); font: inherit;
+}
+.issue-field textarea {
+  resize: vertical; min-height: 64px;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.issue-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.run-actions { display: flex; gap: 8px; align-items: center; }
 .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted);
   border-top-color: transparent; border-radius: 50%; animation: rot .8s linear infinite; margin-right: 6px; }
 @keyframes rot { to { transform: rotate(360deg); } }

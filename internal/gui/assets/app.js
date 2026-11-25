@@ -3,6 +3,7 @@
 const TOKEN = document.querySelector('meta[name="csolve-token"]').content;
 const API = {
   spec: '/api/spec',
+  meta: '/api/meta',
   help: '/api/help',
   validate: '/api/validate',
   jobs: '/api/jobs',
@@ -43,6 +44,14 @@ const I18N = {
     'help': 'Help', 'help_title': 'Help — README',
     'help_loading': 'Loading…',
     'help_error': 'Could not load the help text.',
+    'issue': 'Report issue', 'issue_title': 'Report an issue',
+    'issue_intro': 'Review the text below — it will be pre-filled in a new GitHub issue. Remove anything private before submitting.',
+    'issue_title_label': 'Title', 'issue_env_label': 'Environment',
+    'issue_cmd_label': 'Command', 'issue_desc_label': 'What happened',
+    'issue_logs_label': 'Log (last lines)',
+    'issue_open': 'Open on GitHub', 'issue_copy': 'Copy text', 'issue_copied': 'Copied',
+    'issue_report_run': 'Report error',
+    'issue_fail_title': '[GUI] Run failed',
   },
   ru: {
     'presets': 'Пресеты', 'input': 'Вход', 'output': 'Вывод',
@@ -75,6 +84,14 @@ const I18N = {
     'help': 'Справка', 'help_title': 'Справка — README',
     'help_loading': 'Загрузка…',
     'help_error': 'Не удалось загрузить справку.',
+    'issue': 'Сообщить об ошибке', 'issue_title': 'Сообщение об ошибке',
+    'issue_intro': 'Проверьте текст ниже — он подставится в новое issue на GitHub. Уберите всё приватное перед отправкой.',
+    'issue_title_label': 'Заголовок', 'issue_env_label': 'Окружение',
+    'issue_cmd_label': 'Команда', 'issue_desc_label': 'Что произошло',
+    'issue_logs_label': 'Лог (последние строки)',
+    'issue_open': 'Открыть на GitHub', 'issue_copy': 'Скопировать текст', 'issue_copied': 'Скопировано',
+    'issue_report_run': 'Сообщить об ошибке',
+    'issue_fail_title': '[GUI] Ошибка выполнения',
   },
 };
 let L = 'en'; // default; switch if navigator prefers ru
@@ -92,8 +109,11 @@ const state = {
   options: {},
   output: { plot_format: 'png', plot_engine: 'internal', plot_dpi: 150, plot_font_size: 12, spectra: true, report: false, report_format: 'docx' },
   spec: null,
+  meta: null,
   currentJob: null,
   runAbort: null,
+  lastRun: null,
+  logLines: [],
 };
 
 function optionsClone(defs) { const o = {}; for (const k in defs) o[k] = defs[k]; return o; }
@@ -108,9 +128,15 @@ function el(tag, cls, text) {
 
 // ---------- boot ----------
 async function boot() {
-  const resp = await fetch(API.spec, { headers: { 'X-CSolve-Token': TOKEN } });
-  const spec = await resp.json();
+  const [specResp, metaResp] = await Promise.all([
+    fetch(API.spec, { headers: { 'X-CSolve-Token': TOKEN } }),
+    fetch(API.meta, { headers: { 'X-CSolve-Token': TOKEN } }).catch(() => null),
+  ]);
+  const spec = await specResp.json();
   state.spec = spec;
+  if (metaResp && metaResp.ok) {
+    try { state.meta = await metaResp.json(); } catch (_) { state.meta = null; }
+  }
   if (navigator.language && navigator.language.toLowerCase().startsWith('ru')) L = 'ru';
   state.builtin_type = spec.default_type;
   state.options = optionsClone(defaultsOf(spec));
@@ -148,8 +174,12 @@ function applyLang() {
   setText('run-title', t('run'));
   setText('result-title', t('results'));
   setText('help-btn', t('help'));
+  setText('issue-btn', t('issue'));
+  setText('report-run-btn', t('issue_report_run'));
   const helpTitle = document.querySelector('#help-modal .help-title');
   if (helpTitle) helpTitle.textContent = t('help_title');
+  const issueModal = document.getElementById('issue-modal');
+  if (issueModal) localizeIssueModal(issueModal);
 }
 function setText(id, s) { const e = document.getElementById(id); if (e) e.textContent = s; }
 
@@ -508,18 +538,24 @@ function showRunView() {
   const log = document.getElementById('log');
   log.innerHTML = '<span class="spin"></span>' + t('running');
   document.getElementById('cancel-btn').classList.remove('hidden');
+  document.getElementById('report-run-btn').classList.add('hidden');
+  state.lastRun = null;
+  state.logLines = [];
 }
 
 function openLogEvents(id) {
   const es = new EventSource('/api/jobs/' + id + '/events');
   const log = document.getElementById('log');
   log.innerHTML = '';
+  state.logLines = [];
   es.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'log') {
       const div = el('div', msg.stream === 'err' ? 'err' : '', msg.text);
       log.appendChild(div);
       log.scrollTop = log.scrollHeight;
+      state.logLines.push(msg.text);
+      if (state.logLines.length > 500) state.logLines.shift();
     } else if (msg.type === 'status') {
       es.close();
       onStatus(msg);
@@ -535,11 +571,16 @@ function onStatus(msg) {
   p.innerHTML = '--- ' + t(msg.status) + (msg.exit_code ? ' (' + t('exit') + ' ' + msg.exit_code + ')' : '') +
     ' · ' + t('duration') + ' ' + (msg.duration_ms / 1000).toFixed(1) + 's ---';
   log.appendChild(p);
+  state.lastRun = { status: msg.status, exit: msg.exit_code || 0,
+    error: msg.error || '', duration: msg.duration_ms || 0 };
+  const reportBtn = document.getElementById('report-run-btn');
   if (msg.status === 'done') {
+    if (reportBtn) reportBtn.classList.add('hidden');
     loadResult(state.currentJob);
   } else if (msg.error) {
     const e = el('div', 'err', msg.error);
     log.appendChild(e);
+    if (reportBtn) reportBtn.classList.remove('hidden');
   }
 }
 
@@ -931,6 +972,203 @@ function buildHelpModal() {
   return modal;
 }
 
+// ---------- issue reporting ----------
+const ISSUE_REPO_FALLBACK = 'https://github.com/physicist2018/csolve-go';
+
+function issuesNewURL() {
+  const m = state.meta || {};
+  return m.issues || (ISSUE_REPO_FALLBACK + '/issues/new');
+}
+
+// sanitizePath убирает имена пользователей из абсолютных путей, чтобы они
+// не попадали в публичный issue.
+function sanitizePath(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/\/Users\/[^/\s'"]+/g, '~')
+    .replace(/\/home\/[^/\s'"]+/g, '~')
+    .replace(/[A-Za-z]:\\Users\\[^\\\s'"]+/g, '~');
+}
+
+function issueVersion() {
+  const m = state.meta || {};
+  if (!m.version) return '';
+  let s = 'csolve ' + m.version;
+  if (m.commit) s += ' @ ' + m.commit;
+  if (m.modified) s += ' (dirty)';
+  return s;
+}
+
+function issueEnvironment() {
+  const m = state.meta || {};
+  const parts = [];
+  if (m.os || m.arch) parts.push((m.os || '?') + '/' + (m.arch || '?'));
+  if (m.go) parts.push(m.go);
+  return parts.join(', ');
+}
+
+function issueGenericContext() {
+  return {
+    title: '',
+    version: issueVersion(),
+    env: issueEnvironment(),
+    cmd: sanitizePath(window.__lastCmd || ''),
+    desc: '',
+    logs: '',
+  };
+}
+
+function issueFailureContext() {
+  const r = state.lastRun || {};
+  const desc = [];
+  if (r.error) desc.push(r.error);
+  if (r.exit) desc.push(t('exit') + ': ' + r.exit);
+  return {
+    title: t('issue_fail_title') + (r.exit ? ' (exit ' + r.exit + ')' : ''),
+    version: issueVersion(),
+    env: issueEnvironment(),
+    cmd: sanitizePath(window.__lastCmd || ''),
+    desc: desc.join('\n'),
+    logs: sanitizePath((state.logLines || []).slice(-30).join('\n')),
+  };
+}
+
+function localizeIssueModal(modal) {
+  const title = modal.querySelector('.help-title');
+  if (title) title.textContent = t('issue_title');
+  modal.querySelectorAll('[data-i18n]').forEach((e) => { e.textContent = t(e.dataset.i18n); });
+}
+
+function issueField(modal, id) { return modal.querySelector('#' + id); }
+
+function openIssueModal(ctx) {
+  let modal = document.getElementById('issue-modal');
+  if (!modal) modal = buildIssueModal();
+  localizeIssueModal(modal);
+  const c = Object.assign(issueGenericContext(), ctx || {});
+  issueField(modal, 'issue-title').value = c.title || '';
+  issueField(modal, 'issue-version').value = c.version || '';
+  issueField(modal, 'issue-env').value = c.env || '';
+  issueField(modal, 'issue-cmd').value = c.cmd || '';
+  issueField(modal, 'issue-desc').value = c.desc || '';
+  issueField(modal, 'issue-logs').value = c.logs || '';
+  modal.classList.add('open');
+  (c.desc ? issueField(modal, 'issue-desc') : issueField(modal, 'issue-title')).focus();
+}
+
+function buildIssueModal() {
+  const modal = el('div', 'help-modal');
+  modal.id = 'issue-modal';
+  modal.innerHTML = `
+    <div class="help-box issue-box" role="dialog" aria-modal="true">
+      <div class="help-bar">
+        <div class="help-title"></div>
+        <button class="btn" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="help-body issue-body">
+        <div class="issue-intro" data-i18n="issue_intro"></div>
+        <label class="issue-field"><span data-i18n="issue_title_label"></span>
+          <input type="text" id="issue-title" maxlength="140"></label>
+        <input type="hidden" id="issue-version">
+        <label class="issue-field"><span data-i18n="issue_env_label"></span>
+          <input type="text" id="issue-env"></label>
+        <label class="issue-field"><span data-i18n="issue_cmd_label"></span>
+          <input type="text" id="issue-cmd"></label>
+        <label class="issue-field"><span data-i18n="issue_desc_label"></span>
+          <textarea id="issue-desc" rows="4"></textarea></label>
+        <label class="issue-field"><span data-i18n="issue_logs_label"></span>
+          <textarea id="issue-logs" rows="8"></textarea></label>
+        <div class="issue-actions">
+          <button class="btn primary" type="button" id="issue-open" data-i18n="issue_open"></button>
+          <button class="btn" type="button" id="issue-copy" data-i18n="issue_copy"></button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('.help-bar .btn').addEventListener('click', () => modal.classList.remove('open'));
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('open'); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal.classList.contains('open')) modal.classList.remove('open');
+  });
+  modal.querySelector('#issue-open').addEventListener('click', () => submitIssue(modal));
+  modal.querySelector('#issue-copy').addEventListener('click', () => {
+    copyIssueText(modal);
+    flashCopied(modal);
+  });
+  return modal;
+}
+
+// issueURL собирает ссылку на форму issue: GitHub подставляет значения полей
+// формы по их id (см. .github/ISSUE_TEMPLATE/bug_report.yml).
+function issueURL(modal) {
+  const p = new URLSearchParams();
+  const tpl = state.meta && state.meta.issue_template;
+  if (tpl) p.set('template', tpl);
+  const map = [
+    ['issue-title', 'title'],
+    ['issue-version', 'version'],
+    ['issue-env', 'environment'],
+    ['issue-cmd', 'command'],
+    ['issue-desc', 'what_happened'],
+    ['issue-logs', 'logs'],
+  ];
+  for (const [id, key] of map) {
+    let v = (issueField(modal, id).value || '').trim();
+    if (!v) continue;
+    // не раздуваем URL: GitHub отказывает на слишком длинных (414).
+    if (key === 'logs') v = v.length > 4000 ? v.slice(-4000) : v;
+    else if (key === 'what_happened') v = v.length > 4000 ? v.slice(0, 4000) : v;
+    p.set(key, v);
+  }
+  return issuesNewURL() + '?' + p.toString();
+}
+
+function issuePlainText(modal) {
+  const val = (id) => (issueField(modal, id).value || '').trim();
+  const out = [];
+  const title = val('issue-title');
+  out.push(title ? '# ' + title : t('issue_title'));
+  const version = val('issue-version');
+  if (version) out.push('', '**Version:** ' + version);
+  const env = val('issue-env');
+  if (env) out.push('**Environment:** ' + env);
+  const cmd = val('issue-cmd');
+  if (cmd) out.push('', '**Command:**', '```', cmd, '```');
+  const desc = val('issue-desc');
+  if (desc) out.push('', '**What happened:**', '', desc);
+  const logs = val('issue-logs');
+  if (logs) out.push('', '**Log:**', '```', logs, '```');
+  return out.join('\n') + '\n';
+}
+
+function copyIssueText(modal) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(issuePlainText(modal)).catch(() => {});
+  }
+}
+
+function flashCopied(modal) {
+  const b = modal.querySelector('#issue-copy');
+  b.textContent = t('issue_copied');
+  setTimeout(() => { b.textContent = t('issue_copy'); }, 1600);
+}
+
+function submitIssue(modal) {
+  openExternal(issueURL(modal));
+}
+
+// openExternal открывает ссылку в новой вкладке; клик по ссылке не
+// блокируется попап-блокером и не теряет opener.
+function openExternal(url) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 // ---------- minimal markdown (for README) ----------
 function slugify(text) {
   return String(text)
@@ -1164,6 +1402,8 @@ function bindLang() {
   });
   document.getElementById('show-advanced').addEventListener('change', renderGroups);
   document.getElementById('help-btn').addEventListener('click', openHelpModal);
+  document.getElementById('issue-btn').addEventListener('click', () => openIssueModal());
+  document.getElementById('report-run-btn').addEventListener('click', () => openIssueModal(issueFailureContext()));
   document.getElementById('run-btn').addEventListener('click', doRun);
   document.getElementById('validate-btn').addEventListener('click', () => { window.clearTimeout(valTimer); runValidate(); });
   document.getElementById('cancel-btn').addEventListener('click', () => {

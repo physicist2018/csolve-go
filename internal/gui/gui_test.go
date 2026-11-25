@@ -118,6 +118,48 @@ func TestHelpEndpoint(t *testing.T) {
 	}
 }
 
+func TestMetaEndpoint(t *testing.T) {
+	a := newTestApp(t)
+	h := a.Handler()
+
+	rec := doGet(t, h, a.token, "/api/meta")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("meta: got %d", rec.Code)
+	}
+	var m struct {
+		Version  string `json:"version"`
+		OS       string `json:"os"`
+		Arch     string `json:"arch"`
+		Issues   string `json:"issues"`
+		Template string `json:"issue_template"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
+		t.Fatalf("decode meta: %v", err)
+	}
+	if m.Version == "" {
+		t.Error("meta.version is empty")
+	}
+	if m.OS != runtime.GOOS || m.Arch != runtime.GOARCH {
+		t.Errorf("meta os/arch = %s/%s, want %s/%s", m.OS, m.Arch, runtime.GOOS, runtime.GOARCH)
+	}
+	if !strings.HasSuffix(m.Issues, "/issues/new") {
+		t.Errorf("meta.issues = %q, want .../issues/new", m.Issues)
+	}
+	if m.Template == "" {
+		t.Error("meta.issue_template is empty")
+	}
+
+	// кнопка и диалог подключены на странице
+	idx := doGet(t, h, "", "/")
+	if !strings.Contains(idx.Body.String(), `id="issue-btn"`) {
+		t.Error("index page must contain the issue button")
+	}
+	js := doGet(t, h, "", "/assets/app.js")
+	if !strings.Contains(js.Body.String(), "openIssueModal") {
+		t.Error("app.js must wire the issue dialog")
+	}
+}
+
 func TestPlotEngineArgv(t *testing.T) {
 	flagVal := func(argv []string, flag string) string {
 		for i := 0; i+1 < len(argv); i++ {

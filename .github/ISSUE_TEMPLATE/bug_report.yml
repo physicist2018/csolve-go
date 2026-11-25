@@ -1,0 +1,58 @@
+name: Bug report
+description: Сообщить об ошибке в csolve
+title: "[GUI] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за отчёт! Поля ниже обычно подставляются автоматически из GUI
+        (кнопка «Сообщить об ошибке»). Проверьте, что в тексте нет приватных
+        данных: путей, имён файлов измерений и т. п.
+  - type: input
+    id: version
+    attributes:
+      label: Версия
+      description: Версия и коммит csolve
+      placeholder: csolve v2.0.0 @ 1b63aeb
+    validations:
+      required: false
+  - type: input
+    id: environment
+    attributes:
+      label: Окружение
+      description: ОС, архитектура и версия Go
+      placeholder: darwin/arm64, go1.24.0
+    validations:
+      required: false
+  - type: input
+    id: command
+    attributes:
+      label: Команда
+      description: Команда, при выполнении которой возникла ошибка
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: Что произошло
+      description: Ожидаемое и фактическое поведение
+      placeholder: Опишите, что вы ожидали и что получили.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Лог
+      description: Последние строки вывода решателя
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Проверки
+      options:
+        - label: В тексте нет приватных данных (путей, имён файлов измерений).
+          required: true

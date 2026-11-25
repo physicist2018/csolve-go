@@ -19,6 +19,8 @@ permissions:
 env:
   # v1.7.0 -> stable, v1.7.0-rc1 -> dev (pre-release).
   SUFFIX: ${{ contains(inputs.tag, '-') && 'dev' || 'stable' }}
+  # Версия попадает в бинарник (-X); тег задаёт пользователь.
+  VERSION: ${{ inputs.tag }}
 
 jobs:
   build:
@@ -65,7 +67,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X csolve/internal/version.Version=${VERSION}" \
             -o "dist/csolve-${SUFFIX}${{ matrix.ext }}" ./cmd/csolve
           file "dist/csolve-${SUFFIX}${{ matrix.ext }}"
 
