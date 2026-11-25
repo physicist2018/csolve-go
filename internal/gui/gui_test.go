@@ -127,11 +127,10 @@ func TestMetaEndpoint(t *testing.T) {
 		t.Fatalf("meta: got %d", rec.Code)
 	}
 	var m struct {
-		Version  string `json:"version"`
-		OS       string `json:"os"`
-		Arch     string `json:"arch"`
-		Issues   string `json:"issues"`
-		Template string `json:"issue_template"`
+		Version string `json:"version"`
+		OS      string `json:"os"`
+		Arch    string `json:"arch"`
+		Issues  string `json:"issues"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &m); err != nil {
 		t.Fatalf("decode meta: %v", err)
@@ -144,9 +143,6 @@ func TestMetaEndpoint(t *testing.T) {
 	}
 	if !strings.HasSuffix(m.Issues, "/issues/new") {
 		t.Errorf("meta.issues = %q, want .../issues/new", m.Issues)
-	}
-	if m.Template == "" {
-		t.Error("meta.issue_template is empty")
 	}
 
 	// кнопка и диалог подключены на странице

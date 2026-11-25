@@ -47,6 +47,7 @@ const I18N = {
     'issue': 'Report issue', 'issue_title': 'Report an issue',
     'issue_intro': 'Review the text below — it will be pre-filled in a new GitHub issue. Remove anything private before submitting.',
     'issue_title_label': 'Title', 'issue_env_label': 'Environment',
+    'issue_version_label': 'Version',
     'issue_cmd_label': 'Command', 'issue_desc_label': 'What happened',
     'issue_logs_label': 'Log (last lines)',
     'issue_open': 'Open on GitHub', 'issue_copy': 'Copy text', 'issue_copied': 'Copied',
@@ -87,6 +88,7 @@ const I18N = {
     'issue': 'Сообщить об ошибке', 'issue_title': 'Сообщение об ошибке',
     'issue_intro': 'Проверьте текст ниже — он подставится в новое issue на GitHub. Уберите всё приватное перед отправкой.',
     'issue_title_label': 'Заголовок', 'issue_env_label': 'Окружение',
+    'issue_version_label': 'Версия',
     'issue_cmd_label': 'Команда', 'issue_desc_label': 'Что произошло',
     'issue_logs_label': 'Лог (последние строки)',
     'issue_open': 'Открыть на GitHub', 'issue_copy': 'Скопировать текст', 'issue_copied': 'Скопировано',
@@ -1098,52 +1100,52 @@ function buildIssueModal() {
   return modal;
 }
 
-// issueURL собирает ссылку на форму issue: GitHub подставляет значения полей
-// формы по их id (см. .github/ISSUE_TEMPLATE/bug_report.yml).
-function issueURL(modal) {
+// GitHub надёжно предзаполняет только параметры title и body (см.
+// "Creating an issue from a URL query"); поля Issue Forms по id на практике
+// не подставляются, поэтому текст собирается в один body.
+function issueBody(modal) {
+  const val = (id) => (issueField(modal, id).value || '').trim();
+  const out = [];
+  const desc = trunc(val('issue-desc'), 2000, true);
+  if (desc) out.push(desc, '');
+  const version = val('issue-version');
+  if (version) out.push('**' + t('issue_version_label') + ':** ' + version);
+  const env = val('issue-env');
+  if (env) out.push('**' + t('issue_env_label') + ':** ' + env);
+  const cmd = val('issue-cmd');
+  if (cmd) out.push('', '**' + t('issue_cmd_label') + ':**', '```sh', cmd, '```');
+  const logs = trunc(val('issue-logs'), 2000, false);
+  if (logs) out.push('', '**' + t('issue_logs_label') + ':**', '```', logs, '```');
+  return out.join('\n').trim() + '\n';
+}
+
+function trunc(s, n, head) {
+  if (!s || s.length <= n) return s || '';
+  return head ? s.slice(0, n) : s.slice(-n);
+}
+
+function issuesURL(title, body) {
   const p = new URLSearchParams();
-  const tpl = state.meta && state.meta.issue_template;
-  if (tpl) p.set('template', tpl);
-  const map = [
-    ['issue-title', 'title'],
-    ['issue-version', 'version'],
-    ['issue-env', 'environment'],
-    ['issue-cmd', 'command'],
-    ['issue-desc', 'what_happened'],
-    ['issue-logs', 'logs'],
-  ];
-  for (const [id, key] of map) {
-    let v = (issueField(modal, id).value || '').trim();
-    if (!v) continue;
-    // не раздуваем URL: GitHub отказывает на слишком длинных (414).
-    if (key === 'logs') v = v.length > 4000 ? v.slice(-4000) : v;
-    else if (key === 'what_happened') v = v.length > 4000 ? v.slice(0, 4000) : v;
-    p.set(key, v);
-  }
+  if (title) p.set('title', title);
+  if (body) p.set('body', body);
   return issuesNewURL() + '?' + p.toString();
 }
 
-function issuePlainText(modal) {
-  const val = (id) => (issueField(modal, id).value || '').trim();
-  const out = [];
-  const title = val('issue-title');
-  out.push(title ? '# ' + title : t('issue_title'));
-  const version = val('issue-version');
-  if (version) out.push('', '**Version:** ' + version);
-  const env = val('issue-env');
-  if (env) out.push('**Environment:** ' + env);
-  const cmd = val('issue-cmd');
-  if (cmd) out.push('', '**Command:**', '```', cmd, '```');
-  const desc = val('issue-desc');
-  if (desc) out.push('', '**What happened:**', '', desc);
-  const logs = val('issue-logs');
-  if (logs) out.push('', '**Log:**', '```', logs, '```');
-  return out.join('\n') + '\n';
+// issueURL ужимает тело, чтобы GitHub не ответил 414 на слишком длинный URL.
+function issueURL(modal) {
+  const title = (issueField(modal, 'issue-title').value || '').trim();
+  let body = issueBody(modal);
+  let url = issuesURL(title, body);
+  while (url.length > 7000 && body.length > 200) {
+    body = body.slice(0, Math.floor(body.length * 0.75)) + '\n\n…';
+    url = issuesURL(title, body);
+  }
+  return url;
 }
 
 function copyIssueText(modal) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(issuePlainText(modal)).catch(() => {});
+    navigator.clipboard.writeText(issueBody(modal)).catch(() => {});
   }
 }
 
