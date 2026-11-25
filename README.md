@@ -1,3 +1,22 @@
+<!--
+  Copyright (C) 2026 Шмирко Константин Александрович <kshmirko@dvo.ru>
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+  SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 # csolve-go
 
 Версия **v2.2.0** · Go 1.24 · [сторонние компоненты и лицензии](#лицензии-и-сторонние-компоненты)
@@ -1455,6 +1474,10 @@ C-репозитория):
 | `CSOLVE_LIDAR_DEBUG` | Любое непустое значение: отладочный вывод итераций лидарного ограничения (опорный профиль `S`, топ-решения) |
 
 ## Лицензии и сторонние компоненты
+
+Код проекта распространяется по **GNU General Public License v3.0**
+(`GPL-3.0-or-later`); полный текст — [`LICENSE`](LICENSE). Сторонние
+компоненты сохраняют свои лицензии (перечислены ниже).
 
 - **`gonum.org/v1/plot`** (BSD-3-Clause) — построение графиков во встроенном
   режиме; код PDF-canvas (`plot_pdf.go`) адаптирован из `vg/vgpdf` — текст
