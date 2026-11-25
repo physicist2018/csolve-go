@@ -5,10 +5,6 @@ import (
 	"sort"
 )
 
-// maxSpectrumCurves — сколько индивидуальных решений рисуется на графике
-// спектра. Огибающие и среднее всегда считаются по всему ансамблю.
-const maxSpectrumCurves = 64
-
 // spectrumLegendHIn — высота полосы общей легенды под сеткой спектров, дюймы.
 const spectrumLegendHIn = 1.0
 
@@ -19,8 +15,8 @@ type wlPoint struct {
 }
 
 // spectrumSet — кривые одной величины: индивидуальные решения ансамбля
-// (curves — не более maxSpectrumCurves для графика), их среднее и огибающие,
-// а также измеренные точки входных данных.
+// (curves — все решения), их среднее и огибающие, а также измеренные точки
+// входных данных.
 type spectrumSet struct {
 	curves          [][]float64 // [решение][длина волны]
 	mean, low, high []float64   // по всему ансамблю; NaN — нет данных
@@ -255,8 +251,8 @@ func buildSpectra(a *Args, sols *solutions, geom []*geom,
 		}
 	}
 
-	alpha := aggregateSpectrum(alphaV, wlNm, maxSpectrumCurves)
-	beta := aggregateSpectrum(betaV, wlNm, maxSpectrumCurves)
+	alpha := aggregateSpectrum(alphaV, wlNm)
+	beta := aggregateSpectrum(betaV, wlNm)
 	for t := 0; t < G; t++ {
 		for iw := 0; iw < nw; iw++ {
 			a, b := alphaV[t][iw], betaV[t][iw]
@@ -270,8 +266,8 @@ func buildSpectra(a *Args, sols *solutions, geom []*geom,
 			lidarV[t][iw] = math.NaN()
 		}
 	}
-	lidar := aggregateSpectrum(lidarV, wlNm, maxSpectrumCurves)
-	delta := aggregateSpectrum(deltaV, wlNm, maxSpectrumCurves)
+	lidar := aggregateSpectrum(lidarV, wlNm)
+	delta := aggregateSpectrum(deltaV, wlNm)
 	alpha.meas, beta.meas, delta.meas = measuredSpectrumPoints(ch, g1, depWl,
 		depVal)
 	alpha.measName = "measured α"
@@ -380,8 +376,8 @@ func dedupeSpectrumGrid(v []float64) []float64 {
 }
 
 // aggregateSpectrum — среднее и огибающие по решениям (только конечные
-// значения); curves обрезаются до maxSpectrumCurves для графика.
-func aggregateSpectrum(vals [][]float64, wlNm []float64, maxCurves int) *spectrumSet {
+// значения); curves содержат все решения ансамбля.
+func aggregateSpectrum(vals [][]float64, wlNm []float64) *spectrumSet {
 	nw := len(wlNm)
 	s := &spectrumSet{
 		mean: make([]float64, nw),
@@ -389,9 +385,6 @@ func aggregateSpectrum(vals [][]float64, wlNm []float64, maxCurves int) *spectru
 		high: make([]float64, nw),
 	}
 	nc := len(vals)
-	if nc > maxCurves {
-		nc = maxCurves
-	}
 	s.curves = make([][]float64, nc)
 	for t := 0; t < nc; t++ {
 		s.curves[t] = vals[t]

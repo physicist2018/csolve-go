@@ -335,8 +335,8 @@ func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 	po.writeDataFile(pBars, writeBars(ch, g1, gFit))
 
 	ns := nBestCount
-	if ns > 64 {
-		ns = 64
+	if ns > len(nBest) {
+		ns = len(nBest)
 	}
 	solFiles := make([]string, ns)
 	for t := 0; t < ns; t++ {

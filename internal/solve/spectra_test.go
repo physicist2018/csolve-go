@@ -527,3 +527,26 @@ func TestOutSpectraJSON(t *testing.T) {
 		}
 	}
 }
+
+// TestAggregateSpectrumAllCurves — на графике спектра должны рисоваться все
+// решения ансамбля, а не первые 64.
+func TestAggregateSpectrumAllCurves(t *testing.T) {
+	const n = 100
+	vals := make([][]float64, n)
+	for i := range vals {
+		vals[i] = []float64{float64(i), float64(i) + 1}
+	}
+	s := aggregateSpectrum(vals, []float64{400, 500})
+	if got := len(s.curves); got != n {
+		t.Fatalf("curves = %d, want %d", got, n)
+	}
+	if got := s.curves[n-1][0]; got != float64(n-1) {
+		t.Errorf("last curve = %g, want the last solution", got)
+	}
+	if want := float64(n-1) / 2; math.Abs(s.mean[0]-want) > 1e-12 {
+		t.Errorf("mean[0] = %g, want %g", s.mean[0], want)
+	}
+	if s.low[0] != 0 || s.high[0] != float64(n-1) {
+		t.Errorf("envelope = [%g, %g], want [0, %d]", s.low[0], s.high[0], n-1)
+	}
+}

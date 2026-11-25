@@ -778,9 +778,6 @@ func internalResultsDraw(po *plotOpts, rGrid []float64,
 		tru = scale(nTrue)
 	}
 	ns := nBestCount
-	if ns > 64 {
-		ns = 64
-	}
 	if ns > len(nBest) {
 		ns = len(nBest)
 	}
