@@ -536,7 +536,7 @@ func TestAggregateSpectrumAllCurves(t *testing.T) {
 	for i := range vals {
 		vals[i] = []float64{float64(i), float64(i) + 1}
 	}
-	s := aggregateSpectrum(vals, []float64{400, 500})
+	s := aggregateSpectrum(vals, []float64{400, 500}, 0)
 	if got := len(s.curves); got != n {
 		t.Fatalf("curves = %d, want %d", got, n)
 	}
@@ -548,5 +548,18 @@ func TestAggregateSpectrumAllCurves(t *testing.T) {
 	}
 	if s.low[0] != 0 || s.high[0] != float64(n-1) {
 		t.Errorf("envelope = [%g, %g], want [0, %d]", s.low[0], s.high[0], n-1)
+	}
+
+	// с явным пределом curves обрезаются, а среднее — по всему ансамблю
+	lim := aggregateSpectrum(vals, []float64{400, 500}, 10)
+	if got := len(lim.curves); got != 10 {
+		t.Errorf("limited curves = %d, want 10", got)
+	}
+	if want := float64(n-1) / 2; math.Abs(lim.mean[0]-want) > 1e-12 {
+		t.Errorf("limited mean[0] = %g, want %g", lim.mean[0], want)
+	}
+	if lim.low[0] != 0 || lim.high[0] != float64(n-1) {
+		t.Errorf("limited envelope = [%g, %g], want [0, %d]",
+			lim.low[0], lim.high[0], n-1)
 	}
 }

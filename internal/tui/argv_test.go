@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -250,6 +251,30 @@ func TestBestFraction(t *testing.T) {
 	}
 	if a.Best != 0.1 {
 		t.Errorf("best = %g", a.Best)
+	}
+}
+
+func TestPlotBestLimit(t *testing.T) {
+	s := newTestState(t)
+	s.plotBestLim = "128"
+	argv, a, err := buildArgv(s)
+	if err != nil {
+		t.Fatalf("plot-best-limit: %v", err)
+	}
+	if a.PlotBestLimit != 128 {
+		t.Errorf("PlotBestLimit = %d, want 128", a.PlotBestLimit)
+	}
+	if !slices.Contains(argv, "--plot-best-limit") {
+		t.Errorf("argv is missing --plot-best-limit: %v", argv)
+	}
+
+	// по умолчанию (0 = все) флаг не добавляется
+	argv, _, err = buildArgv(newTestState(t))
+	if err != nil {
+		t.Fatalf("default: %v", err)
+	}
+	if slices.Contains(argv, "--plot-best-limit") {
+		t.Errorf("default argv must not contain --plot-best-limit: %v", argv)
 	}
 }
 

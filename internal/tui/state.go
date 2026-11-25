@@ -90,6 +90,7 @@ type state struct {
 	plotFormat   string
 	plotDpi      string
 	plotFontSize string
+	plotBestLim  string
 	noPlot       bool
 }
 
@@ -179,6 +180,7 @@ func (s *state) reset() {
 	s.plotFormat = string(d.PlotFormat)
 	s.plotDpi = formatFloat(d.PlotDpi)
 	s.plotFontSize = formatFloat(d.PlotFontSize)
+	s.plotBestLim = strconv.Itoa(d.PlotBestLimit)
 	s.noPlot = d.NoPlot
 }
 
@@ -220,7 +222,8 @@ func (s *state) bindings() []any {
 		&s.mReal, &s.mImag, &s.noise, &s.seed,
 		&s.dxMax, &s.nrOut, &s.quadOrder, &s.logSpan,
 		&s.outDir, &s.out, &s.jsonOut,
-		&s.plotting, &s.plotFormat, &s.plotDpi, &s.plotFontSize, &s.noPlot,
+		&s.plotting, &s.plotFormat, &s.plotDpi, &s.plotFontSize,
+		&s.plotBestLim, &s.noPlot,
 	}
 }
 

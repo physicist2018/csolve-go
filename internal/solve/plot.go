@@ -34,12 +34,30 @@ const (
 var plotBackends = []plotBackend{plottingInternal, plottingGnuplot}
 
 type plotOpts struct {
-	format   plotFormat
-	dpi      float64
-	fontSize float64
-	backend  plotBackend
-	con      *console
-	quiet    bool // не печатать «plot saved» (временные графики отчёта)
+	format    plotFormat
+	dpi       float64
+	fontSize  float64
+	backend   plotBackend
+	con       *console
+	quiet     bool // не печатать «plot saved» (временные графики отчёта)
+	bestLimit int  // предел числа кривых лучших решений; 0 — все
+}
+
+// curveLimit — предел числа кривых лучших решений (0 — все).
+func (po *plotOpts) curveLimit() int {
+	if po == nil {
+		return 0
+	}
+	return po.bestLimit
+}
+
+// plotCurves — сколько кривых лучших решений рисовать: limit <= 0 — все.
+// Среднее и огибающие от этого числа не зависят.
+func plotCurves(nBestCount, limit int) int {
+	if limit > 0 && nBestCount > limit {
+		return limit
+	}
+	return nBestCount
 }
 
 // warnf — предупреждение о графике; без консоли пишет в os.Stderr.

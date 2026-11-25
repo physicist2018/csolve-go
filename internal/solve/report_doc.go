@@ -194,7 +194,8 @@ func writeReportDoc(a *Args, c *console, rep *reportCapture, prof *profile,
 // reportPlotOpts — параметры встроенного рендера картинок отчёта.
 func reportPlotOpts(a *Args, c *console) plotOpts {
 	return plotOpts{format: plotFmtPng, dpi: internalPNGDpi,
-		fontSize: a.PlotFontSize, backend: plottingInternal, con: c}
+		fontSize: a.PlotFontSize, backend: plottingInternal, con: c,
+		bestLimit: a.PlotBestLimit}
 }
 
 // reportPNG — PNG-байты графика выбранным backend'ом. Для internal используется
@@ -222,7 +223,7 @@ func reportPNG(a *Args, c *console, existing string,
 	path := filepath.Join(dir, "plot.png")
 	po := plotOpts{format: plotFmtPng, dpi: a.PlotDpi,
 		fontSize: a.PlotFontSize, backend: plottingGnuplot, con: c,
-		quiet: true}
+		quiet: true, bestLimit: a.PlotBestLimit}
 	if !renderFile(&po, path) {
 		return nil, false
 	}

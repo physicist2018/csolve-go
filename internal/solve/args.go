@@ -68,6 +68,10 @@ type Args struct {
 	PlotFormat   plotFormat
 	PlotDpi      float64
 	PlotFontSize float64
+	// PlotBestLimit — предел числа кривых лучших решений на графиках;
+	// 0 — без ограничения. Среднее и огибающие всегда считаются по всему
+	// ансамблю.
+	PlotBestLimit int
 
 	Batch          string
 	BatchOutDir    string
@@ -272,6 +276,8 @@ Options:
   --plot-dpi <N>                 resolution for png/svg, dpi, > 0 [150]
   --plot-font-size <pt>          base font size for all plot text, pt
                                  (0 or 4..72) [12]
+  --plot-best-limit <N>          best-solution curves drawn on plots;
+                                 0 = all [0]
   	--no-plot                      do not build plots
 
     --no-spectra                   do not compute the α(λ)/β(λ)/S(λ)/δ_l(λ)
@@ -435,6 +441,7 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.Var(plottingFlag, "plotting", "")
 	fs.Float64Var(&a.PlotDpi, "plot-dpi", a.PlotDpi, "")
 	fs.Float64Var(&a.PlotFontSize, "plot-font-size", a.PlotFontSize, "")
+	fs.IntVar(&a.PlotBestLimit, "plot-best-limit", a.PlotBestLimit, "")
 	fs.BoolVar(&a.NoPlot, "no-plot", false, "")
 	fs.BoolVar(&a.Spectra, "spectra", a.Spectra, "")
 	var noSpectra bool
@@ -636,6 +643,10 @@ func checkArgs(a *Args, seen map[string]bool) error {
 	}
 	if a.PlotFontSize != 0 && !(a.PlotFontSize >= 4 && a.PlotFontSize <= 72) {
 		return fmt.Errorf("option --plot-font-size must be 0 or between 4 and 72")
+	}
+	if a.PlotBestLimit < 0 {
+		return fmt.Errorf("option --plot-best-limit must be >= 0 " +
+			"(0 = all best solutions)")
 	}
 	if a.SpectrumWlMin < 0 || a.SpectrumWlMax < 0 {
 		return fmt.Errorf("options --spectrum-wl-min/--spectrum-wl-max " +

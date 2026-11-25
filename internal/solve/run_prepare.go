@@ -330,7 +330,8 @@ func writeRunOutputs(a *Args, c *console, baseCh []channel, g1 []float64,
 			}
 		}
 		po := plotOpts{format: a.PlotFormat, dpi: a.PlotDpi,
-			fontSize: a.PlotFontSize, backend: a.Plotting, con: c}
+			fontSize: a.PlotFontSize, backend: a.Plotting, con: c,
+			bestLimit: a.PlotBestLimit}
 		plotResults(&po, plotPath, prof.rGrid, nTrueVals, prof.nAvg,
 			prof.nAvgRaw, prof.nLow, prof.nHigh, prof.vCum, prof.nBest,
 			prof.nBestCount, baseCh, g1, prof.gFit, prof.mRe, prof.mIm)

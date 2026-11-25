@@ -293,6 +293,9 @@ func (b *argvBuilder) output(s *state, d *solve.Args) {
 	if changedFloat(s.plotFontSize, d.PlotFontSize) {
 		b.add("--plot-font-size", s.plotFontSize)
 	}
+	if changedInt(s.plotBestLim, d.PlotBestLimit) {
+		b.add("--plot-best-limit", s.plotBestLim)
+	}
 	if s.noPlot {
 		b.flag("--no-plot")
 	}

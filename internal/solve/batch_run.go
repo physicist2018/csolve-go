@@ -583,7 +583,8 @@ func batchProfilePlotSpecs(b *batchInput, met *metrics, common []commonWl,
 func batchPlots(a *Args, c *console, outDir string, b *batchInput,
 	met *metrics, common []commonWl, nl int) {
 	po := plotOpts{format: a.PlotFormat, dpi: a.PlotDpi,
-		fontSize: a.PlotFontSize, backend: a.Plotting, con: c}
+		fontSize: a.PlotFontSize, backend: a.Plotting, con: c,
+		bestLimit: a.PlotBestLimit}
 	ext := plotFormatExt(a.PlotFormat)
 
 	pp := filepath.Join(outDir, "refractive."+ext)

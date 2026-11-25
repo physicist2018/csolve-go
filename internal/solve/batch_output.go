@@ -343,7 +343,8 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 
 	if !a.NoPlot {
 		po := plotOpts{format: a.PlotFormat, dpi: a.PlotDpi,
-			fontSize: a.PlotFontSize, backend: a.Plotting, con: c}
+			fontSize: a.PlotFontSize, backend: a.Plotting, con: c,
+			bestLimit: a.PlotBestLimit}
 		plotProfile(&po, profilePath, prof.rGrid, prof.nAvg, prof.nLow, prof.nHigh,
 			prof.vCum, solveCh, g1, prof.gFit, h, prof.nBestCount)
 		if prof.spectra != nil {

@@ -119,6 +119,13 @@ var fields = []Field{
 		EN: "Best solutions to average", RU: "Лучших решений для усреднения",
 		HelpEN: "--best: integer count or fraction in (0,1) of solutions.",
 		HelpRU: "--best: целое число или доля в (0,1) решений для ансамбля."},
+	{Key: "plot-best-limit", Group: "grid", Type: "int", Min: 0, Step: 1,
+		EN: "Best solutions drawn on plots (0 = all)",
+		RU: "Лучших решений на графиках (0 — все)",
+		HelpEN: "--plot-best-limit: how many best-solution curves to draw; " +
+			"0 = all. Mean and envelopes always use the whole ensemble.",
+		HelpRU: "--plot-best-limit: сколько кривых лучших решений рисовать; " +
+			"0 — все. Среднее и огибающие всегда по всему ансамблю."},
 
 	// Regularization
 	{Key: "gamma-select", Group: "reg", Type: "enum", Options: []string{"fixed", "cv", "err"},
@@ -316,7 +323,8 @@ func defaultValues() map[string]any {
 		"r0-min":              a.R0Min, "r0-max": a.R0Max, "nr0": a.NR0,
 		"r1-min": a.R1Min, "r1-max": a.R1Max, "nr1": a.NR1,
 		"min-ratio": a.MinRatio, "best": a.Best,
-		"gamma-select": string(a.GammaSelect), "gamma-rel": a.GammaRel,
+		"plot-best-limit": a.PlotBestLimit,
+		"gamma-select":    string(a.GammaSelect), "gamma-rel": a.GammaRel,
 		"gamma-min": a.GammaMin, "gamma-max": a.GammaMax, "ngamma": a.NGamma,
 		"nonneg":           a.Nonneg,
 		"no-zero-boundary": a.NoZeroBoundary,

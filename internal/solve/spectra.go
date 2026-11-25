@@ -15,8 +15,8 @@ type wlPoint struct {
 }
 
 // spectrumSet — кривые одной величины: индивидуальные решения ансамбля
-// (curves — все решения), их среднее и огибающие, а также измеренные точки
-// входных данных.
+// (curves — до limit для графика, 0 — все), их среднее и огибающие, а также
+// измеренные точки входных данных.
 type spectrumSet struct {
 	curves          [][]float64 // [решение][длина волны]
 	mean, low, high []float64   // по всему ансамблю; NaN — нет данных
@@ -251,8 +251,8 @@ func buildSpectra(a *Args, sols *solutions, geom []*geom,
 		}
 	}
 
-	alpha := aggregateSpectrum(alphaV, wlNm)
-	beta := aggregateSpectrum(betaV, wlNm)
+	alpha := aggregateSpectrum(alphaV, wlNm, a.PlotBestLimit)
+	beta := aggregateSpectrum(betaV, wlNm, a.PlotBestLimit)
 	for t := 0; t < G; t++ {
 		for iw := 0; iw < nw; iw++ {
 			a, b := alphaV[t][iw], betaV[t][iw]
@@ -266,8 +266,8 @@ func buildSpectra(a *Args, sols *solutions, geom []*geom,
 			lidarV[t][iw] = math.NaN()
 		}
 	}
-	lidar := aggregateSpectrum(lidarV, wlNm)
-	delta := aggregateSpectrum(deltaV, wlNm)
+	lidar := aggregateSpectrum(lidarV, wlNm, a.PlotBestLimit)
+	delta := aggregateSpectrum(deltaV, wlNm, a.PlotBestLimit)
 	alpha.meas, beta.meas, delta.meas = measuredSpectrumPoints(ch, g1, depWl,
 		depVal)
 	alpha.measName = "measured α"
@@ -376,8 +376,9 @@ func dedupeSpectrumGrid(v []float64) []float64 {
 }
 
 // aggregateSpectrum — среднее и огибающие по решениям (только конечные
-// значения); curves содержат все решения ансамбля.
-func aggregateSpectrum(vals [][]float64, wlNm []float64) *spectrumSet {
+// значения); curves — не более limit (0 — все). Среднее и огибающие всегда
+// считаются по всему ансамблю.
+func aggregateSpectrum(vals [][]float64, wlNm []float64, limit int) *spectrumSet {
 	nw := len(wlNm)
 	s := &spectrumSet{
 		mean: make([]float64, nw),
@@ -385,6 +386,9 @@ func aggregateSpectrum(vals [][]float64, wlNm []float64) *spectrumSet {
 		high: make([]float64, nw),
 	}
 	nc := len(vals)
+	if limit > 0 && nc > limit {
+		nc = limit
+	}
 	s.curves = make([][]float64, nc)
 	for t := 0; t < nc; t++ {
 		s.curves[t] = vals[t]

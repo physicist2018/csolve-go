@@ -777,7 +777,7 @@ func internalResultsDraw(po *plotOpts, rGrid []float64,
 	if nTrue != nil {
 		tru = scale(nTrue)
 	}
-	ns := nBestCount
+	ns := plotCurves(nBestCount, po.curveLimit())
 	if ns > len(nBest) {
 		ns = len(nBest)
 	}

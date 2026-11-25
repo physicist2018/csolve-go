@@ -616,6 +616,11 @@ func outputGroup(s *state) *huh.Group {
 			Description("0 = default, otherwise 4–72 (--plot-font-size).").
 			Value(&s.plotFontSize).
 			Validate(vFontSize()),
+		huh.NewInput().
+			Title("Best solutions drawn on plots").
+			Description("0 = all; the mean and envelopes always use the whole ensemble (--plot-best-limit).").
+			Value(&s.plotBestLim).
+			Validate(vIntMin(0)),
 		huh.NewConfirm().
 			Title("Skip plot generation?").
 			Description("--no-plot.").

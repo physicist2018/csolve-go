@@ -334,7 +334,7 @@ func gnuplotResults(po *plotOpts, outPath string, rGrid []float64,
 	}
 	po.writeDataFile(pBars, writeBars(ch, g1, gFit))
 
-	ns := nBestCount
+	ns := plotCurves(nBestCount, po.curveLimit())
 	if ns > len(nBest) {
 		ns = len(nBest)
 	}
