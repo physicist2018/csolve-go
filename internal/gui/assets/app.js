@@ -3,6 +3,7 @@
 const TOKEN = document.querySelector('meta[name="csolve-token"]').content;
 const API = {
   spec: '/api/spec',
+  help: '/api/help',
   validate: '/api/validate',
   jobs: '/api/jobs',
   quit: '/api/quit',
@@ -39,6 +40,9 @@ const I18N = {
     'result_json': 'JSON result', 'spec_none': 'Check a preset or fill parameters',
     'not_run': 'Configuration is invalid — check highlighted fields.',
     'reuse': 'Rerun', 'edit': 'Edit parameters',
+    'help': 'Help', 'help_title': 'Help — README',
+    'help_loading': 'Loading…',
+    'help_error': 'Could not load the help text.',
   },
   ru: {
     'presets': 'Пресеты', 'input': 'Вход', 'output': 'Вывод',
@@ -68,6 +72,9 @@ const I18N = {
     'result_json': 'JSON-результат', 'spec_none': 'Выберите пресет или заполните параметры',
     'not_run': 'Конфигурация неверна — проверьте поля.',
     'reuse': 'Повторить', 'edit': 'Изменить параметры',
+    'help': 'Справка', 'help_title': 'Справка — README',
+    'help_loading': 'Загрузка…',
+    'help_error': 'Не удалось загрузить справку.',
   },
 };
 let L = 'en'; // default; switch if navigator prefers ru
@@ -140,6 +147,9 @@ function applyLang() {
   setText('copy-cmd', t('copy'));
   setText('run-title', t('run'));
   setText('result-title', t('results'));
+  setText('help-btn', t('help'));
+  const helpTitle = document.querySelector('#help-modal .help-title');
+  if (helpTitle) helpTitle.textContent = t('help_title');
 }
 function setText(id, s) { const e = document.getElementById(id); if (e) e.textContent = s; }
 
@@ -872,6 +882,248 @@ function sizeOf(n) {
   return n + 'B';
 }
 
+// ---------- help modal ----------
+let helpText = null;
+
+function openHelpModal() {
+  let modal = document.getElementById('help-modal');
+  if (!modal) modal = buildHelpModal();
+  const title = modal.querySelector('.help-title');
+  if (title) title.textContent = t('help_title');
+  modal.classList.add('open');
+  if (helpText !== null) return;
+  const body = modal.querySelector('.help-body');
+  body.innerHTML = '';
+  body.appendChild(el('div', 'pd', t('help_loading')));
+  fetch(API.help, { headers: { 'X-CSolve-Token': TOKEN } })
+    .then((resp) => {
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.text();
+    })
+    .then((text) => {
+      helpText = text;
+      body.innerHTML = '';
+      body.appendChild(renderMarkdown(text));
+    })
+    .catch(() => {
+      body.innerHTML = '';
+      body.appendChild(el('div', 'err', t('help_error')));
+    });
+}
+
+function buildHelpModal() {
+  const modal = el('div', 'help-modal');
+  modal.id = 'help-modal';
+  modal.innerHTML = `
+    <div class="help-box" role="dialog" aria-modal="true">
+      <div class="help-bar">
+        <div class="help-title"></div>
+        <button class="btn" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="help-body"></div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.querySelector('.help-bar .btn').addEventListener('click', () => modal.classList.remove('open'));
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('open'); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal.classList.contains('open')) modal.classList.remove('open');
+  });
+  return modal;
+}
+
+// ---------- minimal markdown (for README) ----------
+function slugify(text) {
+  return String(text)
+    .replace(/`/g, '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .trim().toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+    .replace(/\s+/g, '-');
+}
+
+function appendInline(parent, text) {
+  const re = /(`[^`]*`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)\s]+\))/g;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parent.appendChild(document.createTextNode(text.slice(last, m.index)));
+    const tok = m[0];
+    if (tok[0] === '`') {
+      parent.appendChild(el('code', 'md-inline', tok.slice(1, -1)));
+    } else if (tok.startsWith('**')) {
+      const strong = el('strong');
+      appendInline(strong, tok.slice(2, -2));
+      parent.appendChild(strong);
+    } else {
+      const lm = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(tok);
+      const a = el('a');
+      appendInline(a, lm[1]);
+      const href = lm[2];
+      if (/^https?:\/\//i.test(href)) {
+        a.href = href;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+      } else if (href.startsWith('#')) {
+        a.href = href;
+        a.addEventListener('click', (ev) => {
+          const target = document.getElementById(href.slice(1));
+          if (target) { ev.preventDefault(); target.scrollIntoView({ block: 'start' }); }
+        });
+      } else {
+        a.className = 'md-plain';
+      }
+      parent.appendChild(a);
+    }
+    last = m.index + tok.length;
+  }
+  if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
+}
+
+function isTableSep(line) {
+  return /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(line);
+}
+
+function splitRow(line) {
+  let s = line.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|')) s = s.slice(0, -1);
+  const cells = [];
+  let cur = '', esc = false, code = false;
+  for (const ch of s) {
+    if (esc) { cur += ch; esc = false; continue; }
+    if (ch === '\\') { esc = true; continue; }
+    if (ch === '`') { code = !code; cur += ch; continue; }
+    if (ch === '|' && !code) { cells.push(cur.trim()); cur = ''; continue; }
+    cur += ch;
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+
+function mdTable(head, rows) {
+  const t = el('table', 'md-table');
+  const thead = el('thead');
+  const tr = el('tr');
+  for (const c of head) {
+    const th = el('th');
+    appendInline(th, c);
+    tr.appendChild(th);
+  }
+  thead.appendChild(tr);
+  t.appendChild(thead);
+  const tb = el('tbody');
+  for (const row of rows) {
+    const r = el('tr');
+    for (let k = 0; k < head.length; k++) {
+      const td = el('td');
+      appendInline(td, row[k] || '');
+      r.appendChild(td);
+    }
+    tb.appendChild(r);
+  }
+  t.appendChild(tb);
+  return t;
+}
+
+function mdList(lines, start) {
+  const first = /^(\s*)([-*+]|\d+\.)\s+(.*)$/.exec(lines[start]);
+  const baseIndent = first[1].length;
+  const ordered = /^\d+\.$/.test(first[2]);
+  const node = el(ordered ? 'ol' : 'ul', 'md-list');
+  if (ordered) node.start = parseInt(first[2], 10);
+  let i = start;
+  while (i < lines.length) {
+    const m = /^(\s*)([-*+]|\d+\.)\s+(.*)$/.exec(lines[i]);
+    if (!m) break;
+    const indent = m[1].length;
+    if (indent < baseIndent) break;
+    if (indent > baseIndent) {
+      const sub = mdList(lines, i);
+      const lastLi = node.lastElementChild;
+      (lastLi || node).appendChild(sub.node);
+      i = sub.next;
+      continue;
+    }
+    const li = el('li');
+    appendInline(li, m[3]);
+    node.appendChild(li);
+    i++;
+    // строки продолжения пункта (с отступом больше базового)
+    while (i < lines.length && lines[i].trim()) {
+      if (/^\s*([-*+]|\d+\.)\s+/.test(lines[i])) break;
+      if (/^```/.test(lines[i]) || /^#{1,6}\s/.test(lines[i])) break;
+      const ind = lines[i].match(/^\s*/)[0].length;
+      if (ind <= baseIndent) break;
+      li.appendChild(document.createTextNode(' '));
+      appendInline(li, lines[i].trim());
+      i++;
+    }
+  }
+  return { node, next: i };
+}
+
+function renderMarkdown(md) {
+  const root = el('div', 'md');
+  const lines = String(md).replace(/\r\n?/g, '\n').split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!line.trim()) { i++; continue; }
+    if (/^```/.test(line)) {
+      const lang = line.slice(3).trim();
+      const buf = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i])) { buf.push(lines[i]); i++; }
+      if (i < lines.length) i++;
+      const pre = el('pre', 'md-code');
+      pre.appendChild(el('code', null, buf.join('\n')));
+      if (lang) pre.title = lang;
+      root.appendChild(pre);
+      continue;
+    }
+    if (/^#{1,6}\s/.test(line)) {
+      const m = /^(#{1,6})\s+(.*)$/.exec(line);
+      const lvl = Math.min(m[1].length + 1, 6);
+      const h = el('h' + lvl, 'md-h');
+      h.id = slugify(m[2]);
+      appendInline(h, m[2]);
+      root.appendChild(h);
+      i++;
+      continue;
+    }
+    if (line.includes('|') && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+      const head = splitRow(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+        rows.push(splitRow(lines[i]));
+        i++;
+      }
+      root.appendChild(mdTable(head, rows));
+      continue;
+    }
+    if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
+      const r = mdList(lines, i);
+      root.appendChild(r.node);
+      i = r.next;
+      continue;
+    }
+    const buf = [line];
+    i++;
+    while (i < lines.length && lines[i].trim() &&
+           !/^```/.test(lines[i]) && !/^#{1,6}\s/.test(lines[i]) &&
+           !/^\s*([-*+]|\d+\.)\s+/.test(lines[i]) &&
+           !(lines[i].includes('|') && i + 1 < lines.length && isTableSep(lines[i + 1]))) {
+      buf.push(lines[i]);
+      i++;
+    }
+    const p = el('p', 'md-p');
+    appendInline(p, buf.join(' '));
+    root.appendChild(p);
+  }
+  return root;
+}
+
 // ---------- upload ----------
 function pickUpload(accept, cb) {
   const inp = document.createElement('input');
@@ -911,6 +1163,7 @@ function bindLang() {
     renderAll();
   });
   document.getElementById('show-advanced').addEventListener('change', renderGroups);
+  document.getElementById('help-btn').addEventListener('click', openHelpModal);
   document.getElementById('run-btn').addEventListener('click', doRun);
   document.getElementById('validate-btn').addEventListener('click', () => { window.clearTimeout(valTimer); runValidate(); });
   document.getElementById('cancel-btn').addEventListener('click', () => {

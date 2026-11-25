@@ -215,12 +215,13 @@ func writeBatchReportDoc(a *Args, c *console, rep *reportCapture, outDir string,
 	}
 
 	title := "csolve-go: пакетный отчёт по высотам"
+	params := appliedOptionLines(a)
 	var err error
 	if strings.EqualFold(filepath.Ext(path), ".odt") {
-		err = writeOdt(path, title, meta, rep.text(), tables, sections,
+		err = writeOdt(path, title, meta, params, rep.text(), tables, sections,
 			rep.warnings())
 	} else {
-		err = writeDocx(path, title, meta, rep.text(), tables, sections,
+		err = writeDocx(path, title, meta, params, rep.text(), tables, sections,
 			rep.warnings())
 	}
 	if err != nil {

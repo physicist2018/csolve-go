@@ -23,6 +23,7 @@ func (a *app) Handler() http.Handler {
 			http.FileServer(http.FS(sub))))
 	}
 	mux.HandleFunc("GET /api/spec", a.specHandler)
+	mux.HandleFunc("GET /api/help", a.helpHandler)
 	mux.HandleFunc("POST /api/validate", a.validateHandler)
 	mux.HandleFunc("POST /api/jobs", a.jobsHandler)
 	mux.HandleFunc("GET /api/jobs/{id}/events", a.eventsHandler)

@@ -76,7 +76,8 @@ func TestWriteDocx(t *testing.T) {
 		{Data: testPNG(t, 6, 4)},
 	}
 	sections := []docImageSection{{Images: imgs}}
-	if err := writeDocx(path, "Title", "meta", text, nil, sections, warn); err != nil {
+	params := []string{"Повторить: csolve --data x.json", "--data x.json"}
+	if err := writeDocx(path, "Title", "meta", params, text, nil, sections, warn); err != nil {
 		t.Fatalf("writeDocx: %v", err)
 	}
 
@@ -109,6 +110,14 @@ func TestWriteDocx(t *testing.T) {
 	if !strings.Contains(doc, "Предупреждения") {
 		t.Errorf("warnings section is missing")
 	}
+	if !strings.Contains(doc, "Применённые опции") ||
+		!strings.Contains(doc, "--data x.json") {
+		t.Errorf("applied options section is missing")
+	}
+	if strings.Index(doc, "Применённые опции") >
+		strings.Index(doc, "Channel agreement") {
+		t.Errorf("applied options must be at the very beginning")
+	}
 }
 
 func TestWriteOdt(t *testing.T) {
@@ -120,7 +129,7 @@ func TestWriteOdt(t *testing.T) {
 		{Data: testPNG(t, 6, 4)},
 	}
 	sections := []docImageSection{{Images: imgs}}
-	if err := writeOdt(path, "Title", "meta", text, nil, sections, ""); err != nil {
+	if err := writeOdt(path, "Title", "meta", nil, text, nil, sections, ""); err != nil {
 		t.Fatalf("writeOdt: %v", err)
 	}
 
@@ -168,7 +177,7 @@ func TestWriteDocxTable(t *testing.T) {
 		Title:  "Plots",
 		Images: []docImage{{Data: testPNG(t, 8, 4), Caption: "caption"}},
 	}}
-	if err := writeDocx(path, "Title", "meta", "log", tables, sections, ""); err != nil {
+	if err := writeDocx(path, "Title", "meta", nil, "log", tables, sections, ""); err != nil {
 		t.Fatalf("writeDocx: %v", err)
 	}
 	z, read := readZip(t, path)
@@ -204,7 +213,7 @@ func TestWriteOdtTable(t *testing.T) {
 		Title:  "Plots",
 		Images: []docImage{{Data: testPNG(t, 8, 4), Caption: "caption"}},
 	}}
-	if err := writeOdt(path, "Title", "meta", "log", tables, sections, ""); err != nil {
+	if err := writeOdt(path, "Title", "meta", nil, "log", tables, sections, ""); err != nil {
 		t.Fatalf("writeOdt: %v", err)
 	}
 	z, read := readZip(t, path)
@@ -315,5 +324,42 @@ func TestImageSizeCM(t *testing.T) {
 	}
 	if h < 8.49 || h > 8.51 {
 		t.Errorf("height = %g, want 8.5", h)
+	}
+}
+
+func TestAppliedOptionLines(t *testing.T) {
+	a, err := ParseArgs([]string{"--data", "in.json", "--type", "agglomerate",
+		"--gamma-min", "-7", "--report", "report.docx"})
+	if err != nil {
+		t.Fatalf("ParseArgs: %v", err)
+	}
+	got := appliedOptionLines(a)
+	want := []string{
+		"Повторить: csolve --data in.json --type agglomerate " +
+			"--gamma-min -7 --report report.docx",
+		"",
+		"--data in.json",
+		"--type agglomerate",
+		"--gamma-min -7",
+		"--report report.docx",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("lines = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("lines[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	if got := appliedOptionLines(&Args{}); got != nil {
+		t.Errorf("no argv must give no lines: %#v", got)
+	}
+	if got := appliedOptionLines(nil); got != nil {
+		t.Errorf("nil args must give no lines: %#v", got)
+	}
+
+	if q := quoteArg("a b"); q != "'a b'" {
+		t.Errorf("quoteArg = %q", q)
 	}
 }

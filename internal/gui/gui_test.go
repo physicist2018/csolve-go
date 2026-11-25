@@ -84,6 +84,40 @@ func TestAuth(t *testing.T) {
 	}
 }
 
+func TestHelpEndpoint(t *testing.T) {
+	a := newTestApp(t)
+	h := a.Handler()
+
+	rec := doGet(t, h, a.token, "/api/help")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("help: got %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/markdown") {
+		t.Errorf("content type = %q, want text/markdown", ct)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "# csolve-go") {
+		t.Errorf("help body must contain the README (%d bytes)", len(body))
+	}
+
+	// кнопка и диалог подключены на странице
+	idx := doGet(t, h, "", "/")
+	if !strings.Contains(idx.Body.String(), `id="help-btn"`) {
+		t.Error("index page must contain the help button")
+	}
+	js := doGet(t, h, "", "/assets/app.js")
+	if !strings.Contains(js.Body.String(), "openHelpModal") {
+		t.Error("app.js must wire the help dialog")
+	}
+
+	// без токена доступ запрещён
+	req := httptest.NewRequest(http.MethodGet, "/api/help", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("help without token: got %d, want 403", rr.Code)
+	}
+}
+
 func TestPlotEngineArgv(t *testing.T) {
 	flagVal := func(argv []string, flag string) string {
 		for i := 0; i+1 < len(argv); i++ {

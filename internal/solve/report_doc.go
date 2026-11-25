@@ -44,6 +44,51 @@ func filterWarnings(s string) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// quoteArg — аргумент в виде, пригодном для копирования в оболочку.
+func quoteArg(s string) string {
+	if s == "" || strings.ContainsAny(s, " \t\n\"'\\$`") {
+		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	}
+	return s
+}
+
+// joinArgs — аргументы через пробел с квотированием.
+func joinArgs(args []string) string {
+	q := make([]string, len(args))
+	for i, s := range args {
+		q[i] = quoteArg(s)
+	}
+	return strings.Join(q, " ")
+}
+
+// appliedOptionLines — применённые опции для повторения расчёта: строка с
+// полной командой и по одной опции в строке. Пусто, если исходные аргументы
+// неизвестны (Args собраны программно, например в тестах).
+func appliedOptionLines(a *Args) []string {
+	if a == nil || len(a.Argv) == 0 {
+		return nil
+	}
+	lines := []string{"Повторить: csolve " + joinArgs(a.Argv), ""}
+	var cur []string
+	flush := func() {
+		if len(cur) == 0 {
+			return
+		}
+		lines = append(lines, joinArgs(cur))
+		cur = nil
+	}
+	for _, tok := range a.Argv {
+		// новая опция — токен вида --flag (или -h); значения, включая
+		// отрицательные числа вида -7, остаются в текущей опции
+		if len(cur) > 0 && (strings.HasPrefix(tok, "--") || tok == "-h") {
+			flush()
+		}
+		cur = append(cur, tok)
+	}
+	flush()
+	return lines
+}
+
 // docTable — таблица отчёта: заголовок, шапка и строки.
 type docTable struct {
 	Title   string
@@ -128,13 +173,16 @@ func writeReportDoc(a *Args, c *console, rep *reportCapture, prof *profile,
 	title := "csolve-go: результат восстановления"
 	meta := fmt.Sprintf("Дата: %s; входные данные: %s",
 		time.Now().Format("2006-01-02 15:04:05"), src)
+	params := appliedOptionLines(a)
 
 	var err error
 	sections := []docImageSection{{Images: figures}}
 	if strings.EqualFold(filepath.Ext(path), ".odt") {
-		err = writeOdt(path, title, meta, rep.text(), nil, sections, rep.warnings())
+		err = writeOdt(path, title, meta, params, rep.text(), nil, sections,
+			rep.warnings())
 	} else {
-		err = writeDocx(path, title, meta, rep.text(), nil, sections, rep.warnings())
+		err = writeDocx(path, title, meta, params, rep.text(), nil, sections,
+			rep.warnings())
 	}
 	if err != nil {
 		return err
@@ -208,8 +256,8 @@ func imageSizeCM(img []byte, widthCM float64) (w, h float64) {
 
 // ---------------- DOCX ----------------
 
-func writeDocx(path, title, meta, text string, tables []docTable,
-	sections []docImageSection, warnings string) error {
+func writeDocx(path, title, meta string, params []string, text string,
+	tables []docTable, sections []docImageSection, warnings string) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("failed to create report: %w", err)
@@ -230,6 +278,12 @@ func writeDocx(path, title, meta, text string, tables []docTable,
 	var body strings.Builder
 	body.WriteString(docxPara(title, true, false, 28))
 	body.WriteString(docxPara(meta, false, false, 18))
+	if len(params) > 0 {
+		body.WriteString(docxPara("Применённые опции", true, false, 22))
+		for _, ln := range params {
+			body.WriteString(docxPara(ln, false, true, 16))
+		}
+	}
 	for _, ln := range splitLines(text) {
 		body.WriteString(docxPara(ln, false, true, 16))
 	}
@@ -457,8 +511,8 @@ func docxCell(text string, bold bool, width int) string {
 
 const odtMime = "application/vnd.oasis.opendocument.text"
 
-func writeOdt(path, title, meta, text string, tables []docTable,
-	sections []docImageSection, warnings string) error {
+func writeOdt(path, title, meta string, params []string, text string,
+	tables []docTable, sections []docImageSection, warnings string) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("failed to create report: %w", err)
@@ -479,6 +533,12 @@ func writeOdt(path, title, meta, text string, tables []docTable,
 	var body strings.Builder
 	body.WriteString(odtPara(title, "ReportTitle"))
 	body.WriteString(odtPara(meta, "ReportMeta"))
+	if len(params) > 0 {
+		body.WriteString(odtPara("Применённые опции", "ReportHeading"))
+		for _, ln := range params {
+			body.WriteString(odtPara(ln, "Preformatted_20_Text"))
+		}
+	}
 	for _, ln := range splitLines(text) {
 		body.WriteString(odtPara(ln, "Preformatted_20_Text"))
 	}

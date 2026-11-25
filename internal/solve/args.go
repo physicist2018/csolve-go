@@ -87,6 +87,10 @@ type Args struct {
 	SpectrumPoints int     // число длин волн в сетке спектров
 	SpectrumWlMin  float64 // нижняя граница сетки, нм (0 = авто)
 	SpectrumWlMax  float64 // верхняя граница сетки, нм (0 = авто)
+
+	// Argv — исходные аргументы командной строки (копия argv из ParseArgs).
+	// Используется в отчёте, чтобы расчёт можно было повторить.
+	Argv []string
 }
 
 var errHelp = errors.New("help requested")
@@ -532,6 +536,7 @@ func ParseArgs(argv []string) (*Args, error) {
 	if err := checkArgs(a, seen); err != nil {
 		return nil, err
 	}
+	a.Argv = append([]string(nil), argv...)
 	return a, nil
 }
 
