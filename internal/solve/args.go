@@ -194,8 +194,7 @@ func enumSetString[T ~string](vals []T) string {
 
 func printHelp() {
 	fmt.Fprint(os.Stdout, `csolve - retrieval of the particle size distribution from lidar
-coefficients using external cross-section tables
-(Go port of the tabular mode of solve).
+coefficients using external cross-section tables.
 
 Usage:
   csolve [OPTIONS]
@@ -271,10 +270,10 @@ Options:
                                  the chosen distribution; see JSON
                                  kernel_volume_conversion for the conversion)
 
-  --m-real <X>                   true Re(m) for demo
-  --m-imag <X>                   true Im(m) for demo
+  --m-real <X>                   true Re(m) for demo [1.45]
+  --m-imag <X>                   true Im(m) for demo [-0.005]
   --noise <X>                    demo noise level [0]
-  --seed <N>                     RNG seed [1]
+  --seed <N>                     RNG seed [1] (0 = fixed state)
 
   --out-dir <DIR>                directory for output files; relative
                                  --out/--json paths are placed inside it;
@@ -295,16 +294,16 @@ Options:
                                  (0 or 4..72) [12]
   --plot-best-limit <N>          best-solution curves drawn on plots;
                                  0 = all [0]
-  	--no-plot                      do not build plots
+  --no-plot                      do not build plots
 
-    --no-spectra                   do not compute the α(λ)/β(λ)/S(λ)/δ_l(λ)
-                                   spectra (no spectral plots, JSON section or
-                                   batch files)
-    --spectrum-points <N>          wavelengths in the spectra grid, 2..512 [40]
-    --spectrum-wl-min <nm>         lower wavelength of the spectra grid; 0 =
-                                   from the input data [0]
-    --spectrum-wl-max <nm>         upper wavelength of the spectra grid; 0 =
-                                   from the input data [0]
+  --no-spectra                   do not compute the α(λ)/β(λ)/S(λ)/δ_l(λ)
+                                 spectra (no spectral plots, JSON section or
+                                 batch files)
+  --spectrum-points <N>          wavelengths in the spectra grid, 2..512 [40]
+  --spectrum-wl-min <nm>         lower wavelength of the spectra grid; 0 =
+                                 from the input data [0]
+  --spectrum-wl-max <nm>         upper wavelength of the spectra grid; 0 =
+                                 from the input data [0]
 
   --batch <TXT>                  batch processing from txt
                                  (Altitude b<nm>... a<nm>...)
