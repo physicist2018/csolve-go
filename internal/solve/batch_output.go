@@ -244,21 +244,25 @@ type metrics struct {
 	dpolWl              []float64   // длины волн δ_l, µm
 	dpolMeas            [][]float64 // ndep x nAlt, измеренная δ_l, %
 	dpolMeasWl          []float64   // длины волн измеренной δ_l, µm
-	nAlt, nl            int
+	// Доля сфер в режиме смеси (nil вне смеси): по концентрации и по объёму.
+	sfNumMean, sfNumLow, sfNumHigh []float64
+	sfVolMean, sfVolLow, sfVolHigh []float64
+	nAlt, nl                       int
 }
 
 func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 	solveCh []channel, g1 []float64, sols *solutions, kts []*ktable,
 	mre, mim []float64, geom []*geom, r1Max float64, common []commonWl,
 	nl int, writeLidar bool, met *metrics, hi int, ds *depolSet,
-	src *tableSource, rimg *batchReportImages, c *console) error {
+	src *tableSource, mix *mixtureData, rimg *batchReportImages,
+	c *console) error {
 	// измеренные δ_l по всем столбцам dep<nm> для текущей высоты
 	var measVals []float64
 	if b.ndep > 0 {
 		measVals = b.dep[hi*b.ndep : (hi+1)*b.ndep]
 	}
 	prof, err := profileFinalize(a, solveCh, kts, mre, mim, sols, geom, a.R0Min,
-		r1Max, ds, src, g1, b.depWl, measVals)
+		r1Max, ds, src, g1, b.depWl, measVals, mix)
 	if err != nil {
 		return err
 	}
@@ -349,6 +353,28 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 		met.mIm[hi] = prof.mIm
 		for k := 0; k < nl && met.nl > 0; k++ {
 			met.S[k*met.nAlt+hi] = lidarRatioValue(prof.gFit, common, k)
+		}
+		if mix != nil && len(met.sfVolMean) == b.nAlt {
+			met.sfNumMean[hi] = prof.sfracNum
+			met.sfNumLow[hi] = prof.sfracNumLow
+			met.sfNumHigh[hi] = prof.sfracNumHigh
+			met.sfVolMean[hi] = prof.sfracVol
+			met.sfVolLow[hi] = prof.sfracVolLow
+			met.sfVolHigh[hi] = prof.sfracVolHigh
+		}
+	}
+
+	if mix != nil {
+		fsf, err := openAppend(filepath.Join(outDir, "sphere_fraction.txt"))
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(fsf, "%s  %s  %s  %s  %s  %s  %s\n", formatG6(h),
+			formatG6(prof.sfracNum), formatG6(prof.sfracNumLow),
+			formatG6(prof.sfracNumHigh), formatG6(prof.sfracVol),
+			formatG6(prof.sfracVolLow), formatG6(prof.sfracVolHigh))
+		if err := closeFile(fsf); err != nil {
+			return err
 		}
 	}
 

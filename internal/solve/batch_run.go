@@ -37,6 +37,8 @@ type batchSetup struct {
 	design   *design
 	solveCh  []channel
 	r1MaxEff float64
+	mix      *mixtureData
+	sfrac    []float64
 }
 
 func (s *batchSetup) nm() int { return len(s.mre) }
@@ -57,6 +59,9 @@ func prepareBatch(a *Args, c *console) (*batchSetup, error) {
 	if a.DepolRatioCons && b.ndep == 0 && a.DepolRatioExplicit {
 		return nil, errors.New("option --depol-ratio-cons requires a dep<nm> column in the " +
 			"batch file (e.g. dep532), got none")
+	}
+	if a.isMixed() {
+		return prepareBatchMixture(a, c, b)
 	}
 	src, err := a.tableSource(c)
 	if err != nil {
@@ -215,6 +220,87 @@ func prepareBatch(a *Args, c *console) (*batchSetup, error) {
 	return st, nil
 }
 
+// prepareBatchMixture — подготовка пакетного прогона в режиме смеси.
+func prepareBatchMixture(a *Args, c *console, b *batchInput) (*batchSetup, error) {
+	c.printf("  altitudes: %d; channels: %d\n", b.nAlt, b.nch)
+	for j := 0; j < b.nch; j++ {
+		kind := "alpha"
+		if b.ch[j].kind == chBeta {
+			kind = "beta"
+		}
+		c.printf("  channel: %s (%s, %g nm)\n", b.ch[j].name, kind,
+			b.ch[j].wlUm*1e3)
+	}
+	c.printf("  units: β [1/(m·sr)], α [1/m]\n")
+	for k, wl := range b.depWl {
+		c.printf("  measured δ_l column %d: %.6g nm, %%\n", k+1, wl*1e3)
+	}
+
+	st := &batchSetup{b: b}
+	st.solveCh = make([]channel, b.nch)
+	for j := 0; j < b.nch; j++ {
+		st.solveCh[j] = channel{
+			kind:       b.ch[j].kind,
+			wlUm:       b.ch[j].wlUm,
+			refWlUm:    tableRefWlUm,
+			cbackScale: 1.0,
+		}
+	}
+
+	md, err := buildMixtureKernels(a, c, st.solveCh)
+	if err != nil {
+		return nil, err
+	}
+	st.mix = md
+	st.src = md.nonSrc
+	st.mre, st.mim = md.mRe, md.mIm
+	st.kts = md.kts
+	st.sfrac = md.sfrac
+	st.r1MaxEff = md.r1MaxEff
+
+	depWls := make([]float64, 0, len(b.ch)+len(b.depWl))
+	for _, ch := range b.ch {
+		depWls = append(depWls, ch.wlUm)
+	}
+	depWls = append(depWls, b.depWl...)
+	st.ds, err = depolSetBuildMixed(md, depWls, a.TableRefWl, a.R0Min,
+		md.r1MaxEff, a.DxMax, a.TableExtrapolate, c)
+	if err != nil {
+		return nil, err
+	}
+	depolSetReportMixed(st.ds, md, c)
+
+	r0Grid := geomspace(a.R0Min, a.R0Max, a.NR0)
+	r1Grid := geomspace(a.R1Min, st.r1MaxEff, a.NR1)
+	st.design, err = designBuild(st.solveCh, b.nch, st.kts, st.mre, st.mim, r0Grid,
+		r1Grid, a.MinRatio, designSpec{
+			method:       a.Method,
+			degrees:      a.Degrees,
+			nBasis:       a.NBasis,
+			bins:         a.VBins,
+			zeroBoundary: !a.NoZeroBoundary,
+			quadOrder:    a.QuadOrder,
+			maxLogSpan:   a.LogSpan,
+			regOrder:     a.RegOrder,
+			kernelOrder:  a.KernelOrder,
+			sfrac:        st.sfrac,
+		})
+	if err != nil {
+		return nil, err
+	}
+	c.printf("  matrices A precomputed: %d windows × %d models\n", st.design.nW,
+		st.design.nM)
+	reportCondition(st.design, c)
+	if a.Method == methodMonotone {
+		c.printf("  method: monotone functions, %d bins per window, "+
+			"regularization order %d\n", st.design.bins, st.design.regOrder)
+	}
+	c.printf("  kernel order: %d (%s); result converted to dV/dln r\n",
+		st.design.kernelOrder, kernelOrderLabel(st.design.kernelOrder))
+	reportEnsembleSize(a, st.design.nW*st.design.nM, c)
+	return st, nil
+}
+
 // batchOutDir — каталог результатов: --batch-out-dir, затем --out-dir,
 // затем каталог входного файла.
 func batchOutDir(a *Args) (string, error) {
@@ -229,7 +315,7 @@ func batchOutDir(a *Args) (string, error) {
 
 // writeBatchHeaders — шапки общих файлов результата (обнуляют прошлый прогон).
 func writeBatchHeaders(outDir string, b *batchInput, ds *depolSet,
-	common []commonWl, writeLidar bool) error {
+	common []commonWl, writeLidar bool, mix *mixtureData) error {
 	writeHeader := func(name, content string) error {
 		path := filepath.Join(outDir, name)
 		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
@@ -300,11 +386,21 @@ func writeBatchHeaders(outDir string, b *batchInput, ds *depolSet,
 			return err
 		}
 	}
+	if mix != nil {
+		if err := writeHeader("sphere_fraction.txt",
+			"# H  sf_num_mean  sf_num_low  sf_num_high  sf_vol_mean  "+
+				"sf_vol_low  sf_vol_high\n"+
+				"# sphere fraction in the mixture sphere+"+mix.nonType+": "+
+				"num — by concentration, vol — by volume\n"); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 // newBatchMetrics — накопители по высотам для файлов и сводных графиков.
-func newBatchMetrics(b *batchInput, ds *depolSet, nl int) *metrics {
+func newBatchMetrics(b *batchInput, ds *depolSet, nl int,
+	mix *mixtureData) *metrics {
 	met := &metrics{nAlt: b.nAlt, nl: nl}
 	met.err = make([]float64, b.nAlt)
 	met.V = make([]float64, b.nAlt)
@@ -336,6 +432,22 @@ func newBatchMetrics(b *batchInput, ds *depolSet, nl int) *metrics {
 			for h := 0; h < b.nAlt; h++ {
 				met.dpolMeas[k][h] = b.dep[h*b.ndep+k]
 			}
+		}
+	}
+	if mix != nil {
+		met.sfNumMean = make([]float64, b.nAlt)
+		met.sfNumLow = make([]float64, b.nAlt)
+		met.sfNumHigh = make([]float64, b.nAlt)
+		met.sfVolMean = make([]float64, b.nAlt)
+		met.sfVolLow = make([]float64, b.nAlt)
+		met.sfVolHigh = make([]float64, b.nAlt)
+		for h := range met.sfNumMean {
+			met.sfNumMean[h] = math.NaN()
+			met.sfNumLow[h] = math.NaN()
+			met.sfNumHigh[h] = math.NaN()
+			met.sfVolMean[h] = math.NaN()
+			met.sfVolLow[h] = math.NaN()
+			met.sfVolHigh[h] = math.NaN()
 		}
 	}
 	return met
@@ -475,7 +587,7 @@ func solveBatchAltitudes(a *Args, c *console, st *batchSetup, outDir string,
 			g1 := b.data[h*b.nch:]
 			if err := emitProfile(a, outDir, b.alt[h], b, st.solveCh, g1, per[h],
 				st.kts, st.mre, st.mim, st.design.geom, st.r1MaxEff, common, nl,
-				writeLidar, met, h, st.ds, st.src, rimg, c); err != nil {
+				writeLidar, met, h, st.ds, st.src, st.mix, rimg, c); err != nil {
 				return err
 			}
 		}
@@ -507,7 +619,7 @@ func solveBatchAltitudes(a *Args, c *console, st *batchSetup, outDir string,
 		bd.rank(sols, h)
 		if err := emitProfile(a, outDir, b.alt[h], b, st.solveCh, g1, sols,
 			st.kts, st.mre, st.mim, st.design.geom, st.r1MaxEff, common, nl,
-			writeLidar, met, h, st.ds, st.src, rimg, c); err != nil {
+			writeLidar, met, h, st.ds, st.src, st.mix, rimg, c); err != nil {
 			return err
 		}
 	}
@@ -593,6 +705,17 @@ func batchProfilePlotSpecs(b *batchInput, met *metrics, common []commonWl,
 				vals: series, names: dnames, dashed: dashed, logAuto: false})
 		}
 	}
+	if len(met.sfVolMean) > 0 {
+		series := [][]float64{met.sfVolMean, met.sfVolLow, met.sfVolHigh}
+		if anyFiniteSeries(series) {
+			specs = append(specs, batchPlotSpec{
+				name: "sphere_fraction", title: "Sphere fraction (by volume)",
+				xlabel:  "sfrac (volume), 0..1",
+				caption: "Доля сфер по объёму (смесь)",
+				vals:    series, names: []string{"sfrac_vol", "lower", "upper"},
+				logAuto: false})
+		}
+	}
 	return specs
 }
 
@@ -632,10 +755,11 @@ func runBatch(a *Args, c *console, rep *reportCapture) error {
 	common := commonWavelengths(st.b)
 	nl := len(common)
 	writeLidar := a.LidarRatioCons && nl > 0
-	if err := writeBatchHeaders(outDir, st.b, st.ds, common, writeLidar); err != nil {
+	if err := writeBatchHeaders(outDir, st.b, st.ds, common, writeLidar,
+		st.mix); err != nil {
 		return err
 	}
-	met := newBatchMetrics(st.b, st.ds, nl)
+	met := newBatchMetrics(st.b, st.ds, nl, st.mix)
 	var rimg *batchReportImages
 	if rep != nil && !a.NoPlot {
 		rimg = &batchReportImages{}

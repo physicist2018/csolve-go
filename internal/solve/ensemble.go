@@ -142,6 +142,10 @@ type ensembleResult struct {
 	avg, low, high, count []float64
 	mat                   [][]float64 // G x nr, если запрошено
 	mRe, mIm              float64
+	// Доля сфер по концентрации: среднее и огибающие по лучшим G решениям.
+	// mix==false — не заполняется (NaN).
+	mix                            bool
+	sfracMean, sfracLow, sfracHigh float64
 }
 
 // ensembleAverage — среднее только по решениям, чьё окно покрывает r;
@@ -175,6 +179,8 @@ func ensembleAverage(sols *solutions, nBest int, geom []*geom,
 	}
 
 	mre, mim := 0.0, 0.0
+	sfSum, sfCnt := 0.0, 0
+	sfLo, sfHi := math.Inf(1), math.Inf(-1)
 	for t := 0; t < G; t++ {
 		s := &sols.sol[t]
 		g := geom[s.geomIndex]
@@ -196,6 +202,16 @@ func ensembleAverage(sols *solutions, nBest int, geom []*geom,
 		}
 		mre += s.mRe
 		mim += s.mIm
+		if isFinite(s.sfrac) {
+			sfSum += s.sfrac
+			sfCnt++
+			if s.sfrac < sfLo {
+				sfLo = s.sfrac
+			}
+			if s.sfrac > sfHi {
+				sfHi = s.sfrac
+			}
+		}
 	}
 	if G > 0 {
 		mre /= float64(G)
@@ -212,5 +228,15 @@ func ensembleAverage(sols *solutions, nBest int, geom []*geom,
 		}
 	}
 	return ensembleResult{avg: avg, low: low, high: high, count: count,
-		mat: mat, mRe: mre, mIm: mim}
+		mat: mat, mRe: mre, mIm: mim,
+		mix: sfCnt > 0, sfracMean: sfMeanOrNaN(sfSum, sfCnt),
+		sfracLow: sfLo, sfracHigh: sfHi}
+}
+
+// sfMeanOrNaN — среднее по накопленной сумме или NaN при отсутствии данных.
+func sfMeanOrNaN(sum float64, cnt int) float64 {
+	if cnt == 0 {
+		return math.NaN()
+	}
+	return sum / float64(cnt)
 }

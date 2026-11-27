@@ -109,6 +109,15 @@ type Args struct {
 	SpectrumWlMin  float64 // нижняя граница сетки, нм (0 = авто)
 	SpectrumWlMax  float64 // верхняя граница сетки, нм (0 = авто)
 
+	// Смесь «сферы + несферы» (--type sphere+spheroid|sphere+agglomerate).
+	// SphereFrac — фиксированная доля сфер по концентрации (0..1); если
+	// SphereFracSet == false, sfrac сканируется по сетке [SFracMin, SFracMax].
+	SphereFrac    float64
+	SphereFracSet bool
+	SFracMin      float64
+	SFracMax      float64
+	NSfrac        int
+
 	// Argv — исходные аргументы командной строки (копия argv из ParseArgs).
 	// Используется в отчёте, чтобы расчёт можно было повторить.
 	Argv []string
@@ -211,8 +220,10 @@ Options:
                                  (print the URL only)
 
   --data <JSON>                  measured coefficients; demo data if omitted
-  --type {sphere|spheroid|agglomerate|agglomerate-cs}
-                                 built-in cross-section tables [agglomerate]
+  --type {sphere|spheroid|agglomerate|agglomerate-cs|sphere+spheroid|sphere+agglomerate}
+                                 built-in cross-section tables [agglomerate];
+                                 sphere+spheroid / sphere+agglomerate enable
+                                 the sphere/nonsphere mixture mode
   --tables <DIR>                 external tables: directory with
                                  mre_<real>_mim_<imag>/data.txt (mutually
                                  exclusive with --type)
@@ -305,6 +316,13 @@ Options:
   --spectrum-wl-max <nm>         upper wavelength of the spectra grid; 0 =
                                  from the input data [0]
 
+  --sphere-frac <X>              fix the sphere fraction (0..1) instead of
+                                 scanning (sphere mixture types only)
+  --sfrac-min <X>                lower bound of the scanned sphere fraction
+                                 (by concentration) [0]
+  --sfrac-max <X>                upper bound of the scanned sphere fraction [1]
+  --n-sfrac <N>                  number of scanned sphere-fraction values [11]
+
   --batch <TXT>                  batch processing from txt
                                  (Altitude b<nm>... a<nm>...)
   --batch-out-dir <DIR>          batch output directory [next to TXT];
@@ -376,6 +394,10 @@ func ParseArgs(argv []string) (*Args, error) {
 		DepolRatioCons: true,
 		Spectra:        true,
 		SpectrumPoints: 40,
+		SphereFrac:     math.NaN(),
+		SFracMin:       0.0,
+		SFracMax:       1.0,
+		NSfrac:         11,
 	}
 
 	fs := flag.NewFlagSet("csolve", flag.ContinueOnError)
@@ -467,6 +489,13 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.Float64Var(&a.SpectrumWlMin, "spectrum-wl-min", a.SpectrumWlMin, "")
 	fs.Float64Var(&a.SpectrumWlMax, "spectrum-wl-max", a.SpectrumWlMax, "")
 
+	sphereFrac := math.NaN()
+	fs.Float64Var(&sphereFrac, "sphere-frac", math.NaN(), "")
+	fs.Float64Var(&a.SFracMin, "sfrac-min", a.SFracMin, "")
+	fs.Float64Var(&a.SFracMax, "sfrac-max", a.SFracMax, "")
+	nSfrac := &singleIntFlag{minV: 1, maxV: 1001, name: "n-sfrac"}
+	fs.Var(nSfrac, "n-sfrac", "")
+
 	fs.StringVar(&a.Batch, "batch", "", "")
 	fs.StringVar(&a.BatchOutDir, "batch-out-dir", "", "")
 	fs.Float64Var(&a.BatchThin, "batch-thin", a.BatchThin, "")
@@ -525,6 +554,13 @@ func ParseArgs(argv []string) (*Args, error) {
 	}
 	if spectrumPoints.set {
 		a.SpectrumPoints = spectrumPoints.value
+	}
+	if nSfrac.set {
+		a.NSfrac = nSfrac.value
+	}
+	if seen["sphere-frac"] {
+		a.SphereFrac = sphereFrac
+		a.SphereFracSet = true
 	}
 	a.DepolRatioExplicit = seen["depol-ratio-cons"]
 
@@ -675,6 +711,26 @@ func checkArgs(a *Args, seen map[string]bool) error {
 	}
 	if a.SpectrumPoints < 2 {
 		return fmt.Errorf("option --spectrum-points must be >= 2")
+	}
+	if a.SphereFracSet && !(a.SphereFrac >= 0 && a.SphereFrac <= 1) {
+		return fmt.Errorf("option --sphere-frac must be between 0 and 1")
+	}
+	if !(a.SFracMin >= 0 && a.SFracMin <= 1) {
+		return fmt.Errorf("option --sfrac-min must be between 0 and 1")
+	}
+	if !(a.SFracMax >= 0 && a.SFracMax <= 1) {
+		return fmt.Errorf("option --sfrac-max must be between 0 and 1")
+	}
+	if a.SFracMax < a.SFracMin {
+		return fmt.Errorf("option --sfrac-max must be >= --sfrac-min")
+	}
+	if a.NSfrac < 1 {
+		return fmt.Errorf("option --n-sfrac must be >= 1")
+	}
+	if !a.isMixed() && (a.SphereFracSet || seen["sfrac-min"] ||
+		seen["sfrac-max"] || seen["n-sfrac"]) {
+		return fmt.Errorf("options --sphere-frac/--sfrac-min/--sfrac-max/--n-sfrac " +
+			"require a mixture --type (sphere+spheroid or sphere+agglomerate)")
 	}
 	return nil
 }

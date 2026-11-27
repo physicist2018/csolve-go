@@ -32,6 +32,7 @@ type design struct {
 	degree          []int
 	r0, r1          []float64
 	mRe, mIm        []float64
+	sfrac           []float64 // доля сфер (по концентрации) на значение m; nil вне смеси
 	geom            []*geom
 	method          methodKind
 	bins            int
@@ -86,6 +87,9 @@ func designBuild(ch []channel, nch int, kts []*ktable, mRe, mIm []float64,
 	d.r1 = r1s
 	d.mRe = append([]float64(nil), mRe...)
 	d.mIm = append([]float64(nil), mIm...)
+	if len(spec.sfrac) == d.nM {
+		d.sfrac = append([]float64(nil), spec.sfrac...)
+	}
 
 	d.geom = make([]*geom, d.nW)
 	for w := 0; w < d.nW; w++ {

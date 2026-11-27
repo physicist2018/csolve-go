@@ -154,10 +154,18 @@ type runSetup struct {
 	r1MaxEff  float64
 	cbackScal float64
 	mRe, mIm  float64 // истинные m (для демо — приведённые к сетке таблиц)
+
+	// Режим смеси (nil вне смеси): ядра, sfrac и «истинная» доля для демо.
+	mix       *mixtureData
+	sfrac     []float64
+	trueSfrac float64
 }
 
 // prepareRun — сетка m, покрытие таблиц, ядра Cext/Cback и ядра S11/S22.
 func prepareRun(a *Args, c *console, in *runInput) (*runSetup, error) {
+	if a.isMixed() {
+		return prepareRunMixture(a, c, in)
+	}
 	st := &runSetup{mRe: in.trueRe, mIm: in.trueIm, cbackScal: 1.0}
 	if a.TableCback4pi {
 		st.cbackScal = 1.0 / (4.0 * math.Pi)
@@ -268,24 +276,69 @@ func prepareRun(a *Args, c *console, in *runInput) (*runSetup, error) {
 	return st, nil
 }
 
-// demoMeasurements — синтетические g1 по демонстрационному распределению.
-func demoMeasurements(a *Args, c *console, st *runSetup,
-	baseCh []channel) ([]float64, error) {
-	idx := mIndex(st.mre, st.mim, st.mRe, st.mIm)
-	var tk *ktable
-	if idx >= 0 {
-		tk = st.kts[idx]
-	} else {
-		c.printf("  building table for demo true m: m = %g%+gj\n",
-			st.mRe, st.mIm)
-		chs, err := loadTableChannels(st.src, st.mRe, st.mIm, baseCh,
-			a.TableExtrapolate, a.TableRefWl, st.cbackScal)
+// prepareRunMixture — подготовка одиночного прогона в режиме смеси.
+func prepareRunMixture(a *Args, c *console, in *runInput) (*runSetup, error) {
+	md, err := buildMixtureKernels(a, c, in.channels)
+	if err != nil {
+		return nil, err
+	}
+	st := &runSetup{src: md.nonSrc, mix: md, r1MaxEff: md.r1MaxEff,
+		cbackScal: 1.0, mre: md.mRe, mim: md.mIm, kts: md.kts,
+		sfrac: md.sfrac}
+	st.mRe, st.mIm = md.aRe[0], md.aIm[0]
+	if in.demo {
+		st.mRe, st.mIm, err = resolveDemoM(in.trueRe, in.trueIm, a, md.aRe, md.aIm, c)
 		if err != nil {
 			return nil, err
 		}
-		tk, err = ktableBuild(chs, a.R0Min, st.r1MaxEff, a.DxMax)
-		if err != nil {
-			return nil, err
+	}
+	st.trueSfrac = 0.5
+	if a.SphereFracSet {
+		st.trueSfrac = a.SphereFrac
+	}
+
+	depWls := make([]float64, 0, len(in.channels)+len(in.depWl))
+	for _, ch := range in.channels {
+		depWls = append(depWls, ch.wlUm)
+	}
+	depWls = append(depWls, in.depWl...)
+	st.ds, err = depolSetBuildMixed(md, depWls, a.TableRefWl, a.R0Min,
+		md.r1MaxEff, a.DxMax, a.TableExtrapolate, c)
+	if err != nil {
+		return nil, err
+	}
+	depolSetReportMixed(st.ds, md, c)
+	return st, nil
+}
+
+// demoMeasurements — синтетические g1 по демонстрационному распределению.
+func demoMeasurements(a *Args, c *console, st *runSetup,
+	baseCh []channel) ([]float64, error) {
+	var tk *ktable
+	if st.mix != nil {
+		tk = st.mix.demoKernel(st.mRe, st.mIm, st.trueSfrac)
+		if tk == nil {
+			return nil, fmt.Errorf("demo: no combined kernel for m = %g%+gj, "+
+				"sfrac = %g", st.mRe, st.mIm, st.trueSfrac)
+		}
+		c.printf("  demo true: m = %g%+gj, sfrac = %g\n", st.mRe, st.mIm,
+			st.trueSfrac)
+	} else {
+		idx := mIndex(st.mre, st.mim, st.mRe, st.mIm)
+		if idx >= 0 {
+			tk = st.kts[idx]
+		} else {
+			c.printf("  building table for demo true m: m = %g%+gj\n",
+				st.mRe, st.mIm)
+			chs, err := loadTableChannels(st.src, st.mRe, st.mIm, baseCh,
+				a.TableExtrapolate, a.TableRefWl, st.cbackScal)
+			if err != nil {
+				return nil, err
+			}
+			tk, err = ktableBuild(chs, a.R0Min, st.r1MaxEff, a.DxMax)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	g1 := forwardMeasurements(tk, demoTrueDistribution, a.R0Min,
@@ -329,10 +382,23 @@ func writeRunOutputs(a *Args, c *console, baseCh []channel, g1 []float64,
 	}
 
 	if a.JSON != "" {
+		var sf *outSphereFraction
+		if prof.sfracMix {
+			sf = &outSphereFraction{
+				NonType:           mixtureNonType(a),
+				Fixed:             a.SphereFracSet,
+				ConcentrationMean: jfloat(prof.sfracNum),
+				ConcentrationLow:  jfloat(prof.sfracNumLow),
+				ConcentrationHigh: jfloat(prof.sfracNumHigh),
+				VolumeMean:        jfloat(prof.sfracVol),
+				VolumeLow:         jfloat(prof.sfracVolLow),
+				VolumeHigh:        jfloat(prof.sfracVolHigh),
+			}
+		}
 		if err := writeJSON(jsonPath, sols, prof.rGrid, prof.nAvg, prof.nAvgRaw,
 			prof.nLow, prof.nHigh, prof.vCum, baseCh, g1, prof.gFit, prof.mRe,
 			prof.mIm, prof.moments, prof.modes, prof.deltaLwl, prof.deltaL,
-			prof.spectra); err != nil {
+			prof.spectra, sf); err != nil {
 			return err
 		}
 		c.printf("results saved: %s\n", jsonPath)

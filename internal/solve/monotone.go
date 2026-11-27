@@ -48,6 +48,9 @@ type designSpec struct {
 	maxLogSpan   float64
 	regOrder     int
 	kernelOrder  int
+	// sfrac — доля сфер (по концентрации) для каждого значения m сканирования;
+	// nil вне режима смеси.
+	sfrac []float64
 }
 
 // binsFor — число бинов монотонной сетки при заданном --v-bins (0 = auto).

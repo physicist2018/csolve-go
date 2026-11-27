@@ -46,6 +46,8 @@ type solution struct {
 	C         []float64 // коэффициенты (spline) или приращения объёма v (monotone)
 	nu        int
 	geomIndex int
+	mIdx      int     // индекс в развёрнутой сетке m (с учётом sfrac в смеси)
+	sfrac     float64 // доля сфер по концентрации; NaN вне смеси
 	err       float64
 	gFit      []float64
 	id        int
@@ -408,6 +410,11 @@ func scanVariants(d *design, g1 []float64, nch int, gammaSel gammaSelect,
 			so := &out.sol[t]
 			so.mRe = d.mRe[im]
 			so.mIm = d.mIm[im]
+			so.mIdx = im
+			so.sfrac = math.NaN()
+			if d.sfrac != nil {
+				so.sfrac = d.sfrac[im]
+			}
 			so.degree = d.degree[iw]
 			so.bins = d.bins
 			so.r0 = d.r0[iw]

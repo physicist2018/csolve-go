@@ -83,13 +83,17 @@ func batchReportTables(b *batchInput, met *metrics) []docTable {
 			"Im(m)", "Err"},
 		Rows: make([][]string, 0, b.nAlt),
 	}
+	withSfrac := len(met.sfVolMean) == b.nAlt && b.nAlt > 0
+	if withSfrac {
+		micro.Headers = append(micro.Headers, "sfrac (объём)")
+	}
 	modes := docTable{
 		Title:   "Параметры логнормальных мод",
 		Headers: []string{"H, м", "rmf", "rmc", "rm", "σf", "σc", "σ"},
 		Rows:    make([][]string, 0, b.nAlt),
 	}
 	for i := 0; i < b.nAlt; i++ {
-		micro.Rows = append(micro.Rows, []string{
+		row := []string{
 			formatG6(b.alt[i]),
 			reportNum(reportAt(met.V, i)),
 			reportNum(reportAt(met.Vc, i)),
@@ -99,7 +103,11 @@ func batchReportTables(b *batchInput, met *metrics) []docTable {
 			reportNum(reportAt(met.mRe, i)),
 			reportNum(reportAt(met.mIm, i)),
 			reportNum(reportAt(met.err, i) * 100.0),
-		})
+		}
+		if withSfrac {
+			row = append(row, reportNum(reportAt(met.sfVolMean, i)))
+		}
+		micro.Rows = append(micro.Rows, row)
 		modes.Rows = append(modes.Rows, []string{
 			formatG6(b.alt[i]),
 			reportNum(reportAt(met.rmf, i)),

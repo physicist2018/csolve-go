@@ -40,6 +40,16 @@ type profile struct {
 	deltaL     []float64 // δ_l = (S11-S22)/(S11+S22)*100, %
 	deltaLwl   []float64 // длины волн δ_l, µm
 	spectra    *spectra  // α(λ), β(λ), δ_l(λ) по решениям ансамбля
+
+	// Доля сфер в режиме смеси (NaN вне смеси): сначала по концентрации, затем
+	// пересчёт в объёмную долю (для объёмно-эквивалентных радиусов совпадает).
+	sfracMix     bool
+	sfracNum     float64
+	sfracNumLow  float64
+	sfracNumHigh float64
+	sfracVol     float64
+	sfracVolLow  float64
+	sfracVolHigh float64
 }
 
 // mEps — допуск сравнения m: значения приходят из имён каталогов таблиц,
@@ -59,10 +69,11 @@ func mIndex(mre, mim []float64, re, im float64) int {
 // profileFinalize — итоговый профиль одной высоты (общий код одиночного и
 // пакетного режимов). ds — ядра S11/S22 для δ_l (nil — не считаются);
 // src — источник таблиц для спектров α(λ)/β(λ); g1 — измеренные
-// коэффициенты каналов ch; depWl/depVal — измеренная δ_l для маркеров.
+// коэффициенты каналов ch; depWl/depVal — измеренная δ_l для маркеров;
+// mix — данные смеси (nil вне режима смеси).
 func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
 	sols *solutions, geom []*geom, rMin, rMax float64, ds *depolSet,
-	src *tableSource, g1, depWl, depVal []float64) (*profile, error) {
+	src *tableSource, g1, depWl, depVal []float64, mix *mixtureData) (*profile, error) {
 	_ = ch
 	p := &profile{}
 	nr := a.NrOut
@@ -87,6 +98,18 @@ func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
 	p.nHigh = ens.high
 	p.mRe = ens.mRe
 	p.mIm = ens.mIm
+	if ens.mix {
+		p.sfracMix = true
+		p.sfracNum = ens.sfracMean
+		p.sfracNumLow = ens.sfracLow
+		p.sfracNumHigh = ens.sfracHigh
+		// Пересчёт доли по концентрации в объёмную долю. Для встроенных
+		// наборов r — объёмно-эквивалентный радиус, поэтому средние объёмы
+		// сфер и несфер одинаковы и объёмная доля совпадает с числовой.
+		p.sfracVol = volumeFraction(ens.sfracMean)
+		p.sfracVolLow = volumeFraction(ens.sfracLow)
+		p.sfracVolHigh = volumeFraction(ens.sfracHigh)
+	}
 	if !a.NoSmooth {
 		smoothDistribution(p.rGrid, p.nAvg, ens.count, a.SmoothLam)
 		// монотонный метод по построению даёт n ≥ 0; сглаживающий сплайн
@@ -110,10 +133,10 @@ func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
 
 	bestIdx := make([]int, G)
 	for t := 0; t < G; t++ {
-		bestIdx[t] = mIndex(mre, mim, sols.sol[t].mRe, sols.sol[t].mIm)
-		if bestIdx[t] < 0 {
-			return nil, fmt.Errorf("internal error: m = %g%+gj is missing from the kernel grid",
-				sols.sol[t].mRe, sols.sol[t].mIm)
+		bestIdx[t] = sols.sol[t].mIdx
+		if bestIdx[t] < 0 || bestIdx[t] >= len(kts) {
+			return nil, fmt.Errorf("internal error: solution kernel index %d is out of range",
+				bestIdx[t])
 		}
 	}
 
@@ -153,8 +176,35 @@ func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
 	}
 
 	// спектры α(λ), β(λ), δ_l(λ) по каждому решению ансамбля
-	p.spectra = buildSpectra(a, sols, geom, rq, wq, ds, src, ch, g1, depWl,
-		depVal)
+	if mix != nil {
+		p.spectra = buildSpectraMix(a, sols, geom, rq, wq, ds, mix, ch, g1,
+			depWl, depVal)
+	} else {
+		p.spectra = buildSpectra(a, sols, geom, rq, wq, ds, src, ch, g1, depWl,
+			depVal)
+	}
+	// «Полые» расчётные точки — по средней функции распределения n_avg,
+	// посчитанной с усреднённым по лучшим G решениям ядром (так же, как gFit):
+	// g(λ) = ∫ [avg_t K_t(λ,r)] q(r) n_avg(r) dln r.
+	meanModels := make([]spectModel, 0, G)
+	for t := 0; t < G; t++ {
+		if mix != nil {
+			ci := bestIdx[t]
+			meanModels = append(meanModels, spectModel{sph: mix.sphTab[ci],
+				non: mix.nonTab[ci], sfrac: mix.sfrac[ci]})
+			continue
+		}
+		b := &sols.sol[t]
+		tab, terr := tableCacheGet(src, b.mRe, b.mIm, a.TableExtrapolate)
+		if terr != nil {
+			continue
+		}
+		meanModels = append(meanModels, spectModel{non: tab})
+	}
+	if len(meanModels) > 0 {
+		applyMeanDistributionComputed(p.spectra, a, src, mix, ch, depWl, rq, wq,
+			nqVals, meanModels)
+	}
 
 	p.moments = sizeMoments(p.nAvg, p.rGrid)
 	p.count = make([]float64, nr)

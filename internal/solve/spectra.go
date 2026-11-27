@@ -42,9 +42,12 @@ type wlPoint struct {
 type spectrumSet struct {
 	curves          [][]float64 // [решение][длина волны]
 	mean, low, high []float64   // по всему ансамблю; NaN — нет данных
-	meas            []wlPoint   // измеренные точки (заполненные маркеры)
-	measName        string
-	computed        []wlPoint // расчёт в λ без измерения (полые маркеры)
+	// meanDist — кривая, посчитанная по средней функции распределения (а не
+	// усреднением по решениям); используется для «полых» расчётных точек.
+	meanDist []float64
+	meas     []wlPoint // измеренные точки (заполненные маркеры)
+	measName string
+	computed []wlPoint // расчёт в λ без измерения (полые маркеры)
 }
 
 // usable — есть ли хоть одно конечное значение средней кривой.
@@ -523,6 +526,19 @@ func inputWavelengthsNm(ch []channel, depWl []float64) []float64 {
 	return out
 }
 
+// setCurve — кривая, из которой берутся расчётные («полые») точки:
+// посчитанная по средней функции распределения (если есть), иначе — средняя
+// по ансамблю.
+func setCurve(set *spectrumSet) []float64 {
+	if set == nil {
+		return nil
+	}
+	if set.meanDist != nil {
+		return set.meanDist
+	}
+	return set.mean
+}
+
 // missingSpectrumPoints — значения средней кривой в длинах волн wls, где у
 // набора нет измеренной точки. Нефинитные средние (нет данных/δ_l без
 // S11-S22) пропускаются. Результат отсортирован по длине волны.
@@ -542,7 +558,7 @@ func missingSpectrumPoints(wls, grid []float64, set *spectrumSet) []wlPoint {
 		if measured {
 			continue
 		}
-		v, ok := interpAtWavelength(grid, set.mean, wl)
+		v, ok := interpAtWavelength(grid, setCurve(set), wl)
 		if !ok {
 			continue
 		}

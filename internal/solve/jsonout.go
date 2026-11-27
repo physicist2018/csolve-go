@@ -64,17 +64,19 @@ type outChannel struct {
 }
 
 type outSolution struct {
-	Rank   int      `json:"rank"`
-	MReal  jfloat   `json:"m_real"`
-	MImag  jfloat   `json:"m_imag"`
-	Degree int      `json:"degree"`
-	Bins   int      `json:"bins,omitempty"`
-	R0     jfloat   `json:"r0"`
-	R1     jfloat   `json:"r1"`
-	Gamma  jfloat   `json:"gamma"`
-	Err    jfloat   `json:"err"`
-	C      []jfloat `json:"C,omitempty"`
-	VBins  []jfloat `json:"v_bins,omitempty"`
+	Rank   int    `json:"rank"`
+	MReal  jfloat `json:"m_real"`
+	MImag  jfloat `json:"m_imag"`
+	Degree int    `json:"degree"`
+	Bins   int    `json:"bins,omitempty"`
+	R0     jfloat `json:"r0"`
+	R1     jfloat `json:"r1"`
+	Gamma  jfloat `json:"gamma"`
+	Err    jfloat `json:"err"`
+	// Sfrac — доля сфер по концентрации (только в режиме смеси).
+	Sfrac *jfloat  `json:"sphere_fraction_concentration,omitempty"`
+	C     []jfloat `json:"C,omitempty"`
+	VBins []jfloat `json:"v_bins,omitempty"`
 }
 
 // outModel — параметры метода восстановления.
@@ -147,22 +149,36 @@ type outSpectra struct {
 	Measured       outSpectraMeasured `json:"measured"`
 }
 
+// outSphereFraction — доля сфер в режиме смеси: среднее и огибающие по
+// лучшим решениям, по концентрации и по объёму.
+type outSphereFraction struct {
+	NonType           string `json:"nonsphere_type"`
+	Fixed             bool   `json:"fixed"`
+	ConcentrationMean jfloat `json:"concentration_mean"`
+	ConcentrationLow  jfloat `json:"concentration_low"`
+	ConcentrationHigh jfloat `json:"concentration_high"`
+	VolumeMean        jfloat `json:"volume_mean"`
+	VolumeLow         jfloat `json:"volume_low"`
+	VolumeHigh        jfloat `json:"volume_high"`
+}
+
 type outFile struct {
-	Model          outModel      `json:"model"`
-	MAvg           outMAvg       `json:"m_avg"`
-	Moments        outMoments    `json:"moments"`
-	UnitsInput     outUnits      `json:"units_input"`
-	Channels       []outChannel  `json:"channels"`
-	RUm            []jfloat      `json:"r_um"`
-	NAvg           []jfloat      `json:"n_avg"`
-	NLow           []jfloat      `json:"n_low"`
-	NHigh          []jfloat      `json:"n_high"`
-	VCum           []jfloat      `json:"v_cum_um3_per_cm3"`
-	BestSolutions  []outSolution `json:"best_solutions"`
-	NAvgRaw        []jfloat      `json:"n_avg_raw"`
-	Modes          outModes      `json:"modes"`
-	Depolarization outDepol      `json:"depolarization"`
-	Spectra        *outSpectra   `json:"spectra,omitempty"`
+	Model          outModel           `json:"model"`
+	MAvg           outMAvg            `json:"m_avg"`
+	Moments        outMoments         `json:"moments"`
+	UnitsInput     outUnits           `json:"units_input"`
+	Channels       []outChannel       `json:"channels"`
+	RUm            []jfloat           `json:"r_um"`
+	NAvg           []jfloat           `json:"n_avg"`
+	NLow           []jfloat           `json:"n_low"`
+	NHigh          []jfloat           `json:"n_high"`
+	VCum           []jfloat           `json:"v_cum_um3_per_cm3"`
+	BestSolutions  []outSolution      `json:"best_solutions"`
+	NAvgRaw        []jfloat           `json:"n_avg_raw"`
+	Modes          outModes           `json:"modes"`
+	Depolarization outDepol           `json:"depolarization"`
+	SphereFraction *outSphereFraction `json:"sphere_fraction,omitempty"`
+	Spectra        *outSpectra        `json:"spectra,omitempty"`
 }
 
 func toJ(vals []float64) []jfloat {
@@ -198,7 +214,8 @@ func outModeFrom(m csMode) outMode {
 // writeJSON — запись результатов (структура как в Python-версии).
 func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw, nLow,
 	nHigh, vCum []float64, ch []channel, g1, gFit []float64, mAvgRe, mAvgIm float64,
-	mom moments, md modes, deltaWlUm, deltaL []float64, sp *spectra) error {
+	mom moments, md modes, deltaWlUm, deltaL []float64, sp *spectra,
+	sf *outSphereFraction) error {
 
 	out := outFile{
 		MAvg: outMAvg{Real: jfloat(mAvgRe), Imag: jfloat(mAvgIm)},
@@ -223,7 +240,8 @@ func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw, nLow,
 			Coarse:  outModeFrom(md.Coarse),
 			Overall: outModeFrom(md.Overall),
 		},
-		Spectra: outSpectraFrom(sp),
+		SphereFraction: sf,
+		Spectra:        outSpectraFrom(sp),
 	}
 	out.Channels = make([]outChannel, len(ch))
 	for j := range ch {
@@ -252,6 +270,10 @@ func writeJSON(path string, sols *solutions, rGrid, nAvg, nAvgRaw, nLow,
 			Gamma:  jfloat(s.gamma),
 			Err:    jfloat(s.err),
 			C:      toJ(s.C),
+		}
+		if isFinite(s.sfrac) {
+			v := jfloat(s.sfrac)
+			out.BestSolutions[t].Sfrac = &v
 		}
 		if sols.method == methodMonotone {
 			// для монотонного метода C — это приращения объёма по бинам

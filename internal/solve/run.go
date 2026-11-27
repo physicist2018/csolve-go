@@ -241,6 +241,7 @@ func run(a *Args) error {
 			maxLogSpan:   a.LogSpan,
 			regOrder:     a.RegOrder,
 			kernelOrder:  a.KernelOrder,
+			sfrac:        st.sfrac,
 		})
 	if err != nil {
 		return err
@@ -282,7 +283,7 @@ func run(a *Args) error {
 
 	tPhase = nowSec()
 	prof, err := profileFinalize(a, baseCh, kts, mre, mim, sols, design.geom,
-		a.R0Min, r1MaxEff, ds, st.src, g1, depWl, depVal)
+		a.R0Min, r1MaxEff, ds, st.src, g1, depWl, depVal, st.mix)
 	if err != nil {
 		return err
 	}

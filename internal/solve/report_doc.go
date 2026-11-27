@@ -192,13 +192,29 @@ func writeReportDoc(a *Args, c *console, rep *reportCapture, prof *profile,
 		time.Now().Format("2006-01-02 15:04:05"), src)
 	params := appliedOptionLines(a)
 
+	var tables []docTable
+	if prof.sfracMix {
+		tables = append(tables, docTable{
+			Title:   "Доля сфер (смесь sphere + " + mixtureNonType(a) + ")",
+			Headers: []string{"величина", "значение"},
+			Rows: [][]string{
+				{"доля сфер по концентрации (среднее)", reportNum(prof.sfracNum)},
+				{"доля сфер по концентрации (диапазон)", reportNum(prof.sfracNumLow) +
+					" … " + reportNum(prof.sfracNumHigh)},
+				{"доля сфер по объёму (среднее)", reportNum(prof.sfracVol)},
+				{"доля сфер по объёму (диапазон)", reportNum(prof.sfracVolLow) +
+					" … " + reportNum(prof.sfracVolHigh)},
+			},
+		})
+	}
+
 	var err error
 	sections := []docImageSection{{Images: figures}}
 	if strings.EqualFold(filepath.Ext(path), ".odt") {
-		err = writeOdt(path, title, meta, params, rep.text(), nil, sections,
+		err = writeOdt(path, title, meta, params, rep.text(), tables, sections,
 			rep.warnings())
 	} else {
-		err = writeDocx(path, title, meta, params, rep.text(), nil, sections,
+		err = writeDocx(path, title, meta, params, rep.text(), tables, sections,
 			rep.warnings())
 	}
 	if err != nil {

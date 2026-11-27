@@ -18,6 +18,7 @@
 package solve
 
 import (
+	"fmt"
 	"math"
 	"strconv"
 )
@@ -40,13 +41,25 @@ func reportSummary(a *Args, sols *solutions, g1 []float64, ch []channel,
 	depWl, depVal, calcWl, calcDelta []float64, c *console) {
 	nch := len(ch)
 	G := a.bestCount(sols.n)
+	mix := a.isMixed()
 	c.printf("\n=== Solution ensemble (scan over m, r0, r1) ===\n")
 	if sols.method == methodMonotone {
-		c.printf("%4s %13s %6s %9s %9s %10s %9s\n",
-			"rank", "m", "bins", "r0, µm", "r1, µm", "gamma", "Err")
+		if mix {
+			c.printf("%4s %13s %6s %9s %9s %10s %9s %7s\n",
+				"rank", "m", "bins", "r0, µm", "r1, µm", "gamma", "Err", "sfrac")
+		} else {
+			c.printf("%4s %13s %6s %9s %9s %10s %9s\n",
+				"rank", "m", "bins", "r0, µm", "r1, µm", "gamma", "Err")
+		}
 	} else {
-		c.printf("%4s %13s %7s %9s %9s %10s %9s\n",
-			"rank", "m", "degree", "r0, µm", "r1, µm", "gamma", "Err")
+		if mix {
+			c.printf("%4s %13s %7s %9s %9s %10s %9s %7s\n",
+				"rank", "m", "degree", "r0, µm", "r1, µm", "gamma", "Err",
+				"sfrac")
+		} else {
+			c.printf("%4s %13s %7s %9s %9s %10s %9s\n",
+				"rank", "m", "degree", "r0, µm", "r1, µm", "gamma", "Err")
+		}
 	}
 	for t := 0; t < sols.n; t++ {
 		s := &sols.sol[t]
@@ -54,12 +67,16 @@ func reportSummary(a *Args, sols *solutions, g1 []float64, ch []channel,
 		if t == 0 {
 			mark = " <--"
 		}
+		sf := ""
+		if mix {
+			sf = fmt.Sprintf(" %7.3f", s.sfrac)
+		}
 		if sols.method == methodMonotone {
-			c.printf("%4d %6.3f%+7.3fj %6d %9.4g %9.4g %10.3g %9.5f%s\n",
-				t+1, s.mRe, s.mIm, s.bins, s.r0, s.r1, s.gamma, s.err, mark)
+			c.printf("%4d %6.3f%+7.3fj %6d %9.4g %9.4g %10.3g %9.5f%s%s\n",
+				t+1, s.mRe, s.mIm, s.bins, s.r0, s.r1, s.gamma, s.err, sf, mark)
 		} else {
-			c.printf("%4d %6.3f%+7.3fj %7d %9.4g %9.4g %10.3g %9.5f%s\n",
-				t+1, s.mRe, s.mIm, s.degree, s.r0, s.r1, s.gamma, s.err, mark)
+			c.printf("%4d %6.3f%+7.3fj %7d %9.4g %9.4g %10.3g %9.5f%s%s\n",
+				t+1, s.mRe, s.mIm, s.degree, s.r0, s.r1, s.gamma, s.err, sf, mark)
 		}
 		if t+1 >= G {
 			break
@@ -67,6 +84,13 @@ func reportSummary(a *Args, sols *solutions, g1 []float64, ch []channel,
 	}
 	c.printf("\nmean refractive index (over %d best): m = %.3f%+.3fj\n",
 		G, mAvgRe, mAvgIm)
+	if mix {
+		c.printf("sphere fraction sfrac (over %d best): mean %.3f, "+
+			"range %.3f..%.3f (concentration) -> volume %.3f..%.3f\n", G,
+			meanSfracOf(sols, G), sfracRange(sols, G, true),
+			sfracRange(sols, G, false), volumeFraction(sfracRange(sols, G, true)),
+			volumeFraction(sfracRange(sols, G, false)))
+	}
 
 	c.printf("\n=== Distribution function (dV/dln r) over the best solutions ===\n")
 	c.printf("key points (full grid — in --json, if requested):\n")

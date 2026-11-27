@@ -431,7 +431,7 @@ func depolPenaltyVector(sols *solutions, p *depolProj, mre, mim,
 		if s.id < 0 || s.id >= len(pen) {
 			continue
 		}
-		im := mIndex(mre, mim, s.mRe, s.mIm)
+		im := s.mIdx
 		dev := depolDeviation(p, im, s.geomIndex, s.C, targets)
 		if isFinite(dev) {
 			pen[s.id] = w * dev
