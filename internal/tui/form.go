@@ -97,6 +97,7 @@ func runFullForm(s *state) error {
 		batchFileGroup(s),
 		demoGroup(s),
 		tablesGroup(s),
+		mixtureGroup(s),
 		gridGroup(s),
 		regularizationGroup(s),
 		constraintsGroup(s),
@@ -281,6 +282,44 @@ func tablesGroup(s *state) *huh.Group {
 				huh.NewOption("4pi", "4pi"),
 			).
 			Value(&s.tableCback),
+	)
+}
+
+// mixtureGroup — параметры смеси sphere+X (доля сфер). Применяются только при
+// --type sphere+spheroid / sphere+agglomerate; для остальных наборов
+// игнорируются (значения по умолчанию не передаются).
+func mixtureGroup(s *state) *huh.Group {
+	desc := func(base string) func() string {
+		return func() string {
+			if !strings.Contains(s.builtinType, "+") {
+				return "Applies only to --type sphere+spheroid / sphere+agglomerate (ignored now)."
+			}
+			return base
+		}
+	}
+	return page("Sphere/nonsphere mixture",
+		"Fraction of spherical particles; used with --type sphere+spheroid / sphere+agglomerate.",
+		huh.NewInput().
+			Title("Fixed sphere fraction sfrac (empty = scan)").
+			DescriptionFunc(desc("--sphere-frac: fix sfrac (0..1) instead of scanning."), &s.builtinType).
+			Placeholder("e.g. 0.5").
+			Value(&s.sphereFrac).
+			Validate(vFractionEmpty()),
+		huh.NewInput().
+			Title("Scan min sfrac").
+			DescriptionFunc(desc("--sfrac-min: lower bound of the scan (0..1)."), &s.builtinType).
+			Value(&s.sfracMin).
+			Validate(vFraction()),
+		huh.NewInput().
+			Title("Scan max sfrac").
+			DescriptionFunc(desc("--sfrac-max: upper bound of the scan (0..1)."), &s.builtinType).
+			Value(&s.sfracMax).
+			Validate(vFraction()),
+		huh.NewInput().
+			Title("Scan points").
+			DescriptionFunc(desc("--n-sfrac: number of scanned sfrac values (>= 1)."), &s.builtinType).
+			Value(&s.nSfrac).
+			Validate(vIntMin(1)),
 	)
 }
 
@@ -770,6 +809,30 @@ func vFloatNonNeg() func(string) error {
 			return errors.New("must be ≥ 0")
 		}
 		return nil
+	}
+}
+
+// vFraction — число в диапазоне 0..1.
+func vFraction() func(string) error {
+	return func(v string) error {
+		f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			return errors.New("expected a number")
+		}
+		if f < 0 || f > 1 {
+			return errors.New("must be between 0 and 1")
+		}
+		return nil
+	}
+}
+
+// vFractionEmpty — пустое значение или число 0..1.
+func vFractionEmpty() func(string) error {
+	return func(v string) error {
+		if strings.TrimSpace(v) == "" {
+			return nil
+		}
+		return vFraction()(v)
 	}
 }
 

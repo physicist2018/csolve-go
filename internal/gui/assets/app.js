@@ -278,7 +278,7 @@ function renderTables() {
     if (state.tables_kind === kind) o.selected = true;
     sel.appendChild(o);
   }
-  sel.addEventListener('change', () => { state.tables_kind = sel.value; renderTables(); runValidate(); });
+  sel.addEventListener('change', () => { state.tables_kind = sel.value; renderTables(); applyVisibility(); runValidate(); });
   field.appendChild(sel);
   c.appendChild(field);
 
@@ -292,7 +292,7 @@ function renderTables() {
       if (state.builtin_type === tt) o.selected = true;
       tsel.appendChild(o);
     }
-    tsel.addEventListener('change', () => { state.builtin_type = tsel.value; });
+    tsel.addEventListener('change', () => { state.builtin_type = tsel.value; applyVisibility(); runValidate(); });
     f2.appendChild(tsel);
     c.appendChild(f2);
   } else {
@@ -424,6 +424,7 @@ function isVisible(f) {
     let got = null;
     if (k === 'mode') got = state.mode;
     else if (k === 'tables_kind') got = state.tables_kind;
+    else if (k === 'builtin_type') got = state.builtin_type;
     else got = String(state.options[k]);
     if (!wants.includes(got)) return false;
   }

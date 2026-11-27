@@ -131,8 +131,18 @@ func (b *argBuilder) tables(req *Request) error {
 // options — опции формы, отличающиеся от значений по умолчанию.
 func (b *argBuilder) options(req *Request) error {
 	defs := defaultValues()
+	effType := strings.TrimSpace(req.BuiltinType)
+	if effType == "" {
+		effType = defaultTableType()
+	}
+	mixOK := req.TablesKind != "external" && isMixtureType(effType)
 	for key, raw := range req.Options {
 		if raw == nil {
+			continue
+		}
+		if isMixtureOption(key) && !mixOK {
+			// поля смеси скрыты вне режима sphere+X — не передаём их,
+			// чтобы не ломать несовместимый запуск
 			continue
 		}
 		f := fieldByKey(key)
@@ -186,6 +196,18 @@ func (b *argBuilder) options(req *Request) error {
 		}
 	}
 	return nil
+}
+
+// isMixtureType — является ли значение --type составным (sphere+X).
+func isMixtureType(t string) bool { return strings.Contains(t, "+") }
+
+// isMixtureOption — ключ относится только к режиму смеси.
+func isMixtureOption(key string) bool {
+	switch key {
+	case "sphere-frac", "sfrac-min", "sfrac-max", "n-sfrac":
+		return true
+	}
+	return false
 }
 
 // numEqual — равно ли строковое значение числу по умолчанию.
@@ -310,6 +332,8 @@ func rawString(v any) (string, error) {
 	switch x := v.(type) {
 	case string:
 		return strings.TrimSpace(x), nil
+	case int:
+		return strconv.Itoa(x), nil
 	case float64:
 		// целочисленные значения без экспоненты и точки
 		if x == math.Trunc(x) && math.Abs(x) < 1e15 {

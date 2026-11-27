@@ -52,6 +52,12 @@ type state struct {
 	tableRefWl       string
 	tableCback       string
 
+	// Смесь sphere+X: фиксированная доля сфер и сетка её сканирования.
+	sphereFrac string
+	sfracMin   string
+	sfracMax   string
+	nSfrac     string
+
 	method      string
 	degree      int
 	nBasis      string
@@ -138,6 +144,10 @@ func (s *state) reset() {
 	if d.TableCback4pi {
 		s.tableCback = "4pi"
 	}
+	s.sphereFrac = ""
+	s.sfracMin = formatFloat(d.SFracMin)
+	s.sfracMax = formatFloat(d.SFracMax)
+	s.nSfrac = strconv.Itoa(d.NSfrac)
 
 	s.method = string(d.Method)
 	s.degree = 1
@@ -227,6 +237,7 @@ func (s *state) bindings() []any {
 		&s.mode, &s.dataPath, &s.batchPath,
 		&s.tablesKind, &s.builtinType, &s.tablesDir, &s.tableExtrapolate,
 		&s.tableRefWl, &s.tableCback,
+		&s.sphereFrac, &s.sfracMin, &s.sfracMax, &s.nSfrac,
 		&s.degree, &s.nBasis, &s.method, &s.vBins, &s.regOrder,
 		&s.kernelOrder,
 		&s.r0Min, &s.r0Max, &s.nr0, &s.r1Min, &s.r1Max, &s.nr1,

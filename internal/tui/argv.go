@@ -45,6 +45,7 @@ func buildArgv(s *state) ([]string, *solve.Args, error) {
 	if err := b.tables(s, d); err != nil {
 		return nil, nil, err
 	}
+	b.mixture(s, d)
 	b.grid(s, d)
 	b.regularization(s, d)
 	b.depolarization(s, d)
@@ -101,6 +102,26 @@ func (b *argvBuilder) tables(s *state, d *solve.Args) error {
 		b.add("--table-cback", "4pi")
 	}
 	return nil
+}
+
+// mixture — параметры смеси sphere+X (доля сфер). Передаются только для
+// встроенных составных типов; вне смеси скрыты и не влияют на запуск.
+func (b *argvBuilder) mixture(s *state, d *solve.Args) {
+	if s.tablesKind != tablesBuiltin || !strings.Contains(s.builtinType, "+") {
+		return
+	}
+	if v := strings.TrimSpace(s.sphereFrac); v != "" {
+		b.add("--sphere-frac", v)
+	}
+	if changedFloat(s.sfracMin, d.SFracMin) {
+		b.add("--sfrac-min", s.sfracMin)
+	}
+	if changedFloat(s.sfracMax, d.SFracMax) {
+		b.add("--sfrac-max", s.sfracMax)
+	}
+	if changedInt(s.nSfrac, d.NSfrac) {
+		b.add("--n-sfrac", s.nSfrac)
+	}
 }
 
 // grid — метод восстановления, базис/бины, сетка окон и число усредняемых
@@ -352,6 +373,9 @@ func describeOutputs(s *state, a *solve.Args) string {
 		b.WriteString("  dist_<H>.txt, moments.txt, refractive.txt, errors.txt, delpol.txt")
 		if a.LidarRatioCons {
 			b.WriteString(", lidar_ratios.txt")
+		}
+		if strings.Contains(a.Type, "+") {
+			b.WriteString(", sphere_fraction.txt")
 		}
 		b.WriteString("\n  plots: plot_<H>.<ext> and summary profiles")
 		return b.String()
