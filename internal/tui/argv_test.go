@@ -19,6 +19,7 @@ package tui
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -346,14 +347,19 @@ func TestJobsFlag(t *testing.T) {
 		t.Errorf("Jobs = %d, want default %d", a.Jobs, s.def.Jobs)
 	}
 
-	// изменённое значение передаётся
-	s.jobs = "3"
+	// изменённое значение передаётся; выбираем число, заведомо отличное от
+	// дефолта (он зависит от числа CPU на машине)
+	want := 3
+	if s.def.Jobs == want {
+		want = 2
+	}
+	s.jobs = strconv.Itoa(want)
 	argv, a, err = buildArgv(s)
 	if err != nil {
-		t.Fatalf("jobs=3: %v", err)
+		t.Fatalf("jobs=%d: %v", want, err)
 	}
-	if a.Jobs != 3 {
-		t.Errorf("Jobs = %d, want 3", a.Jobs)
+	if a.Jobs != want {
+		t.Errorf("Jobs = %d, want %d", a.Jobs, want)
 	}
 	if !contains(argv, "--jobs") {
 		t.Errorf("argv is missing --jobs: %v", argv)

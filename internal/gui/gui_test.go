@@ -442,19 +442,25 @@ func TestJobsField(t *testing.T) {
 	if _, ok := v.(int); !ok {
 		t.Fatalf("jobs default type = %T, want int", v)
 	}
+	def := v.(int)
+	// значение должно отличаться от дефолта (он зависит от числа CPU)
+	want := 2
+	if def == want {
+		want = 3
+	}
 
 	req := &Request{
 		Mode:        "demo",
 		TablesKind:  "builtin",
 		BuiltinType: defaultTableType(),
-		Options:     map[string]any{"jobs": 2},
+		Options:     map[string]any{"jobs": want},
 	}
 	argv, a, err := buildArgv(req, t.TempDir())
 	if err != nil {
 		t.Fatalf("buildArgv: %v", err)
 	}
-	if a.Jobs != 2 {
-		t.Errorf("Jobs = %d, want 2", a.Jobs)
+	if a.Jobs != want {
+		t.Errorf("Jobs = %d, want %d", a.Jobs, want)
 	}
 	found := false
 	for _, arg := range argv {
