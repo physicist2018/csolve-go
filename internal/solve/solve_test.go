@@ -1287,6 +1287,7 @@ func TestInternalPlotSmoke(t *testing.T) {
 			high:     []float64{1.1e-4, 1e-4, 8e-5, 6e-5, 4e-5},
 			meas:     []wlPoint{{wlNm: 355, value: 1.05e-4}},
 			measName: "measured α",
+			computed: []wlPoint{{wlNm: 1064, value: 3e-5}},
 		},
 		lidar: &spectrumSet{
 			curves:   [][]float64{{12, 13, 14, 15, 16}},
@@ -1311,6 +1312,7 @@ func TestInternalPlotSmoke(t *testing.T) {
 			high:     []float64{11, 12, 13, 14, 15},
 			meas:     []wlPoint{{wlNm: 355, value: 10.5}},
 			measName: "measured δ_l",
+			computed: []wlPoint{{wlNm: 532, value: 12}, {wlNm: 1064, value: 14}},
 		},
 	}
 	for _, np := range sp.namedPanels() {
@@ -1335,8 +1337,8 @@ func TestInternalPlotSmoke(t *testing.T) {
 
 	p = filepath.Join(dir, "profile.pdf")
 	if !plotProfile(po, p, rGrid, []float64{1, 2, 3, 2, 1}, nLow, nHigh,
-		vCum, ch, []float64{0.9, 0.8, 0.7}, []float64{0.85, 0.82, 0.72},
-		500, len(nBest)) {
+		vCum, nBest, len(nBest), ch, []float64{0.9, 0.8, 0.7},
+		[]float64{0.85, 0.82, 0.72}, 500) {
 		t.Fatalf("internal single profile plot failed")
 	}
 	checkPDF(t, p)

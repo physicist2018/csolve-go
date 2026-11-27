@@ -363,7 +363,7 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 			fontSize: a.PlotFontSize, backend: a.Plotting, con: c,
 			bestLimit: a.PlotBestLimit}
 		plotProfile(&po, profilePath, prof.rGrid, prof.nAvg, prof.nLow, prof.nHigh,
-			prof.vCum, solveCh, g1, prof.gFit, h, prof.nBestCount)
+			prof.vCum, prof.nBest, prof.nBestCount, solveCh, g1, prof.gFit, h)
 		if prof.spectra != nil {
 			plotSpectraPanels(&po, spectrumPath, prof.spectra, h)
 		}
@@ -374,13 +374,13 @@ func emitProfile(a *Args, outDir string, h float64, b *batchInput,
 		if bts, ok := reportPNG(a, c, profilePath,
 			func(po *plotOpts) ([]byte, bool) {
 				return internalProfilePNG(po, prof.rGrid, prof.nAvg,
-					prof.nLow, prof.nHigh, prof.vCum, solveCh, g1,
-					prof.gFit, h, prof.nBestCount)
+					prof.nLow, prof.nHigh, prof.vCum, prof.nBest,
+					prof.nBestCount, solveCh, g1, prof.gFit, h)
 			},
 			func(po *plotOpts, path string) bool {
 				return plotProfile(po, path, prof.rGrid, prof.nAvg,
-					prof.nLow, prof.nHigh, prof.vCum, solveCh, g1,
-					prof.gFit, h, prof.nBestCount)
+					prof.nLow, prof.nHigh, prof.vCum, prof.nBest,
+					prof.nBestCount, solveCh, g1, prof.gFit, h)
 			}); ok {
 			profPNG = bts
 		}

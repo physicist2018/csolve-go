@@ -37,9 +37,11 @@ func gnuplotOK(outPath, script string) bool {
 }
 
 // gnuplotProfile — компактный график одной высоты пакетного режима (3 панели).
+// nBest — кривые лучших решений (до --plot-best-limit); nBestCount — полное
+// число лучших решений (для подписи огибающих).
 func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg, nLow, nHigh,
-	vCum []float64, ch []channel, g1, gFit []float64, h float64,
-	gBest int) bool {
+	vCum []float64, nBest [][]float64, nBestCount int, ch []channel,
+	g1, gFit []float64, h float64) bool {
 	dir, ok := po.tempDir()
 	if !ok {
 		return false
@@ -47,6 +49,11 @@ func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg, nLow, nHigh,
 	pProf := filepath.Join(dir, "prof.dat")
 	pBars := filepath.Join(dir, "bars.dat")
 	pScript := filepath.Join(dir, "plot.gp")
+
+	ns := plotCurves(nBestCount, po.curveLimit())
+	if ns > len(nBest) {
+		ns = len(nBest)
+	}
 
 	var prof strings.Builder
 	for i := range rGrid {
@@ -91,6 +98,18 @@ func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg, nLow, nHigh,
 		} else {
 			prof.WriteString("NaN")
 		}
+		for t := 0; t < ns; t++ {
+			prof.WriteByte(' ')
+			bv := math.NaN()
+			if i < len(nBest[t]) {
+				bv = nBest[t][i] / cm3PerM3
+			}
+			if isFinite(bv) {
+				prof.WriteString(formatG17(bv))
+			} else {
+				prof.WriteString("NaN")
+			}
+		}
 		prof.WriteByte('\n')
 	}
 	po.writeDataFile(pProf, prof.String())
@@ -108,13 +127,27 @@ func gnuplotProfile(po *plotOpts, outPath string, rGrid, nAvg, nLow, nHigh,
 	fmt.Fprintf(&sb, "set xlabel 'r, µm'%s\n", fa)
 	fmt.Fprintf(&sb, "set ylabel 'dV/dln r, µm³/cm³'%s\n", fa)
 	sb.WriteString("set grid\n")
-	loLabel, hiLabel := envelopeLegend(gBest)
+	loLabel, hiLabel := envelopeLegend(nBestCount)
 	fmt.Fprintf(&sb, "set key top right%s\n", fa)
-	fmt.Fprintf(&sb, "plot %q using 1:4 with lines dt 2 lw 1.4 "+
-		"lc rgb '#d62728' title '%s', \\\n"+
-		"     '' using 1:5 with lines dt 2 lw 1.4 lc rgb '#d62728' title '%s', \\\n"+
-		"     '' using 1:2 with lines lw 2 lc rgb '#1f77b4' title 'mean'\n",
-		gpPath(pProf), loLabel, hiLabel)
+	parts := make([]string, 0, ns+3)
+	for t := 0; t < ns; t++ {
+		title := "notitle"
+		if t == 0 {
+			title = "title 'individual solutions'"
+		}
+		parts = append(parts, fmt.Sprintf("%q using 1:%d with lines lw 1 "+
+			"lc rgb '#bbbbbb' %s", gpPath(pProf), 6+t, title))
+	}
+	parts = append(parts,
+		fmt.Sprintf("%q using 1:4 with lines dt 2 lw 1.4 "+
+			"lc rgb '#d62728' title '%s'", gpPath(pProf), loLabel),
+		fmt.Sprintf("%q using 1:5 with lines dt 2 lw 1.4 "+
+			"lc rgb '#d62728' title '%s'", gpPath(pProf), hiLabel),
+		fmt.Sprintf("%q using 1:2 with lines lw 2 "+
+			"lc rgb '#1f77b4' title 'mean'", gpPath(pProf)))
+	sb.WriteString("plot ")
+	sb.WriteString(strings.Join(parts, ", \\\n     "))
+	sb.WriteByte('\n')
 	fmt.Fprintf(&sb, "set ylabel 'V, µm³/cm³'%s\n", fa)
 	fmt.Fprintf(&sb, "plot %q using 1:3 with lines lw 2 lc rgb '#2ca02c' "+
 		"notitle\n", gpPath(pProf))
@@ -469,8 +502,15 @@ func gnuplotSpectrumFigure(po *plotOpts, outPath string, panels []spectrumPanel,
 		hIn += legendH
 	}
 	keySlot := -1
+	anyMeas, anyComputed := false, false
 	if multi {
 		for _, pn := range panels {
+			if len(pn.set.meas) > 0 {
+				anyMeas = true
+			}
+			if len(pn.set.computed) > 0 {
+				anyComputed = true
+			}
 			if len(pn.set.meas) > 0 &&
 				(keySlot < 0 || pn.slot < keySlot) {
 				keySlot = pn.slot
@@ -505,7 +545,18 @@ func gnuplotSpectrumFigure(po *plotOpts, outPath string, panels []spectrumPanel,
 			"spacing %.4f,%.4f\n", rows, left, right, bottom, 1-strip, sx, sy)
 	}
 
-	files := make([]string, 0, 2*len(panels)+1)
+	files := make([]string, 0, 3*len(panels)+1)
+	// legendPath — служебный файл без данных: даёт gnuplot запись в ключе,
+	// когда нужная серия нарисована только на другой панели.
+	legendPath := ""
+	ensureLegend := func() string {
+		if legendPath == "" {
+			legendPath = filepath.Join(dir, "legend.dat")
+			po.writeDataFile(legendPath, "NaN NaN\n")
+			files = append(files, legendPath)
+		}
+		return legendPath
+	}
 	writePanel := func(idx int, pn spectrumPanel) {
 		dataPath := filepath.Join(dir, fmt.Sprintf("spec_%d.dat", idx))
 		files = append(files, dataPath)
@@ -554,6 +605,18 @@ func gnuplotSpectrumFigure(po *plotOpts, outPath string, panels []spectrumPanel,
 			po.writeDataFile(measPath, mb.String())
 		}
 
+		compPath := ""
+		if len(pn.set.computed) > 0 {
+			compPath = filepath.Join(dir, fmt.Sprintf("comp_%d.dat", idx))
+			files = append(files, compPath)
+			var cb strings.Builder
+			for _, m := range pn.set.computed {
+				fmt.Fprintf(&cb, "%s %s\n", formatG17(m.wlNm),
+					formatG17(m.value))
+			}
+			po.writeDataFile(compPath, cb.String())
+		}
+
 		fmt.Fprintf(&sb, "set title '%s'\n", pn.title)
 		fmt.Fprintf(&sb, "set xlabel 'λ, nm'%s\n", fa)
 		fmt.Fprintf(&sb, "set ylabel '%s'%s\n", pn.ylabel, fa)
@@ -600,6 +663,19 @@ func gnuplotSpectrumFigure(po *plotOpts, outPath string, panels []spectrumPanel,
 			parts = append(parts, fmt.Sprintf("%q using 1:2 with points "+
 				"pt 7 ps 1.1 lc rgb 'black' title '%s'", gpPath(measPath),
 				measName))
+		} else if multi && idx == keySlot && anyMeas {
+			parts = append(parts, fmt.Sprintf("%q using 1:2 with points "+
+				"pt 7 ps 1.1 lc rgb 'black' title 'measured'",
+				gpPath(ensureLegend())))
+		}
+		if compPath != "" {
+			parts = append(parts, fmt.Sprintf("%q using 1:2 with points "+
+				"pt 6 ps 1.1 lc rgb 'black' title '%s'", gpPath(compPath),
+				spectrumComputedLegend))
+		} else if multi && idx == keySlot && anyComputed {
+			parts = append(parts, fmt.Sprintf("%q using 1:2 with points "+
+				"pt 6 ps 1.1 lc rgb 'black' title '%s'",
+				gpPath(ensureLegend()), spectrumComputedLegend))
 		}
 		sb.WriteString("plot ")
 		sb.WriteString(strings.Join(parts, ", \\\n     "))

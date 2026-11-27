@@ -110,15 +110,17 @@ func plotFormatExt(f plotFormat) string {
 }
 
 // plotProfile — компактный график одной высоты пакетного режима (3 панели).
+// nBest — кривые лучших решений (до --plot-best-limit); nBestCount — полное
+// число лучших решений (для подписи огибающих).
 func plotProfile(po *plotOpts, outPath string, rGrid, nAvg, nLow, nHigh,
-	vCum []float64, ch []channel, g1, gFit []float64, h float64,
-	gBest int) bool {
+	vCum []float64, nBest [][]float64, nBestCount int, ch []channel,
+	g1, gFit []float64, h float64) bool {
 	if po != nil && po.backend == plottingInternal {
-		return internalProfile(po, outPath, rGrid, nAvg, nLow, nHigh, vCum, ch,
-			g1, gFit, h, gBest)
+		return internalProfile(po, outPath, rGrid, nAvg, nLow, nHigh, vCum,
+			nBest, nBestCount, ch, g1, gFit, h)
 	}
-	return gnuplotProfile(po, outPath, rGrid, nAvg, nLow, nHigh, vCum, ch, g1,
-		gFit, h, gBest)
+	return gnuplotProfile(po, outPath, rGrid, nAvg, nLow, nHigh, vCum, nBest,
+		nBestCount, ch, g1, gFit, h)
 }
 
 // envelopeLegend — подписи огибающих с числом лучших решений (g <= 0 —

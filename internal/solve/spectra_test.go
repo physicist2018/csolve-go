@@ -185,6 +185,90 @@ func TestSpectraInvariants(t *testing.T) {
 	}
 }
 
+// checkPointWls сверяет длины волн точек с ожидаемыми.
+func checkPointWls(t *testing.T, name string, got []wlPoint, want []float64) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Errorf("%s: computed points = %v, want wavelengths %v", name, got,
+			want)
+		return
+	}
+	for i := range want {
+		if !sameWavelength(got[i].wlNm, want[i]) {
+			t.Errorf("%s: computed[%d].wl = %g nm, want %g nm", name, i,
+				got[i].wlNm, want[i])
+		}
+	}
+}
+
+// TestInputWavelengthsNm — объединение, дедупликация и сортировка длин волн
+// входных данных (каналы + измеренная δ_l).
+func TestInputWavelengthsNm(t *testing.T) {
+	ch := []channel{{kind: chBeta, wlUm: 0.355}, {kind: chBeta, wlUm: 0.532},
+		{kind: chBeta, wlUm: 1.064}}
+	got := inputWavelengthsNm(ch, []float64{0.532, 0.355, 0.532})
+	want := []float64{355, 532, 1064}
+	if len(got) != len(want) {
+		t.Fatalf("inputWavelengthsNm = %v, want %v", got, want)
+	}
+	for i := range want {
+		if !sameWavelength(got[i], want[i]) {
+			t.Errorf("inputWavelengthsNm[%d] = %g, want %g", i, got[i], want[i])
+		}
+	}
+}
+
+// TestMissingSpectrumPoints — расчётные точки только там, где нет измерения;
+// значения берутся из средней кривой.
+func TestMissingSpectrumPoints(t *testing.T) {
+	grid := []float64{355, 532, 1064}
+	set := &spectrumSet{mean: []float64{1, 2, 3},
+		meas: []wlPoint{{wlNm: 532, value: 2.1}}}
+	got := missingSpectrumPoints([]float64{355, 532, 1064}, grid, set)
+	checkPointWls(t, "alpha", got, []float64{355, 1064})
+	for i, want := range []float64{1, 3} {
+		if i < len(got) {
+			checkClose(t, fmt.Sprintf("computed[%d]", i), got[i].value, want, 1e-12)
+		}
+	}
+}
+
+// TestSpectraComputedPoints — полые маркеры ставятся в λ входных данных без
+// измерения: α (beta@355, alpha@532) и S, δ_l при отсутствии S11/S22.
+func TestSpectraComputedPoints(t *testing.T) {
+	src := testSpectrumSource(t, testX2Table(t))
+	g := testBinGeom(t, 0.1, 4)
+	geoms := []*geom{g}
+	sols := &solutions{n: 2, method: methodMonotone, kernelOrder: 3,
+		sol: []solution{
+			{mRe: 1.5, mIm: -0.001, r0: 0.1, r1: 1.0, geomIndex: 0,
+				C: []float64{1e-6, 2e-6, 1e-6, 3e-6}},
+			{mRe: 1.5, mIm: -0.001, r0: 0.1, r1: 1.0, geomIndex: 0,
+				C: []float64{2e-6, 1e-6, 3e-6, 1e-6}},
+		}}
+	ch := []channel{{kind: chBeta, wlUm: 0.355}, {kind: chAlpha, wlUm: 0.532}}
+	g1 := []float64{1e-6, 1e-5}
+	a := &Args{Spectra: true, SpectrumPoints: 6, Best: 2,
+		KernelOrder: 3, TableRefWl: tableRefWlUm}
+	rq, wq := quadratureGrid([]float64{0.1, 1.0}, 24, 0.1)
+
+	sp := buildSpectra(a, sols, geoms, rq, wq, nil, src, ch, g1, nil, nil)
+	if sp == nil {
+		t.Fatal("spectra must be built")
+	}
+	// входные λ: {355, 532}
+	checkPointWls(t, "alpha", sp.alpha.computed, []float64{355})
+	checkPointWls(t, "beta", sp.beta.computed, []float64{532})
+	checkPointWls(t, "lidar", sp.lidar.computed, []float64{355, 532})
+	checkPointWls(t, "delta", sp.delta.computed, nil)
+	for _, p := range append(append([]wlPoint{}, sp.alpha.computed...),
+		sp.beta.computed...) {
+		if !isFinite(p.value) {
+			t.Errorf("computed value at %g nm must be finite", p.wlNm)
+		}
+	}
+}
+
 // TestSpectrumPanelSlots — панели привязаны к фиксированным ячейкам 2×2:
 // α (0,0), β (0,1), S (1,0), δ_l (1,1), даже если часть панелей отсутствует.
 func TestSpectrumPanelSlots(t *testing.T) {

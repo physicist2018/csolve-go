@@ -528,10 +528,28 @@ func internalPanelDataWidth(w vg.Length, cols int) vg.Length {
 // internalProfileDraw — отрисовка компактного графика одной высоты
 // пакетного режима (общая для файла и PNG-байтов отчёта).
 func internalProfileDraw(po *plotOpts, rGrid, nAvg, nLow, nHigh,
-	vCum []float64, ch []channel, g1, gFit []float64, h float64,
-	gBest int) (func(draw.Canvas), bool) {
+	vCum []float64, nBest [][]float64, nBestCount int, ch []channel,
+	g1, gFit []float64, h float64) (func(draw.Canvas), bool) {
 	if len(rGrid) == 0 || len(nAvg) == 0 {
 		return nil, false
+	}
+	scale := func(v []float64) []float64 {
+		out := make([]float64, len(v))
+		for i := range v {
+			out[i] = v[i] / cm3PerM3
+			if !isFinite(out[i]) {
+				out[i] = math.NaN()
+			}
+		}
+		return out
+	}
+	ns := plotCurves(nBestCount, po.curveLimit())
+	if ns > len(nBest) {
+		ns = len(nBest)
+	}
+	sols := make([][]float64, ns)
+	for t := 0; t < ns; t++ {
+		sols[t] = scale(nBest[t])
 	}
 	dv := make([]float64, len(rGrid))
 	for i := range rGrid {
@@ -578,11 +596,20 @@ func internalProfileDraw(po *plotOpts, rGrid, nAvg, nLow, nHigh,
 		p1.Y.Label.Text = internalLabel("dV/dln r, µm³/cm³")
 		p1.X.Scale = plot.LogScale{}
 		p1.X.Tick.Marker = plot.LogTicks{}
-		if xLo, xHi, yLo, yHi, ok := internalRanges(rGrid, true, dv, lo, hi); ok {
+		all := make([][]float64, 0, len(sols)+3)
+		all = append(all, dv)
+		all = append(all, sols...)
+		all = append(all, lo, hi)
+		if xLo, xHi, yLo, yHi, ok := internalRanges(rGrid, true, all...); ok {
 			p1.X.Min, p1.X.Max = xLo, xHi
 			p1.Y.Min, p1.Y.Max = yLo, yHi
 		}
-		loLabel, hiLabel := envelopeLegend(gBest)
+		gray := color.Gray{Y: 0xbb}
+		for t := 0; t < ns; t++ {
+			internalAddSeries(p1, rGrid, sols[t], gray, vg.Points(1), false,
+				nil, false, "", false)
+		}
+		loLabel, hiLabel := envelopeLegend(nBestCount)
 		internalAddSeries(p1, rGrid, lo, internalColor(1), vg.Points(1.4),
 			false, nil, true, loLabel, true)
 		internalAddSeries(p1, rGrid, hi, internalColor(1), vg.Points(1.4),
@@ -617,10 +644,10 @@ func internalProfileDraw(po *plotOpts, rGrid, nAvg, nLow, nHigh,
 
 // internalProfile — компактный график одной высоты пакетного режима.
 func internalProfile(po *plotOpts, outPath string, rGrid, nAvg, nLow, nHigh,
-	vCum []float64, ch []channel, g1, gFit []float64, h float64,
-	gBest int) bool {
-	drawFn, ok := internalProfileDraw(po, rGrid, nAvg, nLow, nHigh, vCum, ch,
-		g1, gFit, h, gBest)
+	vCum []float64, nBest [][]float64, nBestCount int, ch []channel,
+	g1, gFit []float64, h float64) bool {
+	drawFn, ok := internalProfileDraw(po, rGrid, nAvg, nLow, nHigh, vCum, nBest,
+		nBestCount, ch, g1, gFit, h)
 	if !ok {
 		return false
 	}
@@ -629,9 +656,10 @@ func internalProfile(po *plotOpts, outPath string, rGrid, nAvg, nLow, nHigh,
 
 // internalProfilePNG — тот же график в PNG (для встраивания в отчёт).
 func internalProfilePNG(po *plotOpts, rGrid, nAvg, nLow, nHigh, vCum []float64,
-	ch []channel, g1, gFit []float64, h float64, gBest int) ([]byte, bool) {
-	drawFn, ok := internalProfileDraw(po, rGrid, nAvg, nLow, nHigh, vCum, ch,
-		g1, gFit, h, gBest)
+	nBest [][]float64, nBestCount int, ch []channel, g1, gFit []float64,
+	h float64) ([]byte, bool) {
+	drawFn, ok := internalProfileDraw(po, rGrid, nAvg, nLow, nHigh, vCum, nBest,
+		nBestCount, ch, g1, gFit, h)
 	if !ok {
 		return nil, false
 	}
@@ -871,8 +899,9 @@ func internalResultsDraw(po *plotOpts, rGrid []float64,
 }
 
 // internalSpectrumPlot — панель «величина vs длина волны»: тонкие серые
-// кривые индивидуальных решений, огибающие (штриховые), среднее и измеренные
-// точки. withLegend управляет повтором легенды внутри панели.
+// кривые индивидуальных решений, огибающие (штриховые), среднее, измеренные
+// точки (заполненные круги) и расчёт в длинах волн без измерения (полые
+// круги). withLegend управляет повтором легенды внутри панели.
 func internalSpectrumPlot(po *plotOpts, pn spectrumPanel, withLegend bool) *plot.Plot {
 	p := internalNewPlot(po)
 	p.Title.Text = internalLabel(pn.title)
@@ -888,6 +917,13 @@ func internalSpectrumPlot(po *plotOpts, pn spectrumPanel, withLegend bool) *plot
 	if len(pn.set.meas) > 0 {
 		ys := make([]float64, len(pn.set.meas))
 		for i, m := range pn.set.meas {
+			ys[i] = m.value
+		}
+		all = append(all, ys)
+	}
+	if len(pn.set.computed) > 0 {
+		ys := make([]float64, len(pn.set.computed))
+		for i, m := range pn.set.computed {
 			ys[i] = m.value
 		}
 		all = append(all, ys)
@@ -920,14 +956,27 @@ func internalSpectrumPlot(po *plotOpts, pn spectrumPanel, withLegend bool) *plot
 		if withLegend {
 			measName = pn.set.measName
 		}
-		internalAddPoints(p, xs, ys, color.Black, draw.RingGlyph{}, measName)
+		internalAddPoints(p, xs, ys, color.Black, draw.CircleGlyph{}, measName)
+	}
+	if len(pn.set.computed) > 0 {
+		xs := make([]float64, len(pn.set.computed))
+		ys := make([]float64, len(pn.set.computed))
+		for i, m := range pn.set.computed {
+			xs[i], ys[i] = m.wlNm, m.value
+		}
+		compName := ""
+		if withLegend {
+			compName = spectrumComputedLegend
+		}
+		internalAddPoints(p, xs, ys, color.Black, draw.RingGlyph{}, compName)
 	}
 	return p
 }
 
 // internalDrawSpectrumLegend — одна общая горизонтальная легенда для сетки
-// панелей. hasMeas управляет строкой «measured».
-func internalDrawSpectrumLegend(c draw.Canvas, po *plotOpts, hasMeas bool) {
+// панелей. hasMeas/hasComputed управляют строками «measured» и «computed».
+func internalDrawSpectrumLegend(c draw.Canvas, po *plotOpts, hasMeas,
+	hasComputed bool) {
 	fs := internalFontPt - 1
 	if po != nil && po.fontSize > 0 {
 		fs = math.Max(po.fontSize-1, 4)
@@ -944,16 +993,21 @@ func internalDrawSpectrumLegend(c draw.Canvas, po *plotOpts, hasMeas bool) {
 		clr    color.Color
 		width  vg.Length
 		dashed bool
-		glyph  bool
+		shape  draw.GlyphDrawer // nil — линия
 	}
 	entries := []entry{
-		{"individual solutions", color.Gray{Y: 0xbb}, vg.Points(0.8), false, false},
-		{"lower envelope", internalColor(1), vg.Points(1.6), true, false},
-		{"upper envelope", internalColor(1), vg.Points(1.6), true, false},
-		{"mean of best solutions", internalColor(0), vg.Points(2.4), false, false},
+		{"individual solutions", color.Gray{Y: 0xbb}, vg.Points(0.8), false, nil},
+		{"lower envelope", internalColor(1), vg.Points(1.6), true, nil},
+		{"upper envelope", internalColor(1), vg.Points(1.6), true, nil},
+		{"mean of best solutions", internalColor(0), vg.Points(2.4), false, nil},
 	}
 	if hasMeas {
-		entries = append(entries, entry{"measured", color.Black, 0, false, true})
+		entries = append(entries, entry{"measured", color.Black, 0, false,
+			draw.CircleGlyph{}})
+	}
+	if hasComputed {
+		entries = append(entries, entry{spectrumComputedLegend, color.Black, 0,
+			false, draw.RingGlyph{}})
 	}
 	sampleW, gap, space := vg.Points(18), vg.Points(4), vg.Points(10)
 	widths := make([]vg.Length, len(entries))
@@ -968,9 +1022,9 @@ func internalDrawSpectrumLegend(c draw.Canvas, po *plotOpts, hasMeas bool) {
 	x := c.Min.X + (c.Max.X-c.Min.X-total)/2
 	y := (c.Min.Y + c.Max.Y) / 2
 	for i, e := range entries {
-		if e.glyph {
+		if e.shape != nil {
 			c.DrawGlyph(draw.GlyphStyle{Color: e.clr, Radius: vg.Points(3),
-				Shape: draw.RingGlyph{}}, vg.Point{X: x + sampleW/2, Y: y})
+				Shape: e.shape}, vg.Point{X: x + sampleW/2, Y: y})
 		} else {
 			ls := draw.LineStyle{Color: e.clr, Width: e.width}
 			if e.dashed {
@@ -1007,9 +1061,15 @@ func internalSpectrumFigureDraw(po *plotOpts, panels []spectrumPanel,
 		legendH = vg.Inch * vg.Length(spectrumLegendHIn*scale)
 	}
 	hasMeas := false
+	hasComputed := false
 	for _, pn := range panels {
 		if len(pn.set.meas) > 0 {
 			hasMeas = true
+		}
+		if len(pn.set.computed) > 0 {
+			hasComputed = true
+		}
+		if hasMeas && hasComputed {
 			break
 		}
 	}
@@ -1035,7 +1095,7 @@ func internalSpectrumFigureDraw(po *plotOpts, panels []spectrumPanel,
 		}
 		if multi {
 			internalDrawSpectrumLegend(draw.Canvas{Canvas: c.Canvas,
-				Rectangle: legendRect}, po, hasMeas)
+				Rectangle: legendRect}, po, hasMeas, hasComputed)
 		}
 	}
 	return drawFn, w, h, true

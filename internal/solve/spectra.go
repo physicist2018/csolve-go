@@ -25,6 +25,10 @@ import (
 // spectrumLegendHIn — высота полосы общей легенды под сеткой спектров, дюймы.
 const spectrumLegendHIn = 1.0
 
+// spectrumComputedLegend — подпись расчётных точек в длинах волн без
+// измерений (полые маркеры).
+const spectrumComputedLegend = "computed (no measured data)"
+
 // wlPoint — измеренная точка спектральной зависимости.
 type wlPoint struct {
 	wlNm  float64
@@ -33,12 +37,14 @@ type wlPoint struct {
 
 // spectrumSet — кривые одной величины: индивидуальные решения ансамбля
 // (curves — до limit для графика, 0 — все), их среднее и огибающие, а также
-// измеренные точки входных данных.
+// измеренные точки входных данных и расчётные значения в тех длинах волн,
+// где для этой величины измерений нет.
 type spectrumSet struct {
 	curves          [][]float64 // [решение][длина волны]
 	mean, low, high []float64   // по всему ансамблю; NaN — нет данных
-	meas            []wlPoint
+	meas            []wlPoint   // измеренные точки (заполненные маркеры)
 	measName        string
+	computed        []wlPoint // расчёт в λ без измерения (полые маркеры)
 }
 
 // usable — есть ли хоть одно конечное значение средней кривой.
@@ -293,6 +299,14 @@ func buildSpectra(a *Args, sols *solutions, geom []*geom,
 	lidar.measName = "measured S"
 	delta.measName = "measured δ_l"
 
+	// расчётные значения в длинах волн входных данных, где для величины нет
+	// измерения (среднее по лучшим решениям); изображаются полыми маркерами
+	gapWl := inputWavelengthsNm(ch, depWl)
+	alpha.computed = missingSpectrumPoints(gapWl, wlNm, alpha)
+	beta.computed = missingSpectrumPoints(gapWl, wlNm, beta)
+	lidar.computed = missingSpectrumPoints(gapWl, wlNm, lidar)
+	delta.computed = missingSpectrumPoints(gapWl, wlNm, delta)
+
 	return &spectra{wlNm: wlNm, alpha: alpha, beta: beta, lidar: lidar,
 		delta: delta, g: G}
 }
@@ -479,6 +493,105 @@ func measuredLidarPoints(alpha, beta []wlPoint) []wlPoint {
 // сетке спектров).
 func sameWavelength(a, b float64) bool {
 	return math.Abs(a-b) <= 1e-6*math.Max(1.0, math.Max(math.Abs(a), math.Abs(b)))
+}
+
+// inputWavelengthsNm — отсортированный уникальный набор длин волн (нм)
+// входных данных: каналы (α и β) и измеренная δ_l. Это те длины волн, для
+// которых вычисленные коэффициенты имеют смысл, даже если конкретная
+// величина в этой точке не измерена.
+func inputWavelengthsNm(ch []channel, depWl []float64) []float64 {
+	var out []float64
+	add := func(wlUm float64) {
+		if !(wlUm > 0) || !isFinite(wlUm) {
+			return
+		}
+		nm := wlUm * 1e3
+		for _, v := range out {
+			if sameWavelength(v, nm) {
+				return
+			}
+		}
+		out = append(out, nm)
+	}
+	for j := range ch {
+		add(ch[j].wlUm)
+	}
+	for _, wl := range depWl {
+		add(wl)
+	}
+	sort.Float64s(out)
+	return out
+}
+
+// missingSpectrumPoints — значения средней кривой в длинах волн wls, где у
+// набора нет измеренной точки. Нефинитные средние (нет данных/δ_l без
+// S11-S22) пропускаются. Результат отсортирован по длине волны.
+func missingSpectrumPoints(wls, grid []float64, set *spectrumSet) []wlPoint {
+	if set == nil {
+		return nil
+	}
+	var out []wlPoint
+	for _, wl := range wls {
+		measured := false
+		for _, m := range set.meas {
+			if sameWavelength(m.wlNm, wl) && isFinite(m.value) {
+				measured = true
+				break
+			}
+		}
+		if measured {
+			continue
+		}
+		v, ok := interpAtWavelength(grid, set.mean, wl)
+		if !ok {
+			continue
+		}
+		out = append(out, wlPoint{wlNm: wl, value: v})
+	}
+	return out
+}
+
+// interpAtWavelength — линейная интерполяция ys(xs) в точке x по конечным
+// значениям. Точное (в допуске sameWavelength) совпадение с узлом сетки
+// возвращается как есть; вне диапазона конечных данных — ok = false.
+func interpAtWavelength(xs, ys []float64, x float64) (float64, bool) {
+	n := len(xs)
+	if n == 0 || len(ys) < n || !isFinite(x) {
+		return 0, false
+	}
+	i := sort.SearchFloat64s(xs, x)
+	for _, j := range []int{i - 1, i} {
+		if j >= 0 && j < n && sameWavelength(xs[j], x) && isFinite(ys[j]) {
+			return ys[j], true
+		}
+	}
+	jl, jr := -1, -1
+	for j := i - 1; j >= 0; j-- {
+		if isFinite(ys[j]) {
+			jl = j
+			break
+		}
+	}
+	for j := i; j < n; j++ {
+		if isFinite(xs[j]) && isFinite(ys[j]) {
+			jr = j
+			break
+		}
+	}
+	if jl < 0 || jr < 0 {
+		return 0, false
+	}
+	x0, x1 := xs[jl], xs[jr]
+	if !(x1 > x0) {
+		return ys[jl], true
+	}
+	t := (x - x0) / (x1 - x0)
+	if t < 0 {
+		t = 0
+	} else if t > 1 {
+		t = 1
+	}
+	return ys[jl] + t*(ys[jr]-ys[jl]), true
 }
 
 // measuredSpectrumPoints — измеренные точки входных данных по каналам и
