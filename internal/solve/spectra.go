@@ -546,7 +546,7 @@ func missingSpectrumPoints(wls, grid []float64, set *spectrumSet) []wlPoint {
 	if set == nil {
 		return nil
 	}
-	var out []wlPoint
+	out := make([]wlPoint, 0, len(wls))
 	for _, wl := range wls {
 		measured := false
 		for _, m := range set.meas {

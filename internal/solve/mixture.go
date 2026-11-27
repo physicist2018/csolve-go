@@ -417,7 +417,7 @@ func mapNote(warn bool) string {
 // depolSetBuildMixed — ядра S11/S22 для смеси: для каждого combined-индекса
 // ядра сфер и несфер смешиваются по sfrac. Сетка r — как у основных ядер.
 func depolSetBuildMixed(md *mixtureData, wl []float64, refWl, rMin, rMax,
-	dxMax float64, extrapolate bool, c *console) (*depolSet, error) {
+	dxMax float64, _ bool, c *console) (*depolSet, error) {
 	ds := &depolSet{
 		wl: depolWavelengths(wl),
 		kt: make([][]*ktable, md.nM()),
@@ -495,9 +495,9 @@ func depolSetReportMixed(ds *depolSet, md *mixtureData, c *console) {
 }
 
 // meanSfracOf — средняя доля сфер (по концентрации) по первым G решениям.
-func meanSfracOf(sols *solutions, G int) float64 {
+func meanSfracOf(sols *solutions, g int) float64 {
 	sum, cnt := 0.0, 0
-	for t := 0; t < sols.n && t < G; t++ {
+	for t := 0; t < sols.n && t < g; t++ {
 		v := sols.sol[t].sfrac
 		if isFinite(v) {
 			sum += v
@@ -511,13 +511,13 @@ func meanSfracOf(sols *solutions, G int) float64 {
 }
 
 // sfracRange — минимум (lo=true) или максимум доли сфер по первым G решениям.
-func sfracRange(sols *solutions, G int, lo bool) float64 {
+func sfracRange(sols *solutions, g int, lo bool) float64 {
 	best := math.Inf(1)
 	if !lo {
 		best = math.Inf(-1)
 	}
 	cnt := 0
-	for t := 0; t < sols.n && t < G; t++ {
+	for t := 0; t < sols.n && t < g; t++ {
 		v := sols.sol[t].sfrac
 		if !isFinite(v) {
 			continue

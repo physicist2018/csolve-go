@@ -70,7 +70,7 @@ func newTestApp(t *testing.T) *app {
 	return a
 }
 
-func doGet(t *testing.T, h http.Handler, token, url string) *httptest.ResponseRecorder {
+func doGet(_ *testing.T, h http.Handler, token, url string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodGet, url, nil)
 	req.Header.Set("X-CSolve-Token", token)
 	rec := httptest.NewRecorder()
@@ -78,7 +78,7 @@ func doGet(t *testing.T, h http.Handler, token, url string) *httptest.ResponseRe
 	return rec
 }
 
-func doPost(t *testing.T, h http.Handler, token, url string, body any) *httptest.ResponseRecorder {
+func doPost(_ *testing.T, h http.Handler, token, url string, body any) *httptest.ResponseRecorder {
 	b, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, url, strings.NewReader(string(b)))
 	req.Header.Set("Content-Type", "application/json")

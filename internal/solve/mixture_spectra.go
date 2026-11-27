@@ -308,7 +308,7 @@ func applyMeanDistributionComputed(sp *spectra, a *Args, src *tableSource,
 	cnt := map[mkey]int{}
 	order := make([]mkey, 0, len(models))
 	for _, m := range models {
-		k := mkey{m.sph, m.non, m.sfrac}
+		k := mkey(m)
 		if _, ok := cnt[k]; !ok {
 			order = append(order, k)
 		}
@@ -316,8 +316,7 @@ func applyMeanDistributionComputed(sp *spectra, a *Args, src *tableSource,
 	}
 	wm := make([]weightedModel, len(order))
 	for i, k := range order {
-		wm[i] = weightedModel{model: spectModel{sph: k.sph, non: k.non,
-			sfrac: k.sfrac}, w: float64(cnt[k])}
+		wm[i] = weightedModel{model: spectModel(k), w: float64(cnt[k])}
 	}
 
 	refWl := a.TableRefWl

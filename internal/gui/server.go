@@ -114,7 +114,7 @@ func decodeReq(w http.ResponseWriter, r *http.Request) (*Request, bool) {
 }
 
 // specHandler — метаданные формы.
-func (a *app) specHandler(w http.ResponseWriter, r *http.Request) {
+func (a *app) specHandler(w http.ResponseWriter, _ *http.Request) {
 	defs := defaultValues()
 	// возвращаем Default каждого поля из defs
 	flds := make([]Field, 0, len(fields))
@@ -309,7 +309,7 @@ func (a *app) fileHandler(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, p)
 }
 
-func (a *app) quitHandler(w http.ResponseWriter, r *http.Request) {
+func (a *app) quitHandler(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	select {
 	case <-a.quit:

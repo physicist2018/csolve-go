@@ -86,7 +86,7 @@ func appliedOptionLines(a *Args) []string {
 		return nil
 	}
 	lines := []string{"Повторить: csolve " + joinArgs(a.Argv), ""}
-	var cur []string
+	cur := make([]string, 0, 4)
 	flush := func() {
 		if len(cur) == 0 {
 			return

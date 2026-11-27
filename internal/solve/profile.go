@@ -71,7 +71,7 @@ func mIndex(mre, mim []float64, re, im float64) int {
 // src — источник таблиц для спектров α(λ)/β(λ); g1 — измеренные
 // коэффициенты каналов ch; depWl/depVal — измеренная δ_l для маркеров;
 // mix — данные смеси (nil вне режима смеси).
-func profileFinalize(a *Args, ch []channel, kts []*ktable, mre, mim []float64,
+func profileFinalize(a *Args, ch []channel, kts []*ktable, _, _ []float64,
 	sols *solutions, geom []*geom, rMin, rMax float64, ds *depolSet,
 	src *tableSource, g1, depWl, depVal []float64, mix *mixtureData) (*profile, error) {
 	_ = ch

@@ -240,9 +240,7 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 		}
 		line := string(w.buf[:i])
 		w.buf = w.buf[i+1:]
-		if strings.HasSuffix(line, "\r") {
-			line = line[:len(line)-1]
-		}
+		line = strings.TrimSuffix(line, "\r")
 		w.j.appendLog(w.stream, line)
 	}
 	return len(p), nil

@@ -168,8 +168,8 @@ func sciTickLabelInternal(v float64) string {
 // sciTicks — тики линейной оси с научными подписями (для α и β).
 type sciTicks struct{}
 
-func (sciTicks) Ticks(min, max float64) []plot.Tick {
-	ticks := plot.DefaultTicks{}.Ticks(min, max)
+func (sciTicks) Ticks(lo, hi float64) []plot.Tick {
+	ticks := plot.DefaultTicks{}.Ticks(lo, hi)
 	for i := range ticks {
 		if ticks[i].Label == "" {
 			continue

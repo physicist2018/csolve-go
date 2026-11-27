@@ -29,7 +29,7 @@ import (
 const repoURL = "https://github.com/physicist2018/csolve-go"
 
 // metaHandler — сведения о сборке и ссылки для кнопки «Сообщить об ошибке».
-func (a *app) metaHandler(w http.ResponseWriter, r *http.Request) {
+func (a *app) metaHandler(w http.ResponseWriter, _ *http.Request) {
 	v := version.Get()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version":  v.Version,

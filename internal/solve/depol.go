@@ -420,7 +420,7 @@ func depolDeviation(p *depolProj, im, iwGeom int, c, targets []float64) float64 
 
 // depolPenaltyVector — штраф w·|δ_l − δ_l^meas| / δ_l^meas для каждого
 // решения, индексированный по sol.id (nil, если штраф не нужен).
-func depolPenaltyVector(sols *solutions, p *depolProj, mre, mim,
+func depolPenaltyVector(sols *solutions, p *depolProj, _, _,
 	targets []float64, w float64) []float64 {
 	if sols == nil || sols.n == 0 || p == nil || !(w > 0) {
 		return nil

@@ -74,9 +74,7 @@ func buildArgv(req *Request, outDir string) ([]string, *solve.Args, error) {
 	if err := b.options(req); err != nil {
 		return nil, nil, err
 	}
-	if err := b.output(req, outDir); err != nil {
-		return nil, nil, err
-	}
+	b.output(req, outDir)
 	a, err := solve.ParseArgs(b.argv)
 	if err != nil {
 		return nil, nil, err
@@ -164,11 +162,12 @@ func (b *argBuilder) options(req *Request) error {
 			if !ok || v == d {
 				continue
 			}
-			if v {
+			switch {
+			case v:
 				b.flag("--" + key)
-			} else if f.FalseKey != "" {
+			case f.FalseKey != "":
 				b.flag("--" + f.FalseKey)
-			} else {
+			default:
 				return fmt.Errorf("option --%s has no "+
 					"negative form", key)
 			}
@@ -181,16 +180,8 @@ func (b *argBuilder) options(req *Request) error {
 			if s == "" {
 				continue
 			}
-			if f.Type == "enum" {
-				if ds, ok2 := def.(string); ok2 && ds == s {
-					continue
-				}
-			} else if f.Type == "optional" {
-				// всегда передаём явно заданное значение
-			} else { // int / float
-				if numEqual(s, def) {
-					continue
-				}
+			if shouldSkipDefault(f.Type, s, def) {
+				continue
 			}
 			b.add("--"+key, s)
 		}
@@ -222,13 +213,25 @@ func numEqual(s string, def any) bool {
 	return false
 }
 
+// shouldSkipDefault — не передавать опцию, если её значение совпадает с
+// дефолтом: для enum сравниваем строку, для int/float — число, для optional
+// всегда передаём явно заданное значение.
+func shouldSkipDefault(typ, s string, def any) bool {
+	switch typ {
+	case "enum":
+		ds, ok := def.(string)
+		return ok && ds == s
+	case "optional":
+		return false
+	default: // int / float
+		return numEqual(s, def)
+	}
+}
+
 // toBoolStrict возвращает bool-значение по умолчанию, если оно задано.
 func toBoolStrict(v any) (bool, bool) {
-	switch x := v.(type) {
-	case bool:
-		return x, true
-	}
-	return false, false
+	x, ok := v.(bool)
+	return x, ok
 }
 
 func parseFloatQuiet(s string) float64 {
@@ -237,7 +240,7 @@ func parseFloatQuiet(s string) float64 {
 }
 
 // output — выходные флаги (GUI управляет ими отдельно от опций формы).
-func (b *argBuilder) output(req *Request, outDir string) error {
+func (b *argBuilder) output(req *Request, outDir string) {
 	out := req.Output
 	if outDir == "" {
 		outDir = "."
@@ -302,7 +305,6 @@ func (b *argBuilder) output(req *Request, outDir string) error {
 		}
 		b.add("--report", "report."+format)
 	}
-	return nil
 }
 
 // absPath — абсолютный путь относительно текущего каталога.
