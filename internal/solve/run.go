@@ -241,6 +241,7 @@ func run(a *Args) error {
 			maxLogSpan:   a.LogSpan,
 			regOrder:     a.RegOrder,
 			kernelOrder:  a.KernelOrder,
+			workers:      a.Workers(),
 			sfrac:        st.sfrac,
 		})
 	if err != nil {

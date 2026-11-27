@@ -105,6 +105,7 @@ type state struct {
 	nrOut     string
 	quadOrder string
 	logSpan   string
+	jobs      string
 
 	outDir       string
 	out          string
@@ -199,6 +200,7 @@ func (s *state) reset() {
 	s.nrOut = strconv.Itoa(d.NrOut)
 	s.quadOrder = strconv.Itoa(d.QuadOrder)
 	s.logSpan = formatFloat(d.LogSpan)
+	s.jobs = strconv.Itoa(d.Jobs)
 
 	s.outDir = ""
 	s.out = ""
@@ -248,7 +250,7 @@ func (s *state) bindings() []any {
 		&s.depolCons, &s.depolW, &s.depolMode,
 		&s.lidarCons, &s.lidarW, &s.lidarIter, &s.batchThin,
 		&s.mReal, &s.mImag, &s.noise, &s.seed,
-		&s.dxMax, &s.nrOut, &s.quadOrder, &s.logSpan,
+		&s.dxMax, &s.nrOut, &s.quadOrder, &s.logSpan, &s.jobs,
 		&s.outDir, &s.out, &s.jsonOut,
 		&s.plotting, &s.plotFormat, &s.plotDpi, &s.plotFontSize,
 		&s.plotBestLim, &s.noPlot,

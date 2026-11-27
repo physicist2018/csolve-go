@@ -38,6 +38,7 @@ type design struct {
 	bins            int
 	regOrder        int
 	kernelOrder     int
+	workers         int // число воркеров при сборке A; 1 = последовательно
 }
 
 func designBuild(ch []channel, nch int, kts []*ktable, mRe, mIm []float64,
@@ -48,6 +49,7 @@ func designBuild(ch []channel, nch int, kts []*ktable, mRe, mIm []float64,
 		method:      spec.method,
 		regOrder:    spec.regOrder,
 		kernelOrder: normalizeKernelOrder(spec.kernelOrder),
+		workers:     resolveJobs(spec.workers),
 	}
 	if d.method == methodMonotone {
 		d.bins = binsFor(spec.bins, nch)
@@ -121,37 +123,39 @@ func designBuild(ch []channel, nch int, kts []*ktable, mRe, mIm []float64,
 	d.s0 = make([]float64, d.nM*d.nW)
 	d.cond = make([]float64, d.nM*d.nW)
 
-	for im := 0; im < d.nM; im++ {
-		for w := 0; w < d.nW; w++ {
-			g := d.geom[w]
-			nn := g.nNodes
-			nunk := g.nUnknown
-			off := ((im*d.nW + w) * nch * nunk)
-			Ab := d.A[off : off+nch*nunk]
+	// Каждая пара (im, w) пишет в собственные блоки d.A, d.s0 и d.cond,
+	// поэтому сборку можно распараллелить без изменения результата.
+	fill := func(k int) {
+		im, w := k/d.nW, k%d.nW
+		g := d.geom[w]
+		nn := g.nNodes
+		nunk := g.nUnknown
+		off := ((im*d.nW + w) * nch * nunk)
+		Ab := d.A[off : off+nch*nunk]
 
-			logr := make([]float64, nn)
-			for q := 0; q < nn; q++ {
-				rc := g.nodes[q]
-				if rc < kts[im].rMin {
-					rc = kts[im].rMin
-				}
-				if rc > kts[im].rMax {
-					rc = kts[im].rMax
-				}
-				logr[q] = math.Log(rc)
+		logr := make([]float64, nn)
+		for q := 0; q < nn; q++ {
+			rc := g.nodes[q]
+			if rc < kts[im].rMin {
+				rc = kts[im].rMin
 			}
-			for j := 0; j < nch; j++ {
-				hint := -1
-				row := Ab[j*nunk : (j+1)*nunk]
-				for q := 0; q < nn; q++ {
-					k := math.Exp(kts[im].sp[j].evalHint(logr[q], &hint))
-					wgt := k * kernelWeight(d.kernelOrder, g.nodes[q]) * g.weights[q]
-					g.addNodeContribution(row, q, wgt)
-				}
+			if rc > kts[im].rMax {
+				rc = kts[im].rMax
 			}
-			d.s0[im*d.nW+w], d.cond[im*d.nW+w] = svdNormCond(Ab, nch, nunk)
+			logr[q] = math.Log(rc)
 		}
+		for j := 0; j < nch; j++ {
+			hint := -1
+			row := Ab[j*nunk : (j+1)*nunk]
+			for q := 0; q < nn; q++ {
+				kk := math.Exp(kts[im].sp[j].evalHint(logr[q], &hint))
+				wgt := kk * kernelWeight(d.kernelOrder, g.nodes[q]) * g.weights[q]
+				g.addNodeContribution(row, q, wgt)
+			}
+		}
+		d.s0[im*d.nW+w], d.cond[im*d.nW+w] = svdNormCond(Ab, nch, nunk)
 	}
+	parallelFor(d.nM*d.nW, d.workers, fill)
 	return d, nil
 }
 

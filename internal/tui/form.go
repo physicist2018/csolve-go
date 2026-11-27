@@ -556,6 +556,11 @@ func numericsGroup(s *state) *huh.Group {
 			Description("> 0 (--log-span).").
 			Value(&s.logSpan).
 			Validate(vFloatPositive()),
+		huh.NewInput().
+			Title("Parallel workers").
+			Description("0 = auto (CPU−1), 1 = sequential (--jobs).").
+			Value(&s.jobs).
+			Validate(vIntMin(0)),
 	)
 }
 

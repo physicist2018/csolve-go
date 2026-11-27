@@ -114,14 +114,27 @@ func prepareBatch(a *Args, c *console) (*batchSetup, error) {
 
 	// покрытие таблиц -> r1_max_eff
 	capmin := math.Inf(1)
-	for i := 0; i < nm; i++ {
-		chs, err := loadTableChannels(src, mre[i], mim[i], st.solveCh,
-			a.TableExtrapolate, a.TableRefWl, cbackScale)
-		if err != nil {
-			return nil, err
+	{
+		caps := make([]float64, nm)
+		errs := make([]error, nm)
+		parallelFor(nm, a.Workers(), func(i int) {
+			chs, err := loadTableChannels(src, mre[i], mim[i], st.solveCh,
+				a.TableExtrapolate, a.TableRefWl, cbackScale)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			caps[i] = chs.cap
+		})
+		for _, err := range errs {
+			if err != nil {
+				return nil, err
+			}
 		}
-		if chs.cap < capmin {
-			capmin = chs.cap
+		for _, v := range caps {
+			if v < capmin {
+				capmin = v
+			}
 		}
 	}
 	st.r1MaxEff = math.Min(a.R1Max, capmin)
@@ -158,17 +171,27 @@ func prepareBatch(a *Args, c *console) (*batchSetup, error) {
 	// таблицы ядер — один раз на пакет
 	c.printf("building kernel tables (%d m values, once per batch)...\n", nm)
 	st.kts = make([]*ktable, nm)
-	for i := 0; i < nm; i++ {
-		chs, err := loadTableChannels(src, mre[i], mim[i], st.solveCh,
-			a.TableExtrapolate, a.TableRefWl, cbackScale)
-		if err != nil {
-			return nil, err
+	{
+		errs := make([]error, nm)
+		parallelFor(nm, a.Workers(), func(i int) {
+			chs, err := loadTableChannels(src, mre[i], mim[i], st.solveCh,
+				a.TableExtrapolate, a.TableRefWl, cbackScale)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			kt, err := ktableBuild(chs, a.R0Min, st.r1MaxEff, a.DxMax)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			st.kts[i] = kt
+		})
+		for _, err := range errs {
+			if err != nil {
+				return nil, err
+			}
 		}
-		kt, err := ktableBuild(chs, a.R0Min, st.r1MaxEff, a.DxMax)
-		if err != nil {
-			return nil, err
-		}
-		st.kts[i] = kt
 	}
 	c.printf("  table: %d r points per m\n", st.kts[0].n)
 
@@ -200,6 +223,7 @@ func prepareBatch(a *Args, c *console) (*batchSetup, error) {
 			maxLogSpan:   a.LogSpan,
 			regOrder:     a.RegOrder,
 			kernelOrder:  a.KernelOrder,
+			workers:      a.Workers(),
 		})
 	if err != nil {
 		return nil, err
@@ -283,6 +307,7 @@ func prepareBatchMixture(a *Args, c *console, b *batchInput) (*batchSetup, error
 			maxLogSpan:   a.LogSpan,
 			regOrder:     a.RegOrder,
 			kernelOrder:  a.KernelOrder,
+			workers:      a.Workers(),
 			sfrac:        st.sfrac,
 		})
 	if err != nil {

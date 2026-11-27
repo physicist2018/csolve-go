@@ -426,3 +426,43 @@ func TestPathTraversal(t *testing.T) {
 	}
 	_ = a.manager
 }
+
+func TestJobsField(t *testing.T) {
+	f := fieldByKey("jobs")
+	if f == nil {
+		t.Fatal("jobs field is missing from the form spec")
+	}
+	if f.Group != "numerics" || f.Type != "int" {
+		t.Errorf("jobs field = group %q type %q, want numerics/int", f.Group, f.Type)
+	}
+	v, ok := defaultValues()["jobs"]
+	if !ok {
+		t.Fatal("jobs default is missing")
+	}
+	if _, ok := v.(int); !ok {
+		t.Fatalf("jobs default type = %T, want int", v)
+	}
+
+	req := &Request{
+		Mode:        "demo",
+		TablesKind:  "builtin",
+		BuiltinType: defaultTableType(),
+		Options:     map[string]any{"jobs": 2},
+	}
+	argv, a, err := buildArgv(req, t.TempDir())
+	if err != nil {
+		t.Fatalf("buildArgv: %v", err)
+	}
+	if a.Jobs != 2 {
+		t.Errorf("Jobs = %d, want 2", a.Jobs)
+	}
+	found := false
+	for _, arg := range argv {
+		if arg == "--jobs" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("argv is missing --jobs: %v", argv)
+	}
+}

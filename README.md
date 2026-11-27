@@ -428,7 +428,7 @@ CSOLVE_TIME=1 ./csolve --no-plot
 | **Basis and size grid** | степень и число базисных функций, порядок ядра (`--kernel-order`), сетки `r0`/`r1`, `--min-ratio`, `--best` |
 | **Regularization** | правило выбора `γ` и его сетка |
 | **Constraints and averaging** | `--nonneg`, граничные условия, сглаживание, `--r-split`, `--modes`, `--absolute` |
-| **Numerics** | `--dx-max`, `--nr-out`, `--quad-order`, `--log-span` |
+| **Numerics** | `--dx-max`, `--nr-out`, `--quad-order`, `--log-span`, `--jobs` |
 | **Depolarization** | ограничение по измеренному `δ_l` и его вес/режим |
 | **Lidar ratio** | гладкость `S = α/β` (только пакет) |
 | **Output** | каталог вывода, файлы графика и JSON, backend, формат, DPI, шрифт |
@@ -831,6 +831,12 @@ N = max(1, ceil((hmax - hmin) / W))
 | `--quad-order <N>` | `24` | Порядок квадратуры Гаусса–Лежандра |
 | `--log-span <X>` | `0.1` | Максимальная ширина подотрезка в `ln r` |
 
+### Производительность
+
+| Флаг | По умолчанию | Описание |
+|---|---|---|
+| `--jobs <N>`, `-j <N>` | `max(1, CPU−1)` | Число параллельных воркеров (горутин). `0` — auto (то же, что `CPU−1`), `1` — строго последовательно. Распараллеливаются сборка матриц `A`, перебор решений и загрузка таблиц по значениям `m`; в пакетном режиме высоты обрабатываются последовательно |
+
 ### Демо-данные
 
 | Флаг | По умолчанию | Описание |
@@ -876,7 +882,8 @@ N = max(1, ceil((hmax - hmin) / W))
 
 Проверки: `--nr0`, `--nr1`, `--quad-order`, `--ngamma`,
 `--lidar-ratio-iter` ≥ 1; `--nr-out` ≥ 2; `--r0-min`, `--dx-max`,
-`--log-span`, `--plot-dpi` > 0; `--batch-thin` ≥ 0 (0 = выкл.); `--best` > 0; `--gamma-rel`, `--lidar-ratio-w`,
+`--log-span`, `--plot-dpi` > 0; `--batch-thin` ≥ 0 (0 = выкл.); `--jobs` ≥ 0
+(верхняя граница 1024); `--best` > 0; `--gamma-rel`, `--lidar-ratio-w`,
 `--depol-ratio-w` ≥ 0; `--depol-ratio-mode` — `func` или `rank`;
 `--spectrum-points` — `2..512`; `--spectrum-wl-min`/`--spectrum-wl-max` ≥ 0 и
 при обеих заданных границах `max > min`;

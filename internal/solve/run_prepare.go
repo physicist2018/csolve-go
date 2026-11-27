@@ -200,14 +200,27 @@ func prepareRun(a *Args, c *console, in *runInput) (*runSetup, error) {
 
 	c.printf("building kernel tables (%d m values)...\n", nm)
 	capmin := math.Inf(1)
-	for i := 0; i < nm; i++ {
-		chs, err := loadTableChannels(src, st.mre[i], st.mim[i], in.channels,
-			a.TableExtrapolate, a.TableRefWl, st.cbackScal)
-		if err != nil {
-			return nil, err
+	{
+		caps := make([]float64, nm)
+		errs := make([]error, nm)
+		parallelFor(nm, a.Workers(), func(i int) {
+			chs, err := loadTableChannels(src, st.mre[i], st.mim[i], in.channels,
+				a.TableExtrapolate, a.TableRefWl, st.cbackScal)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			caps[i] = chs.cap
+		})
+		for _, err := range errs {
+			if err != nil {
+				return nil, err
+			}
 		}
-		if chs.cap < capmin {
-			capmin = chs.cap
+		for _, v := range caps {
+			if v < capmin {
+				capmin = v
+			}
 		}
 	}
 	st.r1MaxEff = math.Min(a.R1Max, capmin)
@@ -243,17 +256,27 @@ func prepareRun(a *Args, c *console, in *runInput) (*runSetup, error) {
 
 	st.kts = make([]*ktable, nm)
 	tPhase := nowSec()
-	for i := 0; i < nm; i++ {
-		chs, err := loadTableChannels(src, st.mre[i], st.mim[i], in.channels,
-			a.TableExtrapolate, a.TableRefWl, st.cbackScal)
-		if err != nil {
-			return nil, err
+	{
+		errs := make([]error, nm)
+		parallelFor(nm, a.Workers(), func(i int) {
+			chs, err := loadTableChannels(src, st.mre[i], st.mim[i], in.channels,
+				a.TableExtrapolate, a.TableRefWl, st.cbackScal)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			kt, err := ktableBuild(chs, a.R0Min, st.r1MaxEff, a.DxMax)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			st.kts[i] = kt
+		})
+		for _, err := range errs {
+			if err != nil {
+				return nil, err
+			}
 		}
-		kt, err := ktableBuild(chs, a.R0Min, st.r1MaxEff, a.DxMax)
-		if err != nil {
-			return nil, err
-		}
-		st.kts[i] = kt
 	}
 	c.printf("  table: %d points in r per m\n", st.kts[0].n)
 	c.phase("kernels", tPhase)

@@ -335,100 +335,99 @@ func scanVariants(d *design, g1 []float64, nch int, gammaSel gammaSelect,
 	out.n = total
 	out.scale = scale
 
-	t := 0
-	for im := 0; im < nm; im++ {
-		for iw := 0; iw < nw; iw++ {
-			off := (im*nw + iw) * nch * nu
-			A := d.A[off : off+nch*nu]
-			s0 := d.s0[im*nw+iw]
-			gamma := 0.0
-			var cNorm []float64
+	// Каждый индекс t = im*nw+iw пишет только в out.sol[t]; матрицы A — только
+	// читаются, поэтому перебор можно распараллелить без изменения порядка.
+	parallelFor(total, d.workers, func(t int) {
+		im, iw := t/nw, t%nw
+		off := (im*nw + iw) * nch * nu
+		A := d.A[off : off+nch*nu]
+		s0 := d.s0[im*nw+iw]
+		gamma := 0.0
+		var cNorm []float64
 
-			if gammaSel == gammaFixed {
-				gamma = grel[0] * s0
-				cNorm = solveGamma(A, nch, nu, gamma, weights, g1n, nonneg,
-					d.regOrder)
-			} else {
-				best := math.Inf(1)
-				for k := 0; k < len(grel); k++ {
-					gk := grel[k] * s0
-					var score float64
-					if gammaSel == gammaCV {
-						if nonneg {
-							score = cvBruteforce(A, nch, nu, gk, weights, g1n, true,
-								d.regOrder)
-						} else {
-							sc, ok := cvClosed(A, nch, nu, gk, weights, g1n,
-								d.regOrder)
-							if !ok {
-								score = cvBruteforce(A, nch, nu, gk, weights, g1n,
-									false, d.regOrder)
-							} else {
-								score = sc
-							}
-						}
-					} else {
-						cv := solveGamma(A, nch, nu, gk, weights, g1n, nonneg,
+		if gammaSel == gammaFixed {
+			gamma = grel[0] * s0
+			cNorm = solveGamma(A, nch, nu, gamma, weights, g1n, nonneg,
+				d.regOrder)
+		} else {
+			best := math.Inf(1)
+			for k := 0; k < len(grel); k++ {
+				gk := grel[k] * s0
+				var score float64
+				if gammaSel == gammaCV {
+					if nonneg {
+						score = cvBruteforce(A, nch, nu, gk, weights, g1n, true,
 							d.regOrder)
-						score = residualErr(A, nch, nu, cv, g1n)
+					} else {
+						sc, ok := cvClosed(A, nch, nu, gk, weights, g1n,
+							d.regOrder)
+						if !ok {
+							score = cvBruteforce(A, nch, nu, gk, weights, g1n,
+								false, d.regOrder)
+						} else {
+							score = sc
+						}
 					}
-					if score < best {
-						best = score
-						gamma = gk
-					}
+				} else {
+					cv := solveGamma(A, nch, nu, gk, weights, g1n, nonneg,
+						d.regOrder)
+					score = residualErr(A, nch, nu, cv, g1n)
 				}
-				cNorm = solveGamma(A, nch, nu, gamma, weights, g1n, nonneg,
-					d.regOrder)
-			}
-
-			cAbs := make([]float64, nu)
-			for i := 0; i < nu; i++ {
-				cAbs[i] = cNorm[i] * scale
-			}
-			// второй проход: то же γ, но с строкой ограничения δ_l
-			if extra, nExtra := dc.rows(im, iw, cAbs); nExtra > 0 {
-				c2 := solveGammaRows(A, nch, nu, gamma, weights, g1n,
-					nonneg, extra, nExtra, d.regOrder)
-				for i := 0; i < nu; i++ {
-					cAbs[i] = c2[i] * scale
+				if score < best {
+					best = score
+					gamma = gk
 				}
 			}
-			gfit := make([]float64, nch)
-			for j := 0; j < nch; j++ {
-				p := 0.0
-				for i := 0; i < nu; i++ {
-					p += A[j*nu+i] * cAbs[i]
-				}
-				gfit[j] = p
-			}
-			err := 0.0
-			for j := 0; j < nch; j++ {
-				err += math.Abs(gfit[j]-g1[j]) / g1[j]
-			}
-			err /= float64(nch)
-
-			so := &out.sol[t]
-			so.mRe = d.mRe[im]
-			so.mIm = d.mIm[im]
-			so.mIdx = im
-			so.sfrac = math.NaN()
-			if d.sfrac != nil {
-				so.sfrac = d.sfrac[im]
-			}
-			so.degree = d.degree[iw]
-			so.bins = d.bins
-			so.r0 = d.r0[iw]
-			so.r1 = d.r1[iw]
-			so.gamma = gamma
-			so.C = append([]float64(nil), cAbs...)
-			so.nu = nu
-			so.geomIndex = iw
-			so.err = err
-			so.gFit = append([]float64(nil), gfit...)
-			so.id = t
-			t++
+			cNorm = solveGamma(A, nch, nu, gamma, weights, g1n, nonneg,
+				d.regOrder)
 		}
-	}
+
+		cAbs := make([]float64, nu)
+		for i := 0; i < nu; i++ {
+			cAbs[i] = cNorm[i] * scale
+		}
+		// второй проход: то же γ, но с строкой ограничения δ_l
+		if extra, nExtra := dc.rows(im, iw, cAbs); nExtra > 0 {
+			c2 := solveGammaRows(A, nch, nu, gamma, weights, g1n,
+				nonneg, extra, nExtra, d.regOrder)
+			for i := 0; i < nu; i++ {
+				cAbs[i] = c2[i] * scale
+			}
+		}
+		gfit := make([]float64, nch)
+		for j := 0; j < nch; j++ {
+			p := 0.0
+			for i := 0; i < nu; i++ {
+				p += A[j*nu+i] * cAbs[i]
+			}
+			gfit[j] = p
+		}
+		err := 0.0
+		for j := 0; j < nch; j++ {
+			err += math.Abs(gfit[j]-g1[j]) / g1[j]
+		}
+		err /= float64(nch)
+
+		so := &out.sol[t]
+		so.mRe = d.mRe[im]
+		so.mIm = d.mIm[im]
+		so.mIdx = im
+		so.sfrac = math.NaN()
+		if d.sfrac != nil {
+			so.sfrac = d.sfrac[im]
+		}
+		so.degree = d.degree[iw]
+		so.bins = d.bins
+		so.r0 = d.r0[iw]
+		so.r1 = d.r1[iw]
+		so.gamma = gamma
+		so.C = append([]float64(nil), cAbs...)
+		so.nu = nu
+		so.geomIndex = iw
+		so.err = err
+		so.gFit = append([]float64(nil), gfit...)
+		so.id = t
+	})
 
 	sortSolutions(out.sol)
 	return out, nil

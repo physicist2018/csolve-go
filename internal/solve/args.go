@@ -69,6 +69,9 @@ type Args struct {
 	QuadOrder   int
 	LogSpan     float64
 	KernelOrder int // 1=dN/dlnr, 2=dS/dlnr, 3=dV/dlnr, 4=d(r⁴N)/dlnr
+	// Jobs — число параллельных воркеров (--jobs). Значение по умолчанию —
+	// max(1, NumCPU-1); 0 также означает auto (NumCPU-1), 1 — последовательно.
+	Jobs int
 
 	HasMReal, HasMImag bool
 	MReal, MImag       float64
@@ -280,6 +283,9 @@ Options:
                                  (for monotone: v_bins hold increments of
                                  the chosen distribution; see JSON
                                  kernel_volume_conversion for the conversion)
+  --jobs <N>, -j <N>             number of parallel workers; 0 = auto
+                                 (max CPU-1), 1 = sequential
+                                 [auto: max CPU-1]
 
   --m-real <X>                   true Re(m) for demo [1.45]
   --m-imag <X>                   true Im(m) for demo [-0.005]
@@ -381,6 +387,7 @@ func ParseArgs(argv []string) (*Args, error) {
 		QuadOrder:      24,
 		LogSpan:        0.1,
 		KernelOrder:    defaultKernelOrder,
+		Jobs:           JobsDefault(),
 		Seed:           1,
 		Plotting:       plottingInternal,
 		PlotFormat:     plotFmtPdf,
@@ -458,6 +465,9 @@ func ParseArgs(argv []string) (*Args, error) {
 	fs.Float64Var(&a.LogSpan, "log-span", a.LogSpan, "")
 	kernelOrder := &singleIntFlag{minV: 1, maxV: 4, name: "kernel-order"}
 	fs.Var(kernelOrder, "kernel-order", "")
+	jobsFlag := &singleIntFlag{minV: 0, maxV: jobsMax, name: "jobs"}
+	fs.Var(jobsFlag, "jobs", "")
+	fs.Var(jobsFlag, "j", "")
 
 	mReal := math.NaN()
 	mImag := math.NaN()
@@ -575,6 +585,9 @@ func ParseArgs(argv []string) (*Args, error) {
 	}
 	if kernelOrder.set {
 		a.KernelOrder = kernelOrder.value
+	}
+	if jobsFlag.set {
+		a.Jobs = jobsFlag.value
 	}
 	a.Method = methodFlag.Value()
 	if seen["m-real"] {

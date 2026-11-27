@@ -48,6 +48,8 @@ type designSpec struct {
 	maxLogSpan   float64
 	regOrder     int
 	kernelOrder  int
+	// workers — число воркеров для сборки матриц A; 0 = auto (NumCPU-1).
+	workers int
 	// sfrac — доля сфер (по концентрации) для каждого значения m сканирования;
 	// nil вне режима смеси.
 	sfrac []float64

@@ -239,6 +239,12 @@ var fields = []Field{
 	{Key: "log-span", Group: "numerics", Type: "float", Min: 0, Step: 0.01,
 		EN: "Max ln r subsegment", RU: "Макс. ширина подотрезка в ln r",
 		HelpEN: "--log-span.", HelpRU: "--log-span."},
+	{Key: "jobs", Group: "numerics", Type: "int", Min: 0, Max: 1024, Step: 1,
+		EN: "Parallel workers", RU: "Параллельных воркеров",
+		HelpEN: "--jobs: number of parallel workers; 0 = auto (CPU−1), " +
+			"1 = sequential.",
+		HelpRU: "--jobs: число параллельных воркеров; 0 = авто (CPU−1), " +
+			"1 = последовательно."},
 
 	// Demo
 	{Key: "m-real", Group: "demo", Type: "optional",
@@ -379,8 +385,8 @@ func defaultValues() map[string]any {
 		"depol-ratio-cons": a.DepolRatioCons, "depol-ratio-w": a.DepolRatioW,
 		"depol-ratio-mode": string(a.DepolRatioMode),
 		"dx-max":           a.DxMax, "nr-out": a.NrOut, "quad-order": a.QuadOrder,
-		"log-span": a.LogSpan,
-		"m-real":   "", "m-imag": "", "noise": a.Noise, "seed": a.Seed,
+		"log-span": a.LogSpan, "jobs": a.Jobs,
+		"m-real": "", "m-imag": "", "noise": a.Noise, "seed": a.Seed,
 		"batch-thin":       a.BatchThin,
 		"lidar-ratio-cons": a.LidarRatioCons,
 		"lidar-ratio-w":    a.LidarRatioW,

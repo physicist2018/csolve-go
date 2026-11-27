@@ -331,6 +331,48 @@ func TestShellJoin(t *testing.T) {
 	}
 }
 
+func TestJobsFlag(t *testing.T) {
+	s := newTestState(t)
+
+	// по умолчанию (как в дефолтах решателя) флаг не добавляется
+	argv, a, err := buildArgv(s)
+	if err != nil {
+		t.Fatalf("default: %v", err)
+	}
+	if contains(argv, "--jobs") {
+		t.Errorf("default argv must not contain --jobs: %v", argv)
+	}
+	if a.Jobs != s.def.Jobs {
+		t.Errorf("Jobs = %d, want default %d", a.Jobs, s.def.Jobs)
+	}
+
+	// изменённое значение передаётся
+	s.jobs = "3"
+	argv, a, err = buildArgv(s)
+	if err != nil {
+		t.Fatalf("jobs=3: %v", err)
+	}
+	if a.Jobs != 3 {
+		t.Errorf("Jobs = %d, want 3", a.Jobs)
+	}
+	if !contains(argv, "--jobs") {
+		t.Errorf("argv is missing --jobs: %v", argv)
+	}
+
+	// 0 = auto разрешается в дефолт
+	s.jobs = "0"
+	_, a, err = buildArgv(s)
+	if err != nil {
+		t.Fatalf("jobs=0: %v", err)
+	}
+	if a.Jobs != 0 {
+		t.Errorf("Jobs = %d, want 0 (auto)", a.Jobs)
+	}
+	if a.Workers() != s.def.Jobs {
+		t.Errorf("Workers = %d, want default %d", a.Workers(), s.def.Jobs)
+	}
+}
+
 func contains(list []string, value string) bool {
 	for _, v := range list {
 		if v == value {

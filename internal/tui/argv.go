@@ -53,6 +53,7 @@ func buildArgv(s *state) ([]string, *solve.Args, error) {
 	b.batchThinning(s, d)
 	b.demo(s, d)
 	b.discretization(s, d)
+	b.performance(s, d)
 	b.output(s, d)
 
 	a, err := solve.ParseArgs(b.argv)
@@ -301,6 +302,13 @@ func (b *argvBuilder) discretization(s *state, d *solve.Args) {
 	}
 	if changedFloat(s.logSpan, d.LogSpan) {
 		b.add("--log-span", s.logSpan)
+	}
+}
+
+// performance — число параллельных воркеров.
+func (b *argvBuilder) performance(s *state, d *solve.Args) {
+	if changedInt(s.jobs, d.Jobs) {
+		b.add("--jobs", s.jobs)
 	}
 }
 
